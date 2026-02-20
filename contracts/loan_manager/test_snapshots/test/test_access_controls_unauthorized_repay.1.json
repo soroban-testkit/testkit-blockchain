@@ -117,6 +117,7 @@
                 "val": {
                   "contract_instance": {
                     "executable": {
+                      "wasm": "71e1e216b57308fdc794b9c06a8a4a1c9753879840334673bcc24ded379151b3"
                       "wasm": "0972e210dd1aec3b23cae4ca292d051a270f9b64996e345dcb4a0a9561e67013"
                     },
                     "storage": [

@@ -54,15 +54,20 @@ impl RemittanceNFT {
 
     /// Mint an NFT representing a user's remittance history and reputation score
     /// Only authorized contracts/accounts can call this function
-    pub fn mint(env: Env, user: Address, initial_score: u32, history_hash: BytesN<32>) {
+    /// If minter is provided, it must be authorized and must authorize the call
+    /// If minter is None, admin must authorize the call
+    pub fn mint(env: Env, user: Address, initial_score: u32, history_hash: BytesN<32>, minter: Option<Address>) {
         let admin: Address = env.storage().instance().get(&DataKey::Admin).expect("not initialized");
         
-        // Check if a contract is calling (cross-contract call)
-        let contract_caller = env.current_contract_address();
-        let is_contract_authorized = env.storage().instance().get(&DataKey::AuthorizedMinter(Address::Contract(contract_caller))).unwrap_or(false);
-        
-        if !is_contract_authorized {
-            // If not an authorized contract, require admin auth
+        if let Some(minter_addr) = minter {
+            // If minter is provided, require their auth and check authorization
+            minter_addr.require_auth();
+            let is_authorized = env.storage().instance().get(&DataKey::AuthorizedMinter(minter_addr)).unwrap_or(false);
+            if !is_authorized {
+                panic!("minter is not authorized");
+            }
+        } else {
+            // If no minter provided, require admin auth
             admin.require_auth();
         }
 
@@ -97,15 +102,20 @@ impl RemittanceNFT {
 
     /// Update the score for a user's NFT
     /// Only authorized contracts/accounts can call this function
-    pub fn update_score(env: Env, user: Address, repayment_amount: i128) {
+    /// If minter is provided, it must be authorized and must authorize the call
+    /// If minter is None, admin must authorize the call
+    pub fn update_score(env: Env, user: Address, repayment_amount: i128, minter: Option<Address>) {
         let admin: Address = env.storage().instance().get(&DataKey::Admin).expect("not initialized");
         
-        // Check if a contract is calling (cross-contract call)
-        let contract_caller = env.current_contract_address();
-        let is_contract_authorized = env.storage().instance().get(&DataKey::AuthorizedMinter(Address::Contract(contract_caller))).unwrap_or(false);
-        
-        if !is_contract_authorized {
-            // If not an authorized contract, require admin auth
+        if let Some(minter_addr) = minter {
+            // If minter is provided, require their auth and check authorization
+            minter_addr.require_auth();
+            let is_authorized = env.storage().instance().get(&DataKey::AuthorizedMinter(minter_addr)).unwrap_or(false);
+            if !is_authorized {
+                panic!("minter is not authorized");
+            }
+        } else {
+            // If no minter provided, require admin auth
             admin.require_auth();
         }
 
@@ -121,15 +131,20 @@ impl RemittanceNFT {
 
     /// Update the history hash for a user's NFT
     /// Only authorized contracts/accounts can call this function
-    pub fn update_history_hash(env: Env, user: Address, new_history_hash: BytesN<32>) {
+    /// If minter is provided, it must be authorized and must authorize the call
+    /// If minter is None, admin must authorize the call
+    pub fn update_history_hash(env: Env, user: Address, new_history_hash: BytesN<32>, minter: Option<Address>) {
         let admin: Address = env.storage().instance().get(&DataKey::Admin).expect("not initialized");
         
-        // Check if a contract is calling (cross-contract call)
-        let contract_caller = env.current_contract_address();
-        let is_contract_authorized = env.storage().instance().get(&DataKey::AuthorizedMinter(Address::Contract(contract_caller))).unwrap_or(false);
-        
-        if !is_contract_authorized {
-            // If not an authorized contract, require admin auth
+        if let Some(minter_addr) = minter {
+            // If minter is provided, require their auth and check authorization
+            minter_addr.require_auth();
+            let is_authorized = env.storage().instance().get(&DataKey::AuthorizedMinter(minter_addr)).unwrap_or(false);
+            if !is_authorized {
+                panic!("minter is not authorized");
+            }
+        } else {
+            // If no minter provided, require admin auth
             admin.require_auth();
         }
 

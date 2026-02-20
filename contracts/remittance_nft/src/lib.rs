@@ -55,13 +55,14 @@ impl RemittanceNFT {
     /// Mint an NFT representing a user's remittance history and reputation score
     /// Only authorized contracts/accounts can call this function
     pub fn mint(env: Env, user: Address, initial_score: u32, history_hash: BytesN<32>) {
-        // Check if caller is authorized (admin or authorized contract/account)
-        let caller = env.invoker();
-        let is_authorized = env.storage().instance().get(&DataKey::AuthorizedMinter(caller.clone())).unwrap_or(false);
         let admin: Address = env.storage().instance().get(&DataKey::Admin).expect("not initialized");
         
-        if !is_authorized && caller != admin {
-            // If not explicitly authorized, require admin auth
+        // Check if a contract is calling (cross-contract call)
+        let contract_caller = env.current_contract_address();
+        let is_contract_authorized = env.storage().instance().get(&DataKey::AuthorizedMinter(Address::Contract(contract_caller))).unwrap_or(false);
+        
+        if !is_contract_authorized {
+            // If not an authorized contract, require admin auth
             admin.require_auth();
         }
 
@@ -87,7 +88,7 @@ impl RemittanceNFT {
     /// Get the score for a user (backward compatibility)
     pub fn get_score(env: Env, user: Address) -> u32 {
         let key = DataKey::Metadata(user);
-        if let Some(metadata) = env.storage().persistent().get(&key) {
+        if let Some(metadata) = env.storage().persistent().get::<DataKey, RemittanceMetadata>(&key) {
             metadata.score
         } else {
             0
@@ -97,12 +98,14 @@ impl RemittanceNFT {
     /// Update the score for a user's NFT
     /// Only authorized contracts/accounts can call this function
     pub fn update_score(env: Env, user: Address, repayment_amount: i128) {
-        let caller = env.invoker();
-        let is_authorized = env.storage().instance().get(&DataKey::AuthorizedMinter(caller.clone())).unwrap_or(false);
         let admin: Address = env.storage().instance().get(&DataKey::Admin).expect("not initialized");
         
-        if !is_authorized && caller != admin {
-            // If not explicitly authorized, require admin auth
+        // Check if a contract is calling (cross-contract call)
+        let contract_caller = env.current_contract_address();
+        let is_contract_authorized = env.storage().instance().get(&DataKey::AuthorizedMinter(Address::Contract(contract_caller))).unwrap_or(false);
+        
+        if !is_contract_authorized {
+            // If not an authorized contract, require admin auth
             admin.require_auth();
         }
 
@@ -119,12 +122,14 @@ impl RemittanceNFT {
     /// Update the history hash for a user's NFT
     /// Only authorized contracts/accounts can call this function
     pub fn update_history_hash(env: Env, user: Address, new_history_hash: BytesN<32>) {
-        let caller = env.invoker();
-        let is_authorized = env.storage().instance().get(&DataKey::AuthorizedMinter(caller.clone())).unwrap_or(false);
         let admin: Address = env.storage().instance().get(&DataKey::Admin).expect("not initialized");
         
-        if !is_authorized && caller != admin {
-            // If not explicitly authorized, require admin auth
+        // Check if a contract is calling (cross-contract call)
+        let contract_caller = env.current_contract_address();
+        let is_contract_authorized = env.storage().instance().get(&DataKey::AuthorizedMinter(Address::Contract(contract_caller))).unwrap_or(false);
+        
+        if !is_contract_authorized {
+            // If not an authorized contract, require admin auth
             admin.require_auth();
         }
 

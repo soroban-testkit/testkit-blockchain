@@ -170,3 +170,123 @@ fn test_update_score_without_nft() {
     // Try to update score for user without NFT
     client.update_score(&user, &100, &None);
 }
+
+#[test]
+fn test_backward_compatibility_migration() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+    
+    let contract_id = env.register_contract(None, RemittanceNFT);
+    let client = RemittanceNFTClient::new(&env, &contract_id);
+
+    client.initialize(&admin);
+
+    // Simulate legacy Score data (old format)
+    use super::DataKey;
+    let score_key = DataKey::Score(user.clone());
+    env.as_contract(&contract_id, || {
+        env.storage().persistent().set(&score_key, &750u32);
+    });
+
+    // get_score should migrate and return the score
+    assert_eq!(client.get_score(&user), 750);
+    
+    // get_metadata should return migrated metadata with default hash
+    let metadata = client.get_metadata(&user).unwrap();
+    assert_eq!(metadata.score, 750);
+    // Verify default hash (all zeros)
+    let expected_default_hash = BytesN::from_array(&env, &[0u8; 32]);
+    assert_eq!(metadata.history_hash, expected_default_hash);
+    
+    // Verify old Score key is removed after migration
+    env.as_contract(&contract_id, || {
+        assert!(!env.storage().persistent().has(&score_key));
+        
+        // Verify Metadata key exists after migration
+        let metadata_key = DataKey::Metadata(user.clone());
+        assert!(env.storage().persistent().has(&metadata_key));
+    });
+    
+    // Update score should work on migrated data
+    client.update_score(&user, &500, &None);
+    assert_eq!(client.get_score(&user), 755); // 750 + 5 points (500/100)
+    
+    // Verify metadata still exists and is updated
+    let updated_metadata = client.get_metadata(&user).unwrap();
+    assert_eq!(updated_metadata.score, 755);
+}
+
+#[test]
+fn test_update_score_migrates_legacy_data() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+    
+    let contract_id = env.register_contract(None, RemittanceNFT);
+    let client = RemittanceNFTClient::new(&env, &contract_id);
+
+    client.initialize(&admin);
+
+    // Simulate legacy Score data
+    use super::DataKey;
+    let score_key = DataKey::Score(user.clone());
+    env.as_contract(&contract_id, || {
+        env.storage().persistent().set(&score_key, &600u32);
+    });
+
+    // update_score should migrate legacy data and then update
+    client.update_score(&user, &200, &None);
+    
+    // Score should be 602 (600 + 2 points from 200/100)
+    assert_eq!(client.get_score(&user), 602);
+    
+    // Verify migration happened
+    env.as_contract(&contract_id, || {
+        let metadata_key = DataKey::Metadata(user.clone());
+        assert!(env.storage().persistent().has(&metadata_key));
+        assert!(!env.storage().persistent().has(&score_key));
+    });
+    
+    let metadata = client.get_metadata(&user).unwrap();
+    assert_eq!(metadata.score, 602);
+}
+
+#[test]
+fn test_update_history_hash_migrates_legacy_data() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+    
+    let contract_id = env.register_contract(None, RemittanceNFT);
+    let client = RemittanceNFTClient::new(&env, &contract_id);
+
+    client.initialize(&admin);
+
+    // Simulate legacy Score data
+    use super::DataKey;
+    let score_key = DataKey::Score(user.clone());
+    env.as_contract(&contract_id, || {
+        env.storage().persistent().set(&score_key, &800u32);
+    });
+
+    // update_history_hash should migrate legacy data first
+    let new_hash = create_test_hash(&env, 42);
+    client.update_history_hash(&user, &new_hash, &None);
+    
+    // Verify migration and update
+    let metadata = client.get_metadata(&user).unwrap();
+    assert_eq!(metadata.score, 800); // Score preserved
+    assert_eq!(metadata.history_hash, new_hash); // Hash updated
+    
+    // Verify old data is gone
+    env.as_contract(&contract_id, || {
+        assert!(!env.storage().persistent().has(&score_key));
+    });
+}

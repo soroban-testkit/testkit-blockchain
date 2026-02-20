@@ -23,8 +23,8 @@ fn test_score_lifecycle() {
 
     let history_hash = create_test_hash(&env, 1);
 
-    // Initial mint
-    client.mint(&user, &500, &history_hash);
+    // Initial mint (admin mints, so minter is None)
+    client.mint(&user, &500, &history_hash, &None);
     assert_eq!(client.get_score(&user), 500);
     
     // Check metadata
@@ -32,16 +32,16 @@ fn test_score_lifecycle() {
     assert_eq!(metadata.score, 500);
     assert_eq!(metadata.history_hash, history_hash);
 
-    // Update score (repayment of 250 -> 2 points)
-    client.update_score(&user, &250);
+    // Update score (repayment of 250 -> 2 points) - admin updates
+    client.update_score(&user, &250, &None);
     assert_eq!(client.get_score(&user), 502);
     
     // Verify metadata updated
     let metadata = client.get_metadata(&user).unwrap();
     assert_eq!(metadata.score, 502);
 
-    // Update score (repayment of 1000 -> 10 points)
-    client.update_score(&user, &1000);
+    // Update score (repayment of 1000 -> 10 points) - admin updates
+    client.update_score(&user, &1000, &None);
     assert_eq!(client.get_score(&user), 512);
     
     // Verify metadata updated
@@ -68,14 +68,14 @@ fn test_history_hash_update() {
     client.initialize(&admin);
 
     let initial_hash = create_test_hash(&env, 1);
-    client.mint(&user, &500, &initial_hash);
+    client.mint(&user, &500, &initial_hash, &None);
     
     let metadata = client.get_metadata(&user).unwrap();
     assert_eq!(metadata.history_hash, initial_hash);
 
-    // Update history hash
+    // Update history hash - admin updates
     let new_hash = create_test_hash(&env, 2);
-    client.update_history_hash(&user, &new_hash);
+    client.update_history_hash(&user, &new_hash, &None);
     
     let metadata = client.get_metadata(&user).unwrap();
     assert_eq!(metadata.history_hash, new_hash);
@@ -116,7 +116,7 @@ fn test_not_initialized() {
     let client = RemittanceNFTClient::new(&env, &contract_id);
 
     let history_hash = create_test_hash(&env, 1);
-    client.mint(&user, &500, &history_hash);
+    client.mint(&user, &500, &history_hash, &None);
 }
 
 #[test]
@@ -146,11 +146,11 @@ fn test_duplicate_mint() {
     client.initialize(&admin);
 
     let history_hash = create_test_hash(&env, 1);
-    client.mint(&user, &500, &history_hash);
+    client.mint(&user, &500, &history_hash, &None);
     
     // Try to mint again for the same user
     let history_hash2 = create_test_hash(&env, 2);
-    client.mint(&user, &600, &history_hash2);
+    client.mint(&user, &600, &history_hash2, &None);
 }
 
 #[test]
@@ -168,5 +168,5 @@ fn test_update_score_without_nft() {
     client.initialize(&admin);
 
     // Try to update score for user without NFT
-    client.update_score(&user, &100);
+    client.update_score(&user, &100, &None);
 }

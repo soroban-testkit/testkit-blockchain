@@ -45,7 +45,7 @@ impl LoanManager {
         // Update score
         let nft_contract: Address = env.storage().instance().get(&DataKey::NftContract).expect("not initialized");
         let nft_client = nft::Client::new(&env, &nft_contract);
-        nft_client.update_score(&borrower, &amount);
+        nft_client.update_score(&borrower, &amount, &None);
     }
 }
 

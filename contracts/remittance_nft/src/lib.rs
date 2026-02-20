@@ -13,6 +13,7 @@ pub struct RemittanceMetadata {
 #[derive(Clone)]
 pub enum DataKey {
     Metadata(Address),
+    Score(Address), // Legacy key for backward compatibility
     Admin,
     AuthorizedMinter(Address),
 }
@@ -71,8 +72,11 @@ impl RemittanceNFT {
             admin.require_auth();
         }
 
-        let key = DataKey::Metadata(user.clone());
-        if env.storage().persistent().has(&key) {
+        let metadata_key = DataKey::Metadata(user.clone());
+        let score_key = DataKey::Score(user.clone());
+        
+        // Check if user already has an NFT (either new format or legacy)
+        if env.storage().persistent().has(&metadata_key) || env.storage().persistent().has(&score_key) {
             panic!("user already has an NFT");
         }
 
@@ -81,23 +85,45 @@ impl RemittanceNFT {
             history_hash,
         };
         
-        env.storage().persistent().set(&key, &metadata);
+        env.storage().persistent().set(&metadata_key, &metadata);
     }
 
     /// Get the metadata (score and history hash) for a user's NFT
     pub fn get_metadata(env: Env, user: Address) -> Option<RemittanceMetadata> {
-        let key = DataKey::Metadata(user);
-        env.storage().persistent().get(&key)
+        let metadata_key = DataKey::Metadata(user.clone());
+        if let Some(metadata) = env.storage().persistent().get(&metadata_key) {
+            return Some(metadata);
+        }
+        
+        // Check for legacy Score data and migrate if found
+        let score_key = DataKey::Score(user.clone());
+        if let Some(score) = env.storage().persistent().get::<DataKey, u32>(&score_key) {
+            // Migrate old Score to new Metadata format
+            let default_hash = BytesN::from_array(&env, &[0u8; 32]); // Zero hash as default
+            let migrated_metadata = RemittanceMetadata {
+                score,
+                history_hash: default_hash,
+            };
+            // Store migrated metadata
+            env.storage().persistent().set(&metadata_key, &migrated_metadata);
+            // Remove old Score data
+            env.storage().persistent().remove(&score_key);
+            return Some(migrated_metadata);
+        }
+        
+        None
     }
 
-    /// Get the score for a user (backward compatibility)
+    /// Get the score for a user
+    /// Handles backward compatibility by checking Metadata first, then legacy Score data
     pub fn get_score(env: Env, user: Address) -> u32 {
-        let key = DataKey::Metadata(user);
-        if let Some(metadata) = env.storage().persistent().get::<DataKey, RemittanceMetadata>(&key) {
-            metadata.score
-        } else {
-            0
+        if let Some(metadata) = Self::get_metadata(env.clone(), user.clone()) {
+            return metadata.score;
         }
+        
+        // Check legacy Score data (shouldn't happen after migration, but safe fallback)
+        let score_key = DataKey::Score(user);
+        env.storage().persistent().get::<DataKey, u32>(&score_key).unwrap_or(0)
     }
 
     /// Update the score for a user's NFT
@@ -119,14 +145,31 @@ impl RemittanceNFT {
             admin.require_auth();
         }
 
-        let key = DataKey::Metadata(user.clone());
-        let mut metadata: RemittanceMetadata = env.storage().persistent().get(&key).expect("user does not have an NFT");
+        let metadata_key = DataKey::Metadata(user.clone());
+        let score_key = DataKey::Score(user.clone());
+        
+        // Get metadata, migrating from legacy Score if necessary
+        let mut metadata = if let Some(md) = env.storage().persistent().get(&metadata_key) {
+            md
+        } else if let Some(score) = env.storage().persistent().get::<DataKey, u32>(&score_key) {
+            // Migrate legacy Score to Metadata
+            let default_hash = BytesN::from_array(&env, &[0u8; 32]);
+            let migrated = RemittanceMetadata {
+                score,
+                history_hash: default_hash,
+            };
+            env.storage().persistent().set(&metadata_key, &migrated);
+            env.storage().persistent().remove(&score_key);
+            migrated
+        } else {
+            panic!("user does not have an NFT");
+        };
         
         // Simple logic: 1 point per 100 units of repayment
         let points = (repayment_amount / 100) as u32;
         metadata.score += points;
 
-        env.storage().persistent().set(&key, &metadata);
+        env.storage().persistent().set(&metadata_key, &metadata);
     }
 
     /// Update the history hash for a user's NFT
@@ -148,12 +191,29 @@ impl RemittanceNFT {
             admin.require_auth();
         }
 
-        let key = DataKey::Metadata(user.clone());
-        let mut metadata: RemittanceMetadata = env.storage().persistent().get(&key).expect("user does not have an NFT");
+        let metadata_key = DataKey::Metadata(user.clone());
+        let score_key = DataKey::Score(user.clone());
+        
+        // Get metadata, migrating from legacy Score if necessary
+        let mut metadata = if let Some(md) = env.storage().persistent().get(&metadata_key) {
+            md
+        } else if let Some(score) = env.storage().persistent().get::<DataKey, u32>(&score_key) {
+            // Migrate legacy Score to Metadata
+            let default_hash = BytesN::from_array(&env, &[0u8; 32]);
+            let migrated = RemittanceMetadata {
+                score,
+                history_hash: default_hash,
+            };
+            env.storage().persistent().set(&metadata_key, &migrated);
+            env.storage().persistent().remove(&score_key);
+            migrated
+        } else {
+            panic!("user does not have an NFT");
+        };
         
         metadata.history_hash = new_history_hash;
 
-        env.storage().persistent().set(&key, &metadata);
+        env.storage().persistent().set(&metadata_key, &metadata);
     }
 }
 

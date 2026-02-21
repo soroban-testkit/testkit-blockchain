@@ -1,5 +1,8 @@
 import { Router } from 'express';
 import { getRemittanceHistory, simulatePayment } from '../controllers/simulationController.js';
+import { validate } from '../middleware/validation.js';
+import { getRemittanceHistorySchema, simulatePaymentSchema } from '../schemas/simulationSchemas.js';
+import { strictRateLimiter } from '../middleware/rateLimiter.js';
 
 const router = Router();
 
@@ -41,7 +44,7 @@ const router = Router();
  *         description: User not found or no remittance history available.
  */
 
-router.get('/history/:userId', getRemittanceHistory);
+router.get('/history/:userId', validate(getRemittanceHistorySchema), getRemittanceHistory);
 
 
 /**
@@ -86,6 +89,6 @@ router.get('/history/:userId', getRemittanceHistory);
  *       400:
  *         description: Invalid input data.
  */
-router.post('/simulate', simulatePayment);
+router.post('/simulate', strictRateLimiter, validate(simulatePaymentSchema), simulatePayment);
 
 export default router;

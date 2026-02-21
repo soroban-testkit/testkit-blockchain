@@ -7,6 +7,8 @@ mod nft {
     );
 }
 
+mod events;
+
 #[contracttype]
 #[derive(Clone)]
 pub enum DataKey {
@@ -31,10 +33,14 @@ impl LoanManager {
             panic!("score too low for loan");
         }
         // Loan request logic
+        
+        events::loan_requested(&env, borrower, amount);
     }
 
-    pub fn approve_loan(_env: Env, _loan_id: u32) {
+    pub fn approve_loan(env: Env, loan_id: u32) {
         // Approval logic
+        
+        events::loan_approved(&env, loan_id);
     }
 
     pub fn repay(env: Env, borrower: Address, amount: i128) {
@@ -46,6 +52,8 @@ impl LoanManager {
         let nft_contract: Address = env.storage().instance().get(&DataKey::NftContract).expect("not initialized");
         let nft_client = nft::Client::new(&env, &nft_contract);
         nft_client.update_score(&borrower, &amount, &None);
+        
+        events::loan_repaid(&env, borrower, amount);
     }
 }
 

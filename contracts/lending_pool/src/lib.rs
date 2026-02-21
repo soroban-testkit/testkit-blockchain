@@ -75,6 +75,10 @@ impl LendingPool {
         }
         env.events().publish((symbol_short!("Withdraw"), provider), amount);
     }
+
+    pub fn get_token(env: Env) -> Address {
+        env.storage().instance().get(&DataKey::Token).expect("not initialized")
+    }
 }
 
 #[cfg(test)]

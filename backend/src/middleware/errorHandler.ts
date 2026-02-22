@@ -1,6 +1,7 @@
 import type { Request, Response, NextFunction } from "express";
 import { z } from "zod";
 import { AppError } from "../errors/AppError.js";
+import logger from "../utils/logger.js";
 
 /**
  * Global error handling middleware.
@@ -32,15 +33,23 @@ export const errorHandler = (
 
   // ── Known Operational Errors ─────────────────────────────────
   if (err instanceof AppError) {
+    if (!err.isOperational) {
+      logger.error(`Internal AppError: ${err.message}`, {
+        path: _req.path,
+        method: _req.method,
+        stack: err.stack,
+      });
+    }
+
     res.status(err.statusCode).json({
       success: false,
-      message: err.message,
+      message: err.isOperational ? err.message : "Internal server error",
     });
     return;
   }
 
   // ── Unexpected / Programming Errors ──────────────────────────
-  console.error("Unhandled error:", err);
+  logger.error("Unhandled error:", err);
 
   const isDevelopment = process.env.NODE_ENV !== "production";
 

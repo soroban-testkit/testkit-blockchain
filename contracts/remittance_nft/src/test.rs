@@ -328,3 +328,95 @@ fn test_update_history_hash_migrates_legacy_data() {
         assert!(!env.storage().persistent().has(&score_key));
     });
 }
+
+#[test]
+fn test_minting_with_authorized_minter_sets_expected_metadata() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let admin = Address::generate(&env);
+    let authorized_minter = Address::generate(&env);
+    let user = Address::generate(&env);
+
+    let contract_id = env.register_contract(None, RemittanceNFT);
+    let client = RemittanceNFTClient::new(&env, &contract_id);
+
+    client.initialize(&admin);
+    client.authorize_minter(&authorized_minter);
+
+    let history_hash = create_test_hash(&env, 9);
+    client.mint(&user, &420, &history_hash, &Some(authorized_minter));
+
+    let metadata = client.get_metadata(&user).unwrap();
+    assert_eq!(metadata.score, 420);
+    assert_eq!(metadata.history_hash, history_hash);
+}
+
+#[test]
+#[should_panic(expected = "minter is not authorized")]
+fn test_mint_rejects_unauthorized_minter() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let admin = Address::generate(&env);
+    let unauthorized_minter = Address::generate(&env);
+    let user = Address::generate(&env);
+
+    let contract_id = env.register_contract(None, RemittanceNFT);
+    let client = RemittanceNFTClient::new(&env, &contract_id);
+
+    client.initialize(&admin);
+
+    let history_hash = create_test_hash(&env, 3);
+    client.mint(&user, &500, &history_hash, &Some(unauthorized_minter));
+}
+
+#[test]
+fn test_metadata_retrieval_before_and_after_mint() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+
+    let contract_id = env.register_contract(None, RemittanceNFT);
+    let client = RemittanceNFTClient::new(&env, &contract_id);
+
+    client.initialize(&admin);
+    assert!(client.get_metadata(&user).is_none());
+
+    let history_hash = create_test_hash(&env, 11);
+    client.mint(&user, &250, &history_hash, &None);
+
+    let metadata = client.get_metadata(&user).unwrap();
+    assert_eq!(metadata.score, 250);
+    assert_eq!(metadata.history_hash, history_hash);
+}
+
+#[test]
+fn test_score_update_is_isolated_to_owner() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let admin = Address::generate(&env);
+    let alice = Address::generate(&env);
+    let bob = Address::generate(&env);
+
+    let contract_id = env.register_contract(None, RemittanceNFT);
+    let client = RemittanceNFTClient::new(&env, &contract_id);
+
+    client.initialize(&admin);
+
+    client.mint(&alice, &100, &create_test_hash(&env, 1), &None);
+    client.mint(&bob, &200, &create_test_hash(&env, 2), &None);
+
+    client.update_score(&alice, &900, &None);
+
+    assert_eq!(client.get_score(&alice), 109);
+    assert_eq!(client.get_score(&bob), 200);
+
+    let alice_metadata = client.get_metadata(&alice).unwrap();
+    let bob_metadata = client.get_metadata(&bob).unwrap();
+    assert_eq!(alice_metadata.score, 109);
+    assert_eq!(bob_metadata.score, 200);
+}

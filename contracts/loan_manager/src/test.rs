@@ -1,4 +1,4 @@
-#![cfg(test)]
+
 
 use crate::{LoanManager, LoanManagerClient, LoanStatus};
 use remittance_nft::{RemittanceNFT, RemittanceNFTClient};

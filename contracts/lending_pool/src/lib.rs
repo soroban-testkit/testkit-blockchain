@@ -77,7 +77,7 @@ impl LendingPool {
     }
 
     pub fn get_token(env: Env) -> Address {
-        env.storage().instance().get(&DataKey::Token).expect("not initialized")
+        env.storage().instance().get(&Self::token_key()).expect("not initialized")
     }
 }
 

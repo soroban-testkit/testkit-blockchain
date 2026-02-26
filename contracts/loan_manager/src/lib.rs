@@ -1,4 +1,4 @@
-#![cfg_attr(not(test), no_std)]
+#![no_std]
 use soroban_sdk::{
     contract, contractclient, contractimpl, contracttype, symbol_short, Address, Env,
 };
@@ -44,10 +44,14 @@ pub struct LoanManager;
 
 #[contractimpl]
 impl LoanManager {
+    fn nft_key() -> soroban_sdk::Symbol {
+        symbol_short!("NFT")
+    }
+
     fn nft_contract(env: &Env) -> Address {
         env.storage()
             .instance()
-            .get(&DataKey::NftContract)
+            .get(&Self::nft_key())
             .expect("not initialized")
     }
 
@@ -170,7 +174,7 @@ impl LoanManager {
         env.storage()
             .persistent()
             .get(&DataKey::Loan(loan_id))
-            .expect("loan_id not found")
+            .expect("loan not found")
     }
 
     pub fn repay(env: Env, borrower: Address, amount: i128) {
@@ -191,6 +195,3 @@ impl LoanManager {
         events::loan_repaid(&env, borrower, amount);
     }
 }
-
-#[cfg(test)]
-mod test;

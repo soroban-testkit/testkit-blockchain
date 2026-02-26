@@ -1,4 +1,4 @@
-#![cfg_attr(not(test), no_std)]
+#![no_std]
 use soroban_sdk::token::Client as TokenClient;
 use soroban_sdk::{contract, contractimpl, contracttype, symbol_short, Address, Env};
 
@@ -67,8 +67,15 @@ impl LendingPool {
         }
         let token = Self::read_token(&env);
         let token_client = TokenClient::new(&env, &token);
-        token_client.transfer(&env.current_contract_address(), &provider, &amount);
-        let new_balance = current_balance - amount;
+        let pool_address = env.current_contract_address();
+        let pool_balance = token_client.balance(&pool_address);
+        if pool_balance < amount {
+            panic!("insufficient pool liquidity");
+        }
+        token_client.transfer(&pool_address, &provider, &amount);
+        let new_balance = current_balance
+            .checked_sub(amount)
+            .expect("withdraw underflow");
         if new_balance == 0 {
             env.storage().persistent().remove(&key);
         } else {
@@ -79,10 +86,7 @@ impl LendingPool {
     }
 
     pub fn get_token(env: Env) -> Address {
-        env.storage()
-            .instance()
-            .get(&Self::token_key())
-            .expect("not initialized")
+        Self::read_token(&env)
     }
 }
 

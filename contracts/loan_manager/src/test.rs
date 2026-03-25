@@ -1,5 +1,6 @@
 use crate::{LoanManager, LoanManagerClient, LoanStatus};
 use remittance_nft::{RemittanceNFT, RemittanceNFTClient};
+use soroban_sdk::testutils::Ledger as _;
 use soroban_sdk::token::{Client as TokenClient, StellarAssetClient};
 use soroban_sdk::{testutils::Address as _, Address, Env};
 
@@ -62,6 +63,8 @@ fn test_loan_request_success() {
     let loan = manager.get_loan(&loan_id);
     assert_eq!(loan.borrower, borrower);
     assert_eq!(loan.amount, 1000);
+    assert_eq!(loan.principal_paid, 0);
+    assert_eq!(loan.interest_paid, 0);
     assert_eq!(loan.status, LoanStatus::Pending);
 }
 
@@ -121,9 +124,9 @@ fn test_approve_loan_flow() {
 #[test]
 fn test_repayment_flow() {
     let env = Env::default();
-    env.mock_all_auths();
+    env.mock_all_auths_allowing_non_root_auth();
 
-    let (manager, nft_client, _pool, _token, _token_admin) = setup_test(&env);
+    let (manager, nft_client, pool_address, token_id, _token_admin) = setup_test(&env);
     let borrower = Address::generate(&env);
 
     // 1. Borrower starts with a score of 600
@@ -131,30 +134,78 @@ fn test_repayment_flow() {
     nft_client.mint(&borrower, &600, &history_hash, &None);
     assert_eq!(nft_client.get_score(&borrower), 600);
 
-    // Disable strict top-level auth checks entirely for the internal execution
-    env.mock_all_auths_allowing_non_root_auth();
+    let token_client = TokenClient::new(&env, &token_id);
+    let stellar_token = StellarAssetClient::new(&env, &token_id);
+    stellar_token.mint(&pool_address, &10_000);
+    stellar_token.mint(&borrower, &10_000);
 
-    // 2. Repayment triggers update_score
-    manager.repay(&borrower, &500);
+    let loan_id = manager.request_loan(&borrower, &1000);
+    manager.approve_loan(&loan_id);
+
+    env.ledger()
+        .set_sequence_number(env.ledger().sequence() + 2_000);
+
+    manager.repay(&borrower, &loan_id, &500);
+
+    let loan = manager.get_loan(&loan_id);
+    assert!(loan.principal_paid > 0);
+    assert!(loan.interest_paid >= 0);
+    assert_eq!(loan.status, LoanStatus::Approved);
+    assert_eq!(token_client.balance(&pool_address), 9_500);
 
     // 3. Verify the underlying NFT Score was correctly incremented
     assert_eq!(nft_client.get_score(&borrower), 605);
 }
 
 #[test]
+fn test_partial_repayment_tracks_split_balances() {
+    let env = Env::default();
+    env.mock_all_auths_allowing_non_root_auth();
+
+    let (manager, nft_client, pool_address, token_id, _token_admin) = setup_test(&env);
+    let borrower = Address::generate(&env);
+
+    let history_hash = soroban_sdk::BytesN::from_array(&env, &[0u8; 32]);
+    nft_client.mint(&borrower, &600, &history_hash, &None);
+
+    let stellar_token = StellarAssetClient::new(&env, &token_id);
+    stellar_token.mint(&pool_address, &2_000_000);
+    stellar_token.mint(&borrower, &2_000_000);
+
+    let loan_id = manager.request_loan(&borrower, &1_000_000);
+    manager.approve_loan(&loan_id);
+
+    manager.repay(&borrower, &loan_id, &400_000);
+
+    let after_partial = manager.get_loan(&loan_id);
+    assert!(after_partial.principal_paid > 0);
+    assert_eq!(
+        after_partial.principal_paid + after_partial.interest_paid,
+        400_000
+    );
+    assert_eq!(after_partial.status, LoanStatus::Approved);
+}
+
+#[test]
 fn test_small_repayment_does_not_change_score() {
     let env = Env::default();
-    env.mock_all_auths();
+    env.mock_all_auths_allowing_non_root_auth();
 
-    let (manager, nft_client, _pool, _token, _token_admin) = setup_test(&env);
+    let (manager, nft_client, pool_address, token_id, _token_admin) = setup_test(&env);
     let borrower = Address::generate(&env);
 
     let history_hash = soroban_sdk::BytesN::from_array(&env, &[0u8; 32]);
     nft_client.mint(&borrower, &600, &history_hash, &None);
     assert_eq!(nft_client.get_score(&borrower), 600);
 
-    env.mock_all_auths_allowing_non_root_auth();
-    manager.repay(&borrower, &99);
+    let stellar_token = StellarAssetClient::new(&env, &token_id);
+    stellar_token.mint(&pool_address, &10_000);
+    stellar_token.mint(&borrower, &10_000);
+
+    let loan_id = manager.request_loan(&borrower, &1000);
+    manager.approve_loan(&loan_id);
+
+    manager.repay(&borrower, &loan_id, &99);
 
     assert_eq!(nft_client.get_score(&borrower), 600);
 }
@@ -169,7 +220,7 @@ fn test_access_controls_unauthorized_repay() {
     let borrower = Address::generate(&env);
 
     // Attempting to repay without proper Authorization scope should panic natively.
-    manager.repay(&borrower, &500);
+    manager.repay(&borrower, &1, &500);
 }
 
 #[test]

@@ -1,10 +1,9 @@
-#![no_std] 
+#![no_std]
 
 #[cfg(test)]
 mod test;
 use soroban_sdk::{
-    contract, contractimpl, contracttype, symbol_short,
-    Address, Env, Map, Symbol, Vec, IntoVal,
+    contract, contractimpl, contracttype, symbol_short, Address, Env, IntoVal, Map, Symbol, Vec,
 };
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -86,7 +85,6 @@ pub struct GovernanceContract;
 
 #[contractimpl]
 impl GovernanceContract {
-
     // ── Initialization ────────────────────────────────────────────────────────
 
     /// Initialize the governance contract.
@@ -253,10 +251,10 @@ impl GovernanceContract {
 
         // Cross-contract call to update admin in the RemitLend protocol contract
         env.invoke_contract::<()>(
-    &target,
-    &symbol_short!("set_admin"),
-    soroban_sdk::vec![&env, new_admin.clone().into_val(&env)],
-);
+            &target,
+            &symbol_short!("set_admin"),
+            soroban_sdk::vec![&env, new_admin.clone().into_val(&env)],
+        );
 
         env.events().publish(
             (symbol_short!("GovFin"), new_admin.clone()),
@@ -321,11 +319,19 @@ impl GovernanceContract {
     /// Returns seconds remaining until the timelock expires.
     /// Returns 0 if already elapsed or no pending transfer exists.
     pub fn get_timelock_remaining(env: Env) -> u64 {
-        match env.storage().instance().get::<Symbol, PendingTransfer>(&KEY_PENDING) {
+        match env
+            .storage()
+            .instance()
+            .get::<Symbol, PendingTransfer>(&KEY_PENDING)
+        {
             None => 0,
             Some(p) => {
                 let now = env.ledger().timestamp();
-                if now >= p.executable_after { 0 } else { p.executable_after - now }
+                if now >= p.executable_after {
+                    0
+                } else {
+                    p.executable_after.saturating_sub(now)
+                }
             }
         }
     }

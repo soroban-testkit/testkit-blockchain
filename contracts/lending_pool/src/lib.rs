@@ -6,6 +6,8 @@ use soroban_sdk::{contract, contractimpl, contracttype, symbol_short, Address, E
 #[derive(Clone)]
 pub enum DataKey {
     Deposit(Address),
+    Admin,
+    Paused,
 }
 
 #[contract]
@@ -24,16 +26,27 @@ impl LendingPool {
             .expect("not initialized")
     }
 
-    pub fn initialize(env: Env, token: Address) {
+    fn assert_not_paused(env: &Env) {
+        let paused: bool = env.storage().instance().get(&DataKey::Paused).unwrap_or(false);
+        if paused {
+            panic!("contract is paused");
+        }
+    }
+
+    pub fn initialize(env: Env, token: Address, admin: Address) {
         let token_key = Self::token_key();
         if env.storage().instance().has(&token_key) {
             panic!("already initialized");
         }
         env.storage().instance().set(&token_key, &token);
+        env.storage().instance().set(&DataKey::Admin, &admin);
+        env.storage().instance().set(&DataKey::Paused, &false);
     }
 
     pub fn deposit(env: Env, provider: Address, amount: i128) {
         provider.require_auth();
+        Self::assert_not_paused(&env);
+        
         if amount <= 0 {
             panic!("deposit amount must be positive");
         }
@@ -57,6 +70,8 @@ impl LendingPool {
 
     pub fn withdraw(env: Env, provider: Address, amount: i128) {
         provider.require_auth();
+        Self::assert_not_paused(&env);
+
         if amount <= 0 {
             panic!("withdraw amount must be positive");
         }
@@ -87,6 +102,32 @@ impl LendingPool {
 
     pub fn get_token(env: Env) -> Address {
         Self::read_token(&env)
+    }
+
+    pub fn pause(env: Env) {
+        let admin: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .expect("not initialized");
+        admin.require_auth();
+
+        env.storage().instance().set(&DataKey::Paused, &true);
+        env.events()
+            .publish((symbol_short!("Paused"),), ());
+    }
+
+    pub fn unpause(env: Env) {
+        let admin: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .expect("not initialized");
+        admin.require_auth();
+
+        env.storage().instance().set(&DataKey::Paused, &false);
+        env.events()
+            .publish((symbol_short!("Unpaused"),), ());
     }
 }
 

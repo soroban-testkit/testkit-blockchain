@@ -10,6 +10,11 @@ services:
       - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d remitlend"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
 
   redis:
     image: redis:alpine
@@ -22,7 +27,7 @@ services:
     build:
       context: ./backend
       target: builder
-    command: npm run dev
+    command: sh -c "npm run migrate:up && npm run dev"
     ports:
       - "3001:3001"
     env_file:
@@ -33,8 +38,10 @@ services:
     volumes:
       - ./backend/src:/app/src
     depends_on:
-      - db
-      - redis
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
     restart: unless-stopped
 
   frontend:

@@ -139,6 +139,8 @@ impl RemittanceNFT {
         };
 
         env.storage().persistent().set(&metadata_key, &metadata);
+        env.events()
+            .publish((symbol_short!("Mint"), user), initial_score);
     }
 
     /// Get the metadata (score and history hash) for a user's NFT
@@ -176,6 +178,8 @@ impl RemittanceNFT {
         metadata.score = metadata.score.checked_add(points).expect("score overflow");
 
         env.storage().persistent().set(&metadata_key, &metadata);
+        env.events()
+            .publish((symbol_short!("ScoreUpd"), user), metadata.score);
     }
 
     /// Update the history hash for a user's NFT
@@ -200,6 +204,8 @@ impl RemittanceNFT {
         metadata.history_hash = new_history_hash;
 
         env.storage().persistent().set(&metadata_key, &metadata);
+        env.events()
+            .publish((symbol_short!("HashUpd"), user), metadata.history_hash.clone());
     }
 }
 

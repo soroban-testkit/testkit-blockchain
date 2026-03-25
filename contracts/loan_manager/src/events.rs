@@ -14,3 +14,18 @@ pub fn loan_repaid(env: &Env, borrower: Address, amount: i128) {
     let topics = (Symbol::new(env, "LoanRepaid"), borrower);
     env.events().publish(topics, amount);
 }
+
+pub fn paused(env: &Env) {
+    let topics = (Symbol::new(env, "Paused"),);
+    env.events().publish(topics, ());
+}
+
+pub fn unpaused(env: &Env) {
+    let topics = (Symbol::new(env, "Unpaused"),);
+    env.events().publish(topics, ());
+}
+
+pub fn min_score_updated(env: &Env, old_score: u32, new_score: u32) {
+    let topics = (Symbol::new(env, "MinScoreUpdated"),);
+    env.events().publish(topics, (old_score, new_score));
+}

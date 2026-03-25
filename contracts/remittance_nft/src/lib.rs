@@ -1,5 +1,7 @@
 #![cfg_attr(not(test), no_std)]
-use soroban_sdk::{contract, contractimpl, contracttype, symbol_short, Address, BytesN, Env};
+use soroban_sdk::{
+    contract, contractimpl, contracttype, symbol_short, Address, BytesN, Env,
+};
 
 #[contracttype]
 #[derive(Clone)]
@@ -15,6 +17,7 @@ pub enum DataKey {
     Score(Address),
     AuthorizedMinter(Address),
     Seized(Address),
+    Version,
 }
 
 #[contract]
@@ -26,6 +29,7 @@ impl RemittanceNFT {
     const INSTANCE_TTL_BUMP: u32 = 518400;
     const PERSISTENT_TTL_THRESHOLD: u32 = 17280;
     const PERSISTENT_TTL_BUMP: u32 = 518400;
+    const CURRENT_VERSION: u32 = 1;
 
     fn admin_key() -> soroban_sdk::Symbol {
         symbol_short!("ADMIN")
@@ -103,11 +107,45 @@ impl RemittanceNFT {
             panic!("already initialized");
         }
         env.storage().instance().set(&admin_key, &admin);
+        env.storage()
+            .instance()
+            .set(&DataKey::Version, &Self::CURRENT_VERSION);
         Self::bump_instance_ttl(&env);
         // Admin is automatically authorized to mint
         let key = DataKey::AuthorizedMinter(admin.clone());
         env.storage().persistent().set(&key, &true);
         Self::bump_persistent_ttl(&env, &key);
+    }
+
+    pub fn version(env: Env) -> u32 {
+        Self::bump_instance_ttl(&env);
+        env.storage()
+            .instance()
+            .get(&DataKey::Version)
+            .unwrap_or(0)
+    }
+
+    pub fn upgrade(env: Env, new_wasm_hash: BytesN<32>) {
+        Self::admin(&env).require_auth();
+        env.deployer().update_current_contract_wasm(new_wasm_hash);
+    }
+
+    pub fn migrate(env: Env) {
+        Self::admin(&env).require_auth();
+
+        let current_version: u32 = env
+            .storage()
+            .instance()
+            .get(&DataKey::Version)
+            .unwrap_or(0);
+
+        if current_version < Self::CURRENT_VERSION {
+            env.storage()
+                .instance()
+                .set(&DataKey::Version, &Self::CURRENT_VERSION);
+        }
+
+        Self::bump_instance_ttl(&env);
     }
 
     /// Authorize a contract or account to mint NFTs

@@ -19,6 +19,7 @@ fn test_score_lifecycle() {
     let client = RemittanceNFTClient::new(&env, &contract_id);
 
     client.initialize(&admin);
+    assert_eq!(client.version(), 1);
 
     let history_hash = create_test_hash(&env, 1);
 

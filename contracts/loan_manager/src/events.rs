@@ -29,3 +29,8 @@ pub fn min_score_updated(env: &Env, old_score: u32, new_score: u32) {
     let topics = (Symbol::new(env, "MinScoreUpdated"),);
     env.events().publish(topics, (old_score, new_score));
 }
+
+pub fn loan_defaulted(env: &Env, loan_id: u32, borrower: Address) {
+    let topics = (Symbol::new(env, "LoanDefaulted"), loan_id);
+    env.events().publish(topics, borrower);
+}

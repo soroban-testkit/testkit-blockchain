@@ -53,7 +53,6 @@
         }
       ]
     ],
-    [],
     [
       [
         "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M",
@@ -192,7 +191,7 @@
                 {
                   "i128": {
                     "hi": 0,
-                    "lo": 99
+                    "lo": 1000
                   }
                 }
               ]
@@ -214,7 +213,7 @@
                     {
                       "i128": {
                         "hi": 0,
-                        "lo": 99
+                        "lo": 1000
                       }
                     }
                   ]
@@ -224,13 +223,37 @@
             }
           ]
         }
+      ],
+      [
+        "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+        {
+          "function": {
+            "contract_fn": {
+              "contract_address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4",
+              "function_name": "update_score",
+              "args": [
+                {
+                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAOLZM"
+                },
+                {
+                  "i128": {
+                    "hi": 0,
+                    "lo": 1000
+                  }
+                },
+                "void"
+              ]
+            }
+          },
+          "sub_invocations": []
+        }
       ]
     ],
     []
   ],
   "ledger": {
     "protocol_version": 22,
-    "sequence_number": 0,
+    "sequence_number": 20000,
     "timestamp": 0,
     "network_id": "0000000000000000000000000000000000000000000000000000000000000000",
     "base_reserve": 0,
@@ -368,6 +391,39 @@
       [
         {
           "contract_data": {
+            "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+            "key": {
+              "ledger_key_nonce": {
+                "nonce": 5806905060045992000
+              }
+            },
+            "durability": "temporary"
+          }
+        },
+        [
+          {
+            "last_modified_ledger_seq": 0,
+            "data": {
+              "contract_data": {
+                "ext": "v0",
+                "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+                "key": {
+                  "ledger_key_nonce": {
+                    "nonce": 5806905060045992000
+                  }
+                },
+                "durability": "temporary",
+                "val": "void"
+              }
+            },
+            "ext": "v0"
+          },
+          6311999
+        ]
+      ],
+      [
+        {
+          "contract_data": {
             "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4",
             "key": {
               "vec": [
@@ -460,7 +516,7 @@
                         "symbol": "score"
                       },
                       "val": {
-                        "u32": 600
+                        "u32": 610
                       }
                     }
                   ]
@@ -721,7 +777,7 @@
                       "val": {
                         "i128": {
                           "hi": 0,
-                          "lo": 99
+                          "lo": 1000
                         }
                       }
                     },
@@ -732,7 +788,7 @@
                       "val": {
                         "vec": [
                           {
-                            "symbol": "Approved"
+                            "symbol": "Repaid"
                           }
                         ]
                       }
@@ -961,7 +1017,7 @@
                       "val": {
                         "i128": {
                           "hi": 0,
-                          "lo": 9099
+                          "lo": 10000
                         }
                       }
                     },
@@ -1034,7 +1090,7 @@
                       "val": {
                         "i128": {
                           "hi": 0,
-                          "lo": 10901
+                          "lo": 10000
                         }
                       }
                     },

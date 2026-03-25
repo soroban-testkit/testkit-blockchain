@@ -1,7 +1,5 @@
 #![cfg_attr(not(test), no_std)]
-use soroban_sdk::{
-    contract, contractimpl, contracttype, symbol_short, Address, BytesN, Env,
-};
+use soroban_sdk::{contract, contractimpl, contracttype, symbol_short, Address, BytesN, Env};
 
 #[contracttype]
 #[derive(Clone)]
@@ -119,10 +117,7 @@ impl RemittanceNFT {
 
     pub fn version(env: Env) -> u32 {
         Self::bump_instance_ttl(&env);
-        env.storage()
-            .instance()
-            .get(&DataKey::Version)
-            .unwrap_or(0)
+        env.storage().instance().get(&DataKey::Version).unwrap_or(0)
     }
 
     pub fn upgrade(env: Env, new_wasm_hash: BytesN<32>) {
@@ -133,11 +128,7 @@ impl RemittanceNFT {
     pub fn migrate(env: Env) {
         Self::admin(&env).require_auth();
 
-        let current_version: u32 = env
-            .storage()
-            .instance()
-            .get(&DataKey::Version)
-            .unwrap_or(0);
+        let current_version: u32 = env.storage().instance().get(&DataKey::Version).unwrap_or(0);
 
         if current_version < Self::CURRENT_VERSION {
             env.storage()

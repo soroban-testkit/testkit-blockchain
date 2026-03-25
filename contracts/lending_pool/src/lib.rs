@@ -250,10 +250,7 @@ impl LendingPool {
 
     pub fn version(env: Env) -> u32 {
         Self::bump_instance_ttl(&env);
-        env.storage()
-            .instance()
-            .get(&DataKey::Version)
-            .unwrap_or(0)
+        env.storage().instance().get(&DataKey::Version).unwrap_or(0)
     }
 
     pub fn get_admin(env: Env) -> Address {
@@ -268,15 +265,13 @@ impl LendingPool {
     pub fn migrate(env: Env) {
         Self::admin(&env).require_auth();
 
-        let current_version: u32 = env
-            .storage()
-            .instance()
-            .get(&DataKey::Version)
-            .unwrap_or(0);
+        let current_version: u32 = env.storage().instance().get(&DataKey::Version).unwrap_or(0);
 
         if current_version < Self::CURRENT_VERSION {
             if !env.storage().instance().has(&DataKey::TotalDeposits) {
-                env.storage().instance().set(&DataKey::TotalDeposits, &0i128);
+                env.storage()
+                    .instance()
+                    .set(&DataKey::TotalDeposits, &0i128);
             }
             if !env.storage().instance().has(&DataKey::AccYieldPerDeposit) {
                 env.storage()
@@ -467,7 +462,9 @@ impl LendingPool {
             .expect("no proposed admin");
         proposed_admin.require_auth();
 
-        env.storage().instance().set(&DataKey::Admin, &proposed_admin);
+        env.storage()
+            .instance()
+            .set(&DataKey::Admin, &proposed_admin);
         env.storage().instance().remove(&DataKey::ProposedAdmin);
         Self::bump_instance_ttl(&env);
         env.events()

@@ -204,8 +204,10 @@ impl RemittanceNFT {
         metadata.history_hash = new_history_hash;
 
         env.storage().persistent().set(&metadata_key, &metadata);
-        env.events()
-            .publish((symbol_short!("HashUpd"), user), metadata.history_hash.clone());
+        env.events().publish(
+            (symbol_short!("HashUpd"), user),
+            metadata.history_hash.clone(),
+        );
     }
 }
 

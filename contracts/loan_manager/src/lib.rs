@@ -54,7 +54,11 @@ impl LoanManager {
     }
 
     fn assert_not_paused(env: &Env) {
-        let paused: bool = env.storage().instance().get(&DataKey::Paused).unwrap_or(false);
+        let paused: bool = env
+            .storage()
+            .instance()
+            .get(&DataKey::Paused)
+            .unwrap_or(false);
         if paused {
             panic!("contract is paused");
         }
@@ -97,7 +101,11 @@ impl LoanManager {
         let nft_client = NftClient::new(&env, &nft_contract);
 
         let score = nft_client.get_score(&borrower);
-        let min_score: u32 = env.storage().instance().get(&DataKey::MinScore).unwrap_or(500);
+        let min_score: u32 = env
+            .storage()
+            .instance()
+            .get(&DataKey::MinScore)
+            .unwrap_or(500);
         if score < min_score {
             panic!("score too low for loan");
         }
@@ -188,7 +196,7 @@ impl LoanManager {
     pub fn repay(env: Env, borrower: Address, amount: i128) {
         borrower.require_auth();
         Self::assert_not_paused(&env);
-        
+
         if amount <= 0 {
             panic!("repayment amount must be positive");
         }
@@ -213,13 +221,20 @@ impl LoanManager {
             .expect("not initialized");
         admin.require_auth();
 
-        let old_score: u32 = env.storage().instance().get(&DataKey::MinScore).unwrap_or(500);
+        let old_score: u32 = env
+            .storage()
+            .instance()
+            .get(&DataKey::MinScore)
+            .unwrap_or(500);
         env.storage().instance().set(&DataKey::MinScore, &min_score);
         events::min_score_updated(&env, old_score, min_score);
     }
 
     pub fn get_min_score(env: Env) -> u32 {
-        env.storage().instance().get(&DataKey::MinScore).unwrap_or(500)
+        env.storage()
+            .instance()
+            .get(&DataKey::MinScore)
+            .unwrap_or(500)
     }
 
     pub fn pause(env: Env) {

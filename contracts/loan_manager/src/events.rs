@@ -10,8 +10,8 @@ pub fn loan_approved(env: &Env, loan_id: u32) {
     env.events().publish(topics, ());
 }
 
-pub fn loan_repaid(env: &Env, borrower: Address, amount: i128) {
-    let topics = (Symbol::new(env, "LoanRepaid"), borrower);
+pub fn loan_repaid(env: &Env, borrower: Address, loan_id: u32, amount: i128) {
+    let topics = (Symbol::new(env, "LoanRepaid"), borrower, loan_id);
     env.events().publish(topics, amount);
 }
 

@@ -27,11 +27,7 @@ impl LendingPool {
     }
 
     fn assert_not_paused(env: &Env) {
-        let paused: bool = env
-            .storage()
-            .instance()
-            .get(&DataKey::Paused)
-            .unwrap_or(false);
+        let paused: bool = env.storage().instance().get(&DataKey::Paused).unwrap_or(false);
         if paused {
             panic!("contract is paused");
         }
@@ -50,7 +46,7 @@ impl LendingPool {
     pub fn deposit(env: Env, provider: Address, amount: i128) {
         provider.require_auth();
         Self::assert_not_paused(&env);
-
+        
         if amount <= 0 {
             panic!("deposit amount must be positive");
         }
@@ -117,7 +113,8 @@ impl LendingPool {
         admin.require_auth();
 
         env.storage().instance().set(&DataKey::Paused, &true);
-        env.events().publish((symbol_short!("Paused"),), ());
+        env.events()
+            .publish((symbol_short!("Paused"),), ());
     }
 
     pub fn unpause(env: Env) {
@@ -129,7 +126,8 @@ impl LendingPool {
         admin.require_auth();
 
         env.storage().instance().set(&DataKey::Paused, &false);
-        env.events().publish((symbol_short!("Unpaused"),), ());
+        env.events()
+            .publish((symbol_short!("Unpaused"),), ());
     }
 }
 

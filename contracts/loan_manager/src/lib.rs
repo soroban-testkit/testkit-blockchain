@@ -1,12 +1,14 @@
 #![no_std]
 use soroban_sdk::{
-    contract, contractclient, contractimpl, contracttype, symbol_short, Address, Env,
+    contract, contractclient, contractimpl, contracttype, symbol_short, Address, Env, Vec,
 };
 
 #[contractclient(name = "NftClient")]
 pub trait RemittanceNftInterface {
     fn get_score(env: Env, user: Address) -> u32;
     fn update_score(env: Env, user: Address, repayment_amount: i128, minter: Option<Address>);
+    fn seize_collateral(env: Env, user: Address, minter: Option<Address>);
+    fn is_seized(env: Env, user: Address) -> bool;
 }
 
 mod events;
@@ -416,6 +418,81 @@ impl LoanManager {
         env.storage().instance().set(&DataKey::Paused, &false);
         Self::bump_instance_ttl(&env);
         events::unpaused(&env);
+    }
+
+    pub fn check_default(env: Env, loan_id: u32) {
+        let admin: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .expect("not initialized");
+        admin.require_auth();
+        Self::assert_not_paused(&env);
+
+        let loan_key = DataKey::Loan(loan_id);
+        let mut loan: Loan = env
+            .storage()
+            .persistent()
+            .get(&loan_key)
+            .expect("loan not found");
+        Self::bump_persistent_ttl(&env, &loan_key);
+
+        if loan.status != LoanStatus::Approved {
+            panic!("loan is not active");
+        }
+
+        let current_ledger = env.ledger().sequence();
+        if current_ledger <= loan.due_date {
+            panic!("loan is not past due");
+        }
+
+        loan.status = LoanStatus::Defaulted;
+        env.storage().persistent().set(&loan_key, &loan);
+        Self::bump_persistent_ttl(&env, &loan_key);
+
+        let nft_contract = Self::nft_contract(&env);
+        let nft_client = NftClient::new(&env, &nft_contract);
+        nft_client.seize_collateral(&loan.borrower, &None);
+
+        events::loan_defaulted(&env, loan_id, loan.borrower.clone());
+    }
+
+    pub fn check_defaults(env: Env, loan_ids: Vec<u32>) {
+        let admin: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .expect("not initialized");
+        admin.require_auth();
+        Self::assert_not_paused(&env);
+
+        for loan_id in loan_ids.iter() {
+            let loan_key = DataKey::Loan(loan_id);
+            let mut loan: Loan = match env.storage().persistent().get(&loan_key) {
+                Some(l) => l,
+                None => continue,
+            };
+            Self::bump_persistent_ttl(&env, &loan_key);
+
+            if loan.status != LoanStatus::Approved {
+                continue;
+            }
+
+            let current_ledger = env.ledger().sequence();
+            if current_ledger <= loan.due_date {
+                continue;
+            }
+
+            loan.status = LoanStatus::Defaulted;
+            env.storage().persistent().set(&loan_key, &loan);
+            Self::bump_persistent_ttl(&env, &loan_key);
+
+            let nft_contract = Self::nft_contract(&env);
+            let nft_client = NftClient::new(&env, &nft_contract);
+            nft_client.seize_collateral(&loan.borrower, &None);
+
+            events::loan_defaulted(&env, loan_id, loan.borrower.clone());
+        }
     }
 }
 

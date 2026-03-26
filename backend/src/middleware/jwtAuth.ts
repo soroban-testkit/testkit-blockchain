@@ -19,7 +19,13 @@ export const requireJwtAuth = (
 ): void => {
   const authHeader = req.headers.authorization;
 
-  const token = extractBearerToken(authHeader);
+  // For SSE connections the browser's EventSource API cannot set custom
+  // headers, so we also accept the token as a `?token=` query parameter.
+  // We prioritise the Authorization header when both are present.
+  const rawQueryToken =
+    typeof req.query.token === "string" ? req.query.token : undefined;
+
+  const token = extractBearerToken(authHeader) ?? rawQueryToken ?? null;
   if (!token) {
     throw AppError.unauthorized("Missing or invalid Authorization header");
   }
@@ -58,7 +64,10 @@ export const requireWalletOwnership = (
   _res: Response,
   next: NextFunction,
 ): void => {
-  const requestedWallet = req.params.wallet || req.body.wallet;
+  const requestedWallet =
+    req.params.borrower ??
+    req.params.wallet ??
+    (req.body as { wallet?: string } | undefined)?.wallet;
   const authenticatedWallet = req.user?.publicKey;
 
   if (!authenticatedWallet) {
@@ -74,6 +83,32 @@ export const requireWalletOwnership = (
   }
 
   next();
+};
+
+/**
+ * Ensures a path param (e.g. `userId` on GET /score/:userId) matches the JWT wallet.
+ */
+export const requireWalletParamMatchesJwt = (paramName: string) => {
+  return (req: Request, _res: Response, next: NextFunction): void => {
+    const requested = req.params[paramName];
+    const authenticatedWallet = req.user?.publicKey;
+
+    if (!authenticatedWallet) {
+      throw AppError.unauthorized("Authentication required");
+    }
+
+    if (!requested) {
+      throw AppError.badRequest(`${paramName} is required`);
+    }
+
+    if (requested !== authenticatedWallet) {
+      throw AppError.forbidden(
+        "You are not authorized to access this resource",
+      );
+    }
+
+    next();
+  };
 };
 
 export const requireBorrower = (

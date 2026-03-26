@@ -6,6 +6,7 @@ import {
   type IndexedLoanEvent,
   type WebhookEventType,
 } from "./webhookService.js";
+import { notificationService } from "./notificationService.js";
 
 interface IndexerConfig {
   rpcUrl: string;
@@ -19,7 +20,6 @@ interface LoanEvent extends IndexedLoanEvent {
   eventType: WebhookEventType;
   loanId?: number;
   borrower: string;
-  amount?: string;
   ledger: number;
   ledgerClosedAt: Date;
   txHash: string;
@@ -94,19 +94,42 @@ export class EventIndexer {
           continue;
         const type = this.decodeEventType(e.topic[0]);
         if (!type) continue;
+
+        let borrower = "";
+        let loanId: number | undefined;
+        let amount: string | undefined;
+
+        if (type === "LoanRequested") {
+          borrower = this.decodeAddress(e.topic[1]);
+          amount = this.decodeAmount(e.value);
+        } else if (type === "LoanApproved") {
+          loanId = this.decodeLoanId(e.topic[1]);
+          if (loanId === undefined) continue;
+        } else if (type === "LoanRepaid") {
+          if (!e.topic[2]) continue;
+          borrower = this.decodeAddress(e.topic[1]);
+          loanId = this.decodeLoanId(e.topic[2]);
+          if (loanId === undefined) continue;
+          amount = this.decodeAmount(e.value);
+        } else if (type === "LoanDefaulted") {
+          loanId = this.decodeLoanId(e.topic[1]);
+          if (loanId === undefined) continue;
+          borrower = this.decodeAddress(e.value);
+        }
+
         const evt: LoanEvent = {
           eventId: e.id,
           eventType: type,
-          borrower: this.decodeAddress(e.topic[1]),
+          borrower,
           ledger: e.ledger,
           ledgerClosedAt: new Date(e.ledgerClosedAt),
           txHash: e.txHash,
           contractId: e.contractId.toString(),
           topics: e.topic.map((t) => t.toXDR("base64")),
           value: e.value.toXDR("base64"),
-          amount: this.decodeAmount(e.value),
+          ...(amount !== undefined ? { amount } : {}),
+          ...(loanId !== undefined ? { loanId } : {}),
         };
-        if (e.topic[2]) evt.loanId = this.decodeLoanId(e.topic[2]);
         result.push(evt);
       } catch (err) {
         logger.error("Process event error", { err });
@@ -150,6 +173,15 @@ export class EventIndexer {
       }
       await query("COMMIT", []);
 
+      // Create in-app notifications (fire-and-forget, outside DB transaction)
+      await Promise.all(
+        events.map((event) =>
+          this.createNotificationForEvent(event).catch((err) => {
+            logger.error("Notification creation error", { err, eventId: event.eventId });
+          }),
+        ),
+      );
+
       await Promise.all(
         events.map((event) =>
           webhookService.deliverEvent(event).catch((error) => {
@@ -166,17 +198,79 @@ export class EventIndexer {
     }
   }
 
+  private async createNotificationForEvent(event: LoanEvent): Promise<void> {
+    if (!event.borrower) return;
+
+    type NotifParams = Parameters<typeof notificationService.createNotification>[0];
+    let params: NotifParams | null = null;
+
+    switch (event.eventType) {
+      case "LoanApproved":
+        params = {
+          userId: event.borrower,
+          type: "loan_approved",
+          title: "Loan Approved",
+          message: event.loanId
+            ? `Your loan #${event.loanId} has been approved.`
+            : "Your loan has been approved.",
+          loanId: event.loanId,
+        };
+        break;
+      case "LoanRepaid":
+        params = {
+          userId: event.borrower,
+          type: "repayment_confirmed",
+          title: "Repayment Confirmed",
+          message: event.loanId
+            ? `Repayment for loan #${event.loanId} has been confirmed.`
+            : "Your loan repayment has been confirmed.",
+          loanId: event.loanId,
+        };
+        break;
+      case "LoanDefaulted":
+        params = {
+          userId: event.borrower,
+          type: "loan_defaulted",
+          title: "Loan Defaulted",
+          message: event.loanId
+            ? `Loan #${event.loanId} has been marked as defaulted.`
+            : "A loan has been marked as defaulted.",
+          loanId: event.loanId,
+        };
+        break;
+      default:
+        // LoanRequested does not need a notification (user triggered it)
+        return;
+    }
+
+    if (params) {
+      await notificationService.createNotification(params);
+    }
+  }
+
   private async updateUserScore(userId: string, delta: number): Promise<void> {
-    await query(
+    const result = await query(
       `INSERT INTO scores (user_id, current_score)
        VALUES ($1, $2)
        ON CONFLICT (user_id) 
        DO UPDATE SET 
          current_score = LEAST(850, GREATEST(300, scores.current_score + $3)),
-         updated_at = CURRENT_TIMESTAMP`,
+         updated_at = CURRENT_TIMESTAMP
+       RETURNING current_score`,
       [userId, 500 + delta, delta],
     );
     logger.info("Updated user score from indexer", { userId, delta });
+
+    // Notify user about score change
+    const newScore = result.rows[0]?.current_score as number | undefined;
+    if (newScore !== undefined) {
+      await notificationService.createNotification({
+        userId,
+        type: "score_changed",
+        title: "Credit Score Updated",
+        message: `Your credit score has been updated to ${newScore}.`,
+      }).catch((err) => logger.error("Score notification error", { err, userId }));
+    }
   }
 
   private async getIndexerState() {
@@ -184,7 +278,14 @@ export class EventIndexer {
       "SELECT last_indexed_ledger, last_indexed_cursor FROM indexer_state ORDER BY id DESC LIMIT 1",
       [],
     );
-    return r.rows[0] || { lastIndexedLedger: 0, lastIndexedCursor: null };
+    const row = r.rows[0] as
+      | { last_indexed_ledger?: number; last_indexed_cursor?: string | null }
+      | undefined;
+
+    return {
+      lastIndexedLedger: row?.last_indexed_ledger ?? 0,
+      lastIndexedCursor: row?.last_indexed_cursor ?? null,
+    };
   }
 
   private async updateIndexerState(ledger: number, cursor: string) {
@@ -194,13 +295,13 @@ export class EventIndexer {
     );
   }
 
-  private encodeSymbol(s: string) {
-    return xdr.ScVal.scvSymbol(s).toXDR("base64");
-  }
   private decodeEventType(x: xdr.ScVal): WebhookEventType | null {
     try {
       const s = x.sym().toString();
-      return s === "LoanRequested" || s === "LoanApproved" || s === "LoanRepaid"
+      return s === "LoanRequested" ||
+        s === "LoanApproved" ||
+        s === "LoanRepaid" ||
+        s === "LoanDefaulted"
         ? s
         : null;
     } catch {
@@ -214,18 +315,18 @@ export class EventIndexer {
       return "";
     }
   }
-  private decodeAmount(x: xdr.ScVal): string {
+  private decodeAmount(x: xdr.ScVal): string | undefined {
     try {
       return x.i128().toString();
     } catch {
-      return "0";
+      return undefined;
     }
   }
-  private decodeLoanId(x: xdr.ScVal): number {
+  private decodeLoanId(x: xdr.ScVal): number | undefined {
     try {
       return x.u32();
     } catch {
-      return 0;
+      return undefined;
     }
   }
 }

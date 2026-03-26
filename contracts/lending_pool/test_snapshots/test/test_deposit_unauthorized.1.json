@@ -218,6 +218,21 @@
                         "key": {
                           "vec": [
                             {
+                              "symbol": "MaxPoolSize"
+                            }
+                          ]
+                        },
+                        "val": {
+                          "i128": {
+                            "hi": 0,
+                            "lo": 0
+                          }
+                        }
+                      },
+                      {
+                        "key": {
+                          "vec": [
+                            {
                               "symbol": "Paused"
                             }
                           ]

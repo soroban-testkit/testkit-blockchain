@@ -12,6 +12,7 @@ pub enum DataKey {
     Paused,
     RewardDebt(Address),
     ClaimableYield(Address),
+    MaxPoolSize,
     TotalDeposits,
     AccYieldPerDeposit,
     UnclaimedYieldPool,
@@ -225,6 +226,13 @@ impl LendingPool {
         }
     }
 
+    fn read_total_deposits(env: &Env) -> i128 {
+        env.storage()
+            .instance()
+            .get(&DataKey::TotalDeposits)
+            .unwrap_or(0)
+    }
+
     pub fn initialize(env: Env, token: Address, admin: Address) {
         let token_key = Self::token_key();
         if env.storage().instance().has(&token_key) {
@@ -236,6 +244,7 @@ impl LendingPool {
         env.storage()
             .instance()
             .set(&DataKey::TotalDeposits, &0i128);
+        env.storage().instance().set(&DataKey::MaxPoolSize, &0i128);
         env.storage()
             .instance()
             .set(&DataKey::AccYieldPerDeposit, &0i128);
@@ -265,30 +274,62 @@ impl LendingPool {
     pub fn migrate(env: Env) {
         Self::admin(&env).require_auth();
 
-        let current_version: u32 = env.storage().instance().get(&DataKey::Version).unwrap_or(0);
-
-        if current_version < Self::CURRENT_VERSION {
-            if !env.storage().instance().has(&DataKey::TotalDeposits) {
-                env.storage()
-                    .instance()
-                    .set(&DataKey::TotalDeposits, &0i128);
-            }
-            if !env.storage().instance().has(&DataKey::AccYieldPerDeposit) {
-                env.storage()
-                    .instance()
-                    .set(&DataKey::AccYieldPerDeposit, &0i128);
-            }
-            if !env.storage().instance().has(&DataKey::UnclaimedYieldPool) {
-                env.storage()
-                    .instance()
-                    .set(&DataKey::UnclaimedYieldPool, &0i128);
-            }
+        if !env.storage().instance().has(&DataKey::TotalDeposits) {
             env.storage()
                 .instance()
-                .set(&DataKey::Version, &Self::CURRENT_VERSION);
+                .set(&DataKey::TotalDeposits, &0i128);
         }
+        if !env.storage().instance().has(&DataKey::MaxPoolSize) {
+            env.storage().instance().set(&DataKey::MaxPoolSize, &0i128);
+        }
+        if !env.storage().instance().has(&DataKey::AccYieldPerDeposit) {
+            env.storage()
+                .instance()
+                .set(&DataKey::AccYieldPerDeposit, &0i128);
+        }
+        if !env.storage().instance().has(&DataKey::UnclaimedYieldPool) {
+            env.storage()
+                .instance()
+                .set(&DataKey::UnclaimedYieldPool, &0i128);
+        }
+        env.storage()
+            .instance()
+            .set(&DataKey::Version, &Self::CURRENT_VERSION);
 
         Self::bump_instance_ttl(&env);
+    }
+
+    /// Admin-only: set the maximum total deposits the pool will accept.
+    /// Pass `0` to remove the cap entirely.
+    pub fn set_max_pool_size(env: Env, max: i128) {
+        let admin: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .expect("not initialized");
+        admin.require_auth();
+
+        if max < 0 {
+            panic!("max pool size must be non-negative");
+        }
+        env.storage().instance().set(&DataKey::MaxPoolSize, &max);
+        Self::bump_instance_ttl(&env);
+        env.events().publish((symbol_short!("MaxPool"),), max);
+    }
+
+    /// Returns the current max pool size cap (0 = no cap).
+    pub fn get_max_pool_size(env: Env) -> i128 {
+        Self::bump_instance_ttl(&env);
+        env.storage()
+            .instance()
+            .get(&DataKey::MaxPoolSize)
+            .unwrap_or(0)
+    }
+
+    /// Returns the current sum of all provider deposits.
+    pub fn get_total_deposits(env: Env) -> i128 {
+        Self::bump_instance_ttl(&env);
+        Self::read_total_deposits(&env)
     }
 
     pub fn deposit(env: Env, provider: Address, amount: i128) {
@@ -297,6 +338,20 @@ impl LendingPool {
 
         if amount <= 0 {
             panic!("deposit amount must be positive");
+        }
+
+        // Enforce max pool size cap when set (non-zero).
+        let max: i128 = env
+            .storage()
+            .instance()
+            .get(&DataKey::MaxPoolSize)
+            .unwrap_or(0);
+        if max > 0 {
+            let total = Self::read_total_deposits(&env);
+            let new_total = total.checked_add(amount).expect("deposit overflow");
+            if new_total > max {
+                panic!("deposit exceeds max pool size");
+            }
         }
 
         Self::sync_yield(&env);
@@ -327,7 +382,6 @@ impl LendingPool {
             .and_then(|value| value.checked_div(Self::YIELD_SCALE))
             .expect("reward debt overflow");
         Self::write_reward_debt(&env, &provider, reward_debt);
-
         env.events()
             .publish((symbol_short!("Deposit"), provider), amount);
     }
@@ -370,14 +424,6 @@ impl LendingPool {
         let new_balance = current_balance
             .checked_sub(amount)
             .expect("withdraw underflow");
-        let total_deposits = Self::total_deposits(&env)
-            .checked_sub(amount)
-            .expect("total deposits underflow");
-        env.storage()
-            .instance()
-            .set(&DataKey::TotalDeposits, &total_deposits);
-        Self::bump_instance_ttl(&env);
-
         if new_balance == 0 {
             env.storage().persistent().remove(&key);
             env.storage()
@@ -392,6 +438,15 @@ impl LendingPool {
                 .expect("reward debt overflow");
             Self::write_reward_debt(&env, &provider, reward_debt);
         }
+
+        let new_total = Self::read_total_deposits(&env)
+            .checked_sub(amount)
+            .expect("total deposits underflow");
+        env.storage()
+            .instance()
+            .set(&DataKey::TotalDeposits, &new_total);
+        Self::bump_instance_ttl(&env);
+
         env.events()
             .publish((symbol_short!("Withdraw"), provider), amount);
     }
@@ -490,4 +545,3 @@ impl LendingPool {
 
 #[cfg(test)]
 mod test;
-

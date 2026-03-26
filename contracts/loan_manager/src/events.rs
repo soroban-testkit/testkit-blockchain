@@ -25,6 +25,11 @@ pub fn loan_rejected(env: &Env, loan_id: u32, reason: String) {
     env.events().publish(topics, reason);
 }
 
+pub fn late_fee_charged(env: &Env, loan_id: u32, fee_amount: i128) {
+    let topics = (Symbol::new(env, "LateFeeCharged"), loan_id);
+    env.events().publish(topics, fee_amount);
+}
+
 pub fn paused(env: &Env) {
     let topics = (Symbol::new(env, "Paused"),);
     env.events().publish(topics, ());
@@ -53,4 +58,9 @@ pub fn default_term_updated(env: &Env, old_term: u32, new_term: u32) {
 pub fn loan_defaulted(env: &Env, loan_id: u32, borrower: Address) {
     let topics = (Symbol::new(env, "LoanDefaulted"), loan_id);
     env.events().publish(topics, borrower);
+}
+
+pub fn term_limits_updated(env: &Env, min_term: u32, max_term: u32) {
+    let topics = (Symbol::new(env, "TermLimitsUpdated"),);
+    env.events().publish(topics, (min_term, max_term));
 }

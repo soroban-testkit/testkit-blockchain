@@ -1,5 +1,5 @@
 use super::*;
-use soroban_sdk::{testutils::Address as _, Address, BytesN, Env};
+use soroban_sdk::{testutils::Address as _, testutils::Ledger as _, Address, BytesN, Env};
 
 fn create_test_hash(env: &Env, value: u8) -> BytesN<32> {
     let mut hash_bytes = [0u8; 32];
@@ -477,4 +477,150 @@ fn test_seize_collateral_already_seized() {
 
     client.seize_collateral(&user, &None);
     client.seize_collateral(&user, &None);
+}
+
+#[test]
+fn test_get_score_history_for_unknown_user_is_empty() {
+    let env = Env::default();
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+
+    let contract_id = env.register(RemittanceNFT, ());
+    let client = RemittanceNFTClient::new(&env, &contract_id);
+
+    client.initialize(&admin);
+
+    let history = client.get_score_history(&user);
+    assert_eq!(history.len(), 0);
+}
+
+#[test]
+fn test_score_history_tracks_and_caps_recent_updates() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+
+    let contract_id = env.register(RemittanceNFT, ());
+    let client = RemittanceNFTClient::new(&env, &contract_id);
+
+    client.initialize(&admin);
+    client.mint(&user, &500, &create_test_hash(&env, 7), &None);
+
+    for sequence in 1..=12u32 {
+        env.ledger().set_sequence_number(sequence);
+        client.update_score(&user, &100, &None);
+    }
+
+    let history = client.get_score_history(&user);
+    assert_eq!(history.len(), 10);
+
+    let first = history.get(0).unwrap();
+    assert_eq!(
+        first,
+        ScoreHistoryEntry {
+            ledger: 3,
+            old_score: 502,
+            new_score: 503,
+            reason: symbol_short!("REPAY"),
+        }
+    );
+
+    let last = history.get(9).unwrap();
+    assert_eq!(
+        last,
+        ScoreHistoryEntry {
+            ledger: 12,
+            old_score: 511,
+            new_score: 512,
+            reason: symbol_short!("REPAY"),
+        }
+    );
+}
+
+#[test]
+#[should_panic(expected = "burned user requires admin approval to remint")]
+fn test_burn_blocks_authorized_remint_without_admin_approval() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let admin = Address::generate(&env);
+    let authorized_minter = Address::generate(&env);
+    let user = Address::generate(&env);
+
+    let contract_id = env.register(RemittanceNFT, ());
+    let client = RemittanceNFTClient::new(&env, &contract_id);
+
+    client.initialize(&admin);
+    client.authorize_minter(&authorized_minter);
+    client.mint(&user, &500, &create_test_hash(&env, 4), &None);
+
+    client.burn(&user, &None);
+    assert!(client.get_metadata(&user).is_none());
+
+    client.mint(
+        &user,
+        &650,
+        &create_test_hash(&env, 5),
+        &Some(authorized_minter),
+    );
+}
+
+#[test]
+fn test_approve_remint_allows_authorized_minter_remint() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let admin = Address::generate(&env);
+    let authorized_minter = Address::generate(&env);
+    let user = Address::generate(&env);
+
+    let contract_id = env.register(RemittanceNFT, ());
+    let client = RemittanceNFTClient::new(&env, &contract_id);
+
+    client.initialize(&admin);
+    client.authorize_minter(&authorized_minter);
+    client.mint(&user, &500, &create_test_hash(&env, 4), &None);
+
+    client.burn(&user, &None);
+    client.approve_remint(&user);
+    client.mint(
+        &user,
+        &650,
+        &create_test_hash(&env, 5),
+        &Some(authorized_minter),
+    );
+
+    let metadata = client.get_metadata(&user).unwrap();
+    assert_eq!(metadata.score, 650);
+    assert_eq!(metadata.history_hash, create_test_hash(&env, 5));
+    assert!(!client.is_seized(&user));
+}
+
+#[test]
+fn test_record_default_auto_burns_after_threshold() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+
+    let contract_id = env.register(RemittanceNFT, ());
+    let client = RemittanceNFTClient::new(&env, &contract_id);
+
+    client.initialize(&admin);
+    client.set_default_burn_threshold(&2);
+    client.mint(&user, &500, &create_test_hash(&env, 6), &None);
+
+    client.record_default(&user, &None);
+    assert_eq!(client.get_default_count(&user), 1);
+    assert!(client.is_seized(&user));
+    assert!(client.get_metadata(&user).is_some());
+
+    client.record_default(&user, &None);
+    assert_eq!(client.get_default_count(&user), 2);
+    assert!(client.get_metadata(&user).is_none());
+    assert_eq!(client.get_score(&user), 0);
+    assert!(!client.is_seized(&user));
 }

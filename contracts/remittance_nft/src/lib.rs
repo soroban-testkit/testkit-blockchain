@@ -1,5 +1,7 @@
 #![cfg_attr(not(test), no_std)]
-use soroban_sdk::{contract, contractimpl, contracttype, symbol_short, Address, BytesN, Env};
+use soroban_sdk::{
+    contract, contractimpl, contracttype, symbol_short, Address, BytesN, Env, Symbol, Vec,
+};
 
 #[contracttype]
 #[derive(Clone)]
@@ -9,12 +11,25 @@ pub struct RemittanceMetadata {
 }
 
 #[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ScoreHistoryEntry {
+    pub ledger: u32,
+    pub old_score: u32,
+    pub new_score: u32,
+    pub reason: Symbol,
+}
+
+#[contracttype]
 #[derive(Clone)]
 pub enum DataKey {
     Metadata(Address),
     Score(Address),
     AuthorizedMinter(Address),
     Seized(Address),
+    ScoreHistory(Address),
+    DefaultCount(Address),
+    Burned(Address),
+    RemintApproval(Address),
 }
 
 #[contract]
@@ -26,9 +41,15 @@ impl RemittanceNFT {
     const INSTANCE_TTL_BUMP: u32 = 518400;
     const PERSISTENT_TTL_THRESHOLD: u32 = 17280;
     const PERSISTENT_TTL_BUMP: u32 = 518400;
+    const DEFAULT_BURN_THRESHOLD: u32 = 3;
+    const MAX_SCORE_HISTORY: u32 = 10;
 
     fn admin_key() -> soroban_sdk::Symbol {
         symbol_short!("ADMIN")
+    }
+
+    fn burn_threshold_key() -> soroban_sdk::Symbol {
+        symbol_short!("BURNTHR")
     }
 
     fn bump_instance_ttl(env: &Env) {
@@ -97,12 +118,106 @@ impl RemittanceNFT {
         None
     }
 
+    fn get_score_history_or_default(env: &Env, user: &Address) -> Vec<ScoreHistoryEntry> {
+        let key = DataKey::ScoreHistory(user.clone());
+        if let Some(history) = env.storage().persistent().get(&key) {
+            Self::bump_persistent_ttl(env, &key);
+            history
+        } else {
+            Vec::new(env)
+        }
+    }
+
+    fn write_score_history(env: &Env, user: &Address, history: Vec<ScoreHistoryEntry>) {
+        let key = DataKey::ScoreHistory(user.clone());
+        env.storage().persistent().set(&key, &history);
+        Self::bump_persistent_ttl(env, &key);
+    }
+
+    fn append_score_history(
+        env: &Env,
+        user: &Address,
+        old_score: u32,
+        new_score: u32,
+        reason: Symbol,
+    ) {
+        let current_history = Self::get_score_history_or_default(env, user);
+        let mut next_history = Vec::new(env);
+        let current_len = current_history.len();
+        let keep_from = current_len.saturating_sub(Self::MAX_SCORE_HISTORY - 1);
+
+        for (idx, entry) in current_history.iter().enumerate() {
+            if (idx as u32) >= keep_from {
+                next_history.push_back(entry);
+            }
+        }
+
+        next_history.push_back(ScoreHistoryEntry {
+            ledger: env.ledger().sequence(),
+            old_score,
+            new_score,
+            reason,
+        });
+        Self::write_score_history(env, user, next_history);
+    }
+
+    fn has_active_nft(env: &Env, user: &Address) -> bool {
+        let metadata_key = DataKey::Metadata(user.clone());
+        if env.storage().persistent().has(&metadata_key) {
+            Self::bump_persistent_ttl(env, &metadata_key);
+            return true;
+        }
+
+        let score_key = DataKey::Score(user.clone());
+        let has_legacy = env.storage().persistent().has(&score_key);
+        if has_legacy {
+            Self::bump_persistent_ttl(env, &score_key);
+        }
+        has_legacy
+    }
+
+    fn default_burn_threshold(env: &Env) -> u32 {
+        let key = Self::burn_threshold_key();
+        Self::bump_instance_ttl(env);
+        env.storage()
+            .instance()
+            .get(&key)
+            .unwrap_or(Self::DEFAULT_BURN_THRESHOLD)
+    }
+
+    fn burn_internal(env: &Env, user: &Address) {
+        env.storage()
+            .persistent()
+            .remove(&DataKey::Metadata(user.clone()));
+        env.storage()
+            .persistent()
+            .remove(&DataKey::Score(user.clone()));
+        env.storage()
+            .persistent()
+            .remove(&DataKey::ScoreHistory(user.clone()));
+        env.storage()
+            .persistent()
+            .remove(&DataKey::Seized(user.clone()));
+        env.storage()
+            .persistent()
+            .remove(&DataKey::RemintApproval(user.clone()));
+
+        let burned_key = DataKey::Burned(user.clone());
+        env.storage().persistent().set(&burned_key, &true);
+        Self::bump_persistent_ttl(env, &burned_key);
+        env.events()
+            .publish((symbol_short!("NftBurned"), user.clone()), ());
+    }
+
     pub fn initialize(env: Env, admin: Address) {
         let admin_key = Self::admin_key();
         if env.storage().instance().has(&admin_key) {
             panic!("already initialized");
         }
         env.storage().instance().set(&admin_key, &admin);
+        env.storage()
+            .instance()
+            .set(&Self::burn_threshold_key(), &Self::DEFAULT_BURN_THRESHOLD);
         Self::bump_instance_ttl(&env);
         // Admin is automatically authorized to mint
         let key = DataKey::AuthorizedMinter(admin.clone());
@@ -149,16 +264,33 @@ impl RemittanceNFT {
         history_hash: BytesN<32>,
         minter: Option<Address>,
     ) {
+        let admin_direct_mint = minter.is_none();
         Self::require_admin_or_authorized_minter(&env, minter);
 
         let metadata_key = DataKey::Metadata(user.clone());
         let score_key = DataKey::Score(user.clone());
+        let burned_key = DataKey::Burned(user.clone());
 
         // Check if user already has an NFT (either new format or legacy)
         if env.storage().persistent().has(&metadata_key)
             || env.storage().persistent().has(&score_key)
         {
             panic!("user already has an NFT");
+        }
+
+        if env.storage().persistent().has(&burned_key) {
+            let remint_approval_key = DataKey::RemintApproval(user.clone());
+            let has_approval = env.storage().persistent().has(&remint_approval_key);
+
+            if !admin_direct_mint && !has_approval {
+                panic!("burned user requires admin approval to remint");
+            }
+
+            env.storage().persistent().remove(&burned_key);
+            env.storage().persistent().remove(&remint_approval_key);
+            env.storage()
+                .persistent()
+                .remove(&DataKey::Seized(user.clone()));
         }
 
         let metadata = RemittanceMetadata {
@@ -204,10 +336,18 @@ impl RemittanceNFT {
         if points == 0 {
             return;
         }
+        let old_score = metadata.score;
         metadata.score = metadata.score.checked_add(points).expect("score overflow");
 
         env.storage().persistent().set(&metadata_key, &metadata);
         Self::bump_persistent_ttl(&env, &metadata_key);
+        Self::append_score_history(
+            &env,
+            &user,
+            old_score,
+            metadata.score,
+            symbol_short!("REPAY"),
+        );
         env.events()
             .publish((symbol_short!("ScoreUpd"), user), metadata.score);
     }
@@ -262,6 +402,47 @@ impl RemittanceNFT {
         env.events().publish((symbol_short!("Seized"), user), ());
     }
 
+    pub fn record_default(env: Env, user: Address, minter: Option<Address>) {
+        Self::require_admin_or_authorized_minter(&env, minter);
+
+        if !Self::has_active_nft(&env, &user) {
+            panic!("user does not have an NFT");
+        }
+
+        let default_key = DataKey::DefaultCount(user.clone());
+        let updated_count = env
+            .storage()
+            .persistent()
+            .get::<DataKey, u32>(&default_key)
+            .unwrap_or(0)
+            .checked_add(1)
+            .expect("default count overflow");
+        env.storage().persistent().set(&default_key, &updated_count);
+        Self::bump_persistent_ttl(&env, &default_key);
+
+        let seized_key = DataKey::Seized(user.clone());
+        if !env.storage().persistent().has(&seized_key) {
+            env.storage().persistent().set(&seized_key, &true);
+            Self::bump_persistent_ttl(&env, &seized_key);
+            env.events()
+                .publish((symbol_short!("Seized"), user.clone()), ());
+        }
+
+        if updated_count >= Self::default_burn_threshold(&env) {
+            Self::burn_internal(&env, &user);
+        }
+    }
+
+    pub fn burn(env: Env, user: Address, minter: Option<Address>) {
+        Self::require_admin_or_authorized_minter(&env, minter);
+
+        if !Self::has_active_nft(&env, &user) {
+            panic!("user does not have an NFT");
+        }
+
+        Self::burn_internal(&env, &user);
+    }
+
     pub fn is_seized(env: Env, user: Address) -> bool {
         let seized_key = DataKey::Seized(user.clone());
         let is_seized = env.storage().persistent().has(&seized_key);
@@ -269,6 +450,43 @@ impl RemittanceNFT {
             Self::bump_persistent_ttl(&env, &seized_key);
         }
         is_seized
+    }
+
+    pub fn get_default_count(env: Env, user: Address) -> u32 {
+        let key = DataKey::DefaultCount(user);
+        let count = env.storage().persistent().get(&key).unwrap_or(0);
+        if count > 0 {
+            Self::bump_persistent_ttl(&env, &key);
+        }
+        count
+    }
+
+    pub fn approve_remint(env: Env, user: Address) {
+        Self::admin(&env).require_auth();
+
+        let approval_key = DataKey::RemintApproval(user);
+        env.storage().persistent().set(&approval_key, &true);
+        Self::bump_persistent_ttl(&env, &approval_key);
+    }
+
+    pub fn set_default_burn_threshold(env: Env, threshold: u32) {
+        if threshold == 0 {
+            panic!("default burn threshold must be positive");
+        }
+        Self::admin(&env).require_auth();
+
+        env.storage()
+            .instance()
+            .set(&Self::burn_threshold_key(), &threshold);
+        Self::bump_instance_ttl(&env);
+    }
+
+    pub fn get_default_burn_threshold(env: Env) -> u32 {
+        Self::default_burn_threshold(&env)
+    }
+
+    pub fn get_score_history(env: Env, user: Address) -> Vec<ScoreHistoryEntry> {
+        Self::get_score_history_or_default(&env, &user)
     }
 }
 

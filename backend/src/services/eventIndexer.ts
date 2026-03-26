@@ -1,6 +1,11 @@
 import { rpc, xdr } from "@stellar/stellar-sdk";
 import { query } from "../db/connection.js";
 import logger from "../utils/logger.js";
+import {
+  webhookService,
+  type IndexedLoanEvent,
+  type WebhookEventType,
+} from "./webhookService.js";
 
 interface IndexerConfig {
   rpcUrl: string;
@@ -9,12 +14,11 @@ interface IndexerConfig {
   batchSize: number;
 }
 
-interface LoanEvent {
+interface LoanEvent extends IndexedLoanEvent {
   eventId: string;
-  eventType: "LoanRequested" | "LoanApproved" | "LoanRepaid";
+  eventType: WebhookEventType;
   loanId?: number;
   borrower: string;
-  amount?: string;
   ledger: number;
   ledgerClosedAt: Date;
   txHash: string;
@@ -89,19 +93,42 @@ export class EventIndexer {
           continue;
         const type = this.decodeEventType(e.topic[0]);
         if (!type) continue;
+
+        let borrower = "";
+        let loanId: number | undefined;
+        let amount: string | undefined;
+
+        if (type === "LoanRequested") {
+          borrower = this.decodeAddress(e.topic[1]);
+          amount = this.decodeAmount(e.value);
+        } else if (type === "LoanApproved") {
+          loanId = this.decodeLoanId(e.topic[1]);
+          if (loanId === undefined) continue;
+        } else if (type === "LoanRepaid") {
+          if (!e.topic[2]) continue;
+          borrower = this.decodeAddress(e.topic[1]);
+          loanId = this.decodeLoanId(e.topic[2]);
+          if (loanId === undefined) continue;
+          amount = this.decodeAmount(e.value);
+        } else if (type === "LoanDefaulted") {
+          loanId = this.decodeLoanId(e.topic[1]);
+          if (loanId === undefined) continue;
+          borrower = this.decodeAddress(e.value);
+        }
+
         const evt: LoanEvent = {
           eventId: e.id,
           eventType: type,
-          borrower: this.decodeAddress(e.topic[1]),
+          borrower,
           ledger: e.ledger,
           ledgerClosedAt: new Date(e.ledgerClosedAt),
           txHash: e.txHash,
           contractId: e.contractId.toString(),
           topics: e.topic.map((t) => t.toXDR("base64")),
           value: e.value.toXDR("base64"),
-          amount: this.decodeAmount(e.value),
+          ...(amount !== undefined ? { amount } : {}),
+          ...(loanId !== undefined ? { loanId } : {}),
         };
-        if (e.topic[2]) evt.loanId = this.decodeLoanId(e.topic[2]);
         result.push(evt);
       } catch (err) {
         logger.error("Process event error", { err });
@@ -144,6 +171,17 @@ export class EventIndexer {
         }
       }
       await query("COMMIT", []);
+
+      await Promise.all(
+        events.map((event) =>
+          webhookService.deliverEvent(event).catch((error) => {
+            logger.error("Webhook delivery processing error", {
+              error,
+              eventId: event.eventId,
+            });
+          }),
+        ),
+      );
     } catch (err) {
       await query("ROLLBACK", []);
       throw err;
@@ -168,7 +206,14 @@ export class EventIndexer {
       "SELECT last_indexed_ledger, last_indexed_cursor FROM indexer_state ORDER BY id DESC LIMIT 1",
       [],
     );
-    return r.rows[0] || { lastIndexedLedger: 0, lastIndexedCursor: null };
+    const row = r.rows[0] as
+      | { last_indexed_ledger?: number; last_indexed_cursor?: string | null }
+      | undefined;
+
+    return {
+      lastIndexedLedger: row?.last_indexed_ledger ?? 0,
+      lastIndexedCursor: row?.last_indexed_cursor ?? null,
+    };
   }
 
   private async updateIndexerState(ledger: number, cursor: string) {
@@ -178,15 +223,13 @@ export class EventIndexer {
     );
   }
 
-  private encodeSymbol(s: string) {
-    return xdr.ScVal.scvSymbol(s).toXDR("base64");
-  }
-  private decodeEventType(
-    x: xdr.ScVal,
-  ): "LoanRequested" | "LoanApproved" | "LoanRepaid" | null {
+  private decodeEventType(x: xdr.ScVal): WebhookEventType | null {
     try {
       const s = x.sym().toString();
-      return s === "LoanRequested" || s === "LoanApproved" || s === "LoanRepaid"
+      return s === "LoanRequested" ||
+        s === "LoanApproved" ||
+        s === "LoanRepaid" ||
+        s === "LoanDefaulted"
         ? s
         : null;
     } catch {
@@ -200,18 +243,18 @@ export class EventIndexer {
       return "";
     }
   }
-  private decodeAmount(x: xdr.ScVal): string {
+  private decodeAmount(x: xdr.ScVal): string | undefined {
     try {
       return x.i128().toString();
     } catch {
-      return "0";
+      return undefined;
     }
   }
-  private decodeLoanId(x: xdr.ScVal): number {
+  private decodeLoanId(x: xdr.ScVal): number | undefined {
     try {
       return x.u32();
     } catch {
-      return 0;
+      return undefined;
     }
   }
 }

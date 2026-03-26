@@ -11,6 +11,7 @@ pub trait RemittanceNftInterface {
     fn seize_collateral(env: Env, user: Address, minter: Option<Address>);
     fn is_seized(env: Env, user: Address) -> bool;
     fn record_default(env: Env, user: Address, minter: Option<Address>);
+    fn is_authorized_minter(env: Env, minter: Address) -> bool;
 }
 
 mod events;
@@ -385,6 +386,11 @@ impl LoanManager {
         env.storage().instance().set(&DataKey::Admin, &admin);
         env.storage().instance().set(&DataKey::LoanCounter, &0u32);
         env.storage().instance().set(&DataKey::Paused, &false);
+
+        let nft_client = NftClient::new(&env, &nft_contract);
+        if !nft_client.is_authorized_minter(&env.current_contract_address()) {
+            panic!("LoanManager must be authorized minter on NFT contract");
+        }
         env.storage()
             .instance()
             .set(&DataKey::Version, &Self::CURRENT_VERSION);
@@ -656,7 +662,7 @@ impl LoanManager {
         if amount >= 100 {
             let nft_contract = Self::nft_contract(&env);
             let nft_client = NftClient::new(&env, &nft_contract);
-            nft_client.update_score(&borrower, &amount, &None);
+            nft_client.update_score(&borrower, &amount, &Some(env.current_contract_address()));
         }
 
         if late_fee_delta > 0 {
@@ -1009,7 +1015,7 @@ impl LoanManager {
 
         let nft_contract = Self::nft_contract(&env);
         let nft_client = NftClient::new(&env, &nft_contract);
-        nft_client.record_default(&loan.borrower, &None);
+        nft_client.record_default(&loan.borrower, &Some(env.current_contract_address()));
 
         events::loan_defaulted(&env, loan_id, loan.borrower.clone());
     }
@@ -1043,7 +1049,7 @@ impl LoanManager {
 
             let nft_contract = Self::nft_contract(&env);
             let nft_client = NftClient::new(&env, &nft_contract);
-            nft_client.record_default(&loan.borrower, &None);
+            nft_client.record_default(&loan.borrower, &Some(env.current_contract_address()));
 
             events::loan_defaulted(&env, loan_id, loan.borrower.clone());
         }

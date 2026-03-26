@@ -31,6 +31,9 @@ fn setup_test<'a>(
     let loan_manager_id = env.register(LoanManager, ());
     let loan_manager_client = LoanManagerClient::new(env, &loan_manager_id);
 
+    // Authorize LoanManager on NFT contract before initialization
+    nft_client.authorize_minter(&loan_manager_id);
+
     // 5. Initialize the Loan Manager with the NFT contract, lending pool, token, and admin
     loan_manager_client.initialize(&nft_contract_id, &pool_address, &token_id, &admin);
 

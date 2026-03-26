@@ -47,6 +47,7 @@ impl RemittanceNFT {
     const DEFAULT_BURN_THRESHOLD: u32 = 3;
     const MAX_SCORE_HISTORY: u32 = 10;
     const TRANSFER_COOLDOWN_LEDGERS: u32 = 17280;
+    pub const MAX_SCORE: u32 = 850;
 
     fn admin_key() -> soroban_sdk::Symbol {
         symbol_short!("ADMIN")
@@ -359,7 +360,7 @@ impl RemittanceNFT {
         }
 
         let metadata = RemittanceMetadata {
-            score: initial_score,
+            score: initial_score.min(Self::MAX_SCORE),
             history_hash,
         };
 
@@ -397,12 +398,17 @@ impl RemittanceNFT {
             .unwrap_or_else(|| panic!("user does not have an NFT"));
 
         // Simple logic: 1 point per 100 units of repayment
-        let points = (repayment_amount / 100) as u32;
-        if points == 0 {
+        let points_i128 = repayment_amount / 100;
+        if points_i128 == 0 {
             return;
         }
+        let points = if points_i128 > (Self::MAX_SCORE as i128) {
+            Self::MAX_SCORE
+        } else {
+            points_i128 as u32
+        };
         let old_score = metadata.score;
-        metadata.score = metadata.score.checked_add(points).expect("score overflow");
+        metadata.score = metadata.score.saturating_add(points).min(Self::MAX_SCORE);
 
         env.storage().persistent().set(&metadata_key, &metadata);
         Self::bump_persistent_ttl(&env, &metadata_key);

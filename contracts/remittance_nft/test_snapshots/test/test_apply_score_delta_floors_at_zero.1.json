@@ -19,7 +19,11 @@
                   "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
                 },
                 {
+<<<<<<< HEAD
                   "u32": 350
+=======
+                  "u32": 8
+>>>>>>> 2fa1037 (feat(loan-manager): add grace period, default window, and late repayment score penalty)
                 },
                 {
                   "bytes": "0100000000000000000000000000000000000000000000000000000000000000"
@@ -228,7 +232,11 @@
                         "symbol": "score"
                       },
                       "val": {
+<<<<<<< HEAD
                         "u32": 300
+=======
+                        "u32": 0
+>>>>>>> 2fa1037 (feat(loan-manager): add grace period, default window, and late repayment score penalty)
                       }
                     }
                   ]
@@ -292,7 +300,11 @@
                             "symbol": "new_score"
                           },
                           "val": {
+<<<<<<< HEAD
                             "u32": 300
+=======
+                            "u32": 0
+>>>>>>> 2fa1037 (feat(loan-manager): add grace period, default window, and late repayment score penalty)
                           }
                         },
                         {
@@ -300,7 +312,11 @@
                             "symbol": "old_score"
                           },
                           "val": {
+<<<<<<< HEAD
                             "u32": 350
+=======
+                            "u32": 8
+>>>>>>> 2fa1037 (feat(loan-manager): add grace period, default window, and late repayment score penalty)
                           }
                         },
                         {
@@ -360,6 +376,7 @@
                         "val": {
                           "u32": 3
                         }
+<<<<<<< HEAD
                       },
                       {
                         "key": {
@@ -384,6 +401,8 @@
                         "val": {
                           "u32": 2
                         }
+=======
+>>>>>>> 2fa1037 (feat(loan-manager): add grace period, default window, and late repayment score penalty)
                       }
                     ]
                   }

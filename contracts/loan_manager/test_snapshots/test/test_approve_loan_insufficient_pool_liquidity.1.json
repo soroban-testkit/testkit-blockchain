@@ -835,6 +835,7 @@
                         "key": {
                           "vec": [
                             {
+<<<<<<< HEAD
                               "symbol": "BorrowerLoans"
                             },
                             {
@@ -854,6 +855,8 @@
                         "key": {
                           "vec": [
                             {
+=======
+>>>>>>> 2fa1037 (feat(loan-manager): add grace period, default window, and late repayment score penalty)
                               "symbol": "DefaultWindowLedgers"
                             }
                           ]

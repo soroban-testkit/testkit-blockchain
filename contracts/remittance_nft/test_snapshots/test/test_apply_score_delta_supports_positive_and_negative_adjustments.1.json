@@ -453,6 +453,7 @@
                         "val": {
                           "u32": 3
                         }
+<<<<<<< HEAD
                       },
                       {
                         "key": {
@@ -477,6 +478,8 @@
                         "val": {
                           "u32": 2
                         }
+=======
+>>>>>>> 2fa1037 (feat(loan-manager): add grace period, default window, and late repayment score penalty)
                       }
                     ]
                   }

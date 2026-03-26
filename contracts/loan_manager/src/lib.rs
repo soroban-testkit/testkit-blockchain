@@ -54,6 +54,7 @@ pub enum DataKey {
     Loan(u32),
     LoanCounter,
     MinScore,
+    MinRepaymentAmount,
     MaxLoanAmount,
     MaxLoansPerBorrower,
     BorrowerLoanCount(Address),
@@ -83,6 +84,7 @@ impl LoanManager {
     const MAX_LATE_FEE_CAP_BPS: u32 = 2500;
     const DEFAULT_MAX_LOAN_AMOUNT: i128 = 50_000;
     const DEFAULT_MAX_LOANS_PER_BORROWER: u32 = 3;
+    const DEFAULT_MIN_REPAYMENT_AMOUNT: i128 = 100;
 
     fn bump_instance_ttl(env: &Env) {
         env.storage()
@@ -208,6 +210,14 @@ impl LoanManager {
             .instance()
             .get(&DataKey::MaxLoansPerBorrower)
             .unwrap_or(Self::DEFAULT_MAX_LOANS_PER_BORROWER)
+    }
+
+    fn min_repayment_amount(env: &Env) -> i128 {
+        Self::bump_instance_ttl(env);
+        env.storage()
+            .instance()
+            .get(&DataKey::MinRepaymentAmount)
+            .unwrap_or(Self::DEFAULT_MIN_REPAYMENT_AMOUNT)
     }
 
     fn borrower_loan_count(env: &Env, borrower: &Address) -> u32 {
@@ -610,6 +620,11 @@ impl LoanManager {
             panic!("repayment exceeds current total debt");
         }
 
+        let min_repayment_amount = Self::min_repayment_amount(&env);
+        if amount < total_debt && amount < min_repayment_amount {
+            panic!("repayment amount below minimum");
+        }
+
         let token: Address = env
             .storage()
             .instance()
@@ -849,6 +864,28 @@ impl LoanManager {
 
     pub fn get_max_loan_amount(env: Env) -> i128 {
         Self::max_loan_amount(&env)
+    }
+
+    pub fn set_min_repayment_amount(env: Env, amount: i128) {
+        if amount < 0 {
+            panic!("min repayment amount cannot be negative");
+        }
+
+        let admin: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .expect("not initialized");
+        admin.require_auth();
+
+        env.storage()
+            .instance()
+            .set(&DataKey::MinRepaymentAmount, &amount);
+        Self::bump_instance_ttl(&env);
+    }
+
+    pub fn get_min_repayment_amount(env: Env) -> i128 {
+        Self::min_repayment_amount(&env)
     }
 
     pub fn set_max_loans_per_borrower(env: Env, max_loans: u32) {

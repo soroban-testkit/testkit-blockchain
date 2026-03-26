@@ -294,6 +294,58 @@ fn test_partial_repayment_tracks_split_balances() {
 }
 
 #[test]
+#[should_panic(expected = "repayment amount below minimum")]
+fn test_minimum_repayment_amount_enforced() {
+    let env = Env::default();
+    env.mock_all_auths_allowing_non_root_auth();
+
+    let (manager, nft_client, pool_address, token_id, _token_admin) = setup_test(&env);
+    let borrower = Address::generate(&env);
+
+    let history_hash = soroban_sdk::BytesN::from_array(&env, &[0u8; 32]);
+    nft_client.mint(&borrower, &600, &history_hash, &None);
+    assert_eq!(nft_client.get_score(&borrower), 600);
+
+    let _history_hash = soroban_sdk::BytesN::from_array(&env, &[0u8; 32]);
+    let stellar_token = StellarAssetClient::new(&env, &token_id);
+    stellar_token.mint(&pool_address, &10_000);
+    stellar_token.mint(&borrower, &10_000);
+
+    let loan_id = manager.request_loan(&borrower, &1_000);
+    manager.approve_loan(&loan_id);
+
+    manager.set_min_repayment_amount(&150);
+    manager.repay(&borrower, &loan_id, &100);
+}
+
+#[test]
+fn test_full_repayment_ignores_minimum_amount() {
+    let env = Env::default();
+    env.mock_all_auths_allowing_non_root_auth();
+
+    let (manager, nft_client, pool_address, token_id, _token_admin) = setup_test(&env);
+    let borrower = Address::generate(&env);
+
+    let history_hash = soroban_sdk::BytesN::from_array(&env, &[0u8; 32]);
+    nft_client.mint(&borrower, &600, &history_hash, &None);
+    assert_eq!(nft_client.get_score(&borrower), 600);
+
+    let _history_hash = soroban_sdk::BytesN::from_array(&env, &[0u8; 32]);
+    let stellar_token = StellarAssetClient::new(&env, &token_id);
+    stellar_token.mint(&pool_address, &10_000);
+    stellar_token.mint(&borrower, &10_000);
+
+    let loan_id = manager.request_loan(&borrower, &1_000);
+    manager.approve_loan(&loan_id);
+
+    manager.set_min_repayment_amount(&150);
+    manager.repay(&borrower, &loan_id, &1_000);
+
+    let loan = manager.get_loan(&loan_id);
+    assert_eq!(loan.status, LoanStatus::Repaid);
+}
+
+#[test]
 #[should_panic(expected = "loan amount exceeds max loan amount")]
 fn test_request_loan_above_max_amount_fails() {
     let env = Env::default();
@@ -328,6 +380,7 @@ fn test_small_repayment_does_not_change_score() {
     let loan_id = manager.request_loan(&borrower, &1000);
     manager.approve_loan(&loan_id);
 
+    manager.set_min_repayment_amount(&1);
     manager.repay(&borrower, &loan_id, &99);
 
     assert_eq!(nft_client.get_score(&borrower), 600);

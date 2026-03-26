@@ -299,8 +299,7 @@ impl RemittanceNFT {
         env.storage().persistent().set(&key, &true);
         Self::bump_persistent_ttl(&env, &key);
 
-        env.events()
-            .publish((symbol_short!("MntAuth"), minter), ());
+        env.events().publish((symbol_short!("MntAuth"), minter), ());
     }
 
     /// Revoke authorization for a contract or account to mint NFTs
@@ -311,8 +310,7 @@ impl RemittanceNFT {
             .persistent()
             .remove(&DataKey::AuthorizedMinter(minter.clone()));
 
-        env.events()
-            .publish((symbol_short!("MntRev"), minter), ());
+        env.events().publish((symbol_short!("MntRev"), minter), ());
     }
 
     /// Check if an address is authorized to mint

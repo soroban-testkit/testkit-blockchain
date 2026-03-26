@@ -518,38 +518,38 @@ fn test_concurrent_deposit_withdraw_same_ledger() {
 
     // All these happen in the same ledger sequence
     pool_client.deposit(&provider_a, &1000);
-    
+
     // Simulate interest being earned (minted to pool)
     stellar_asset_client.mint(&pool_id, &100);
-    
+
     pool_client.deposit(&provider_b, &1000);
-    
+
     // More interest
     stellar_asset_client.mint(&pool_id, &50);
-    
+
     pool_client.withdraw(&provider_a, &500);
-    
+
     // Check balances
     // provider_a: 2000 - 1000 + 500 = 1500 (tokens)
     // plus accrued yield.
-    // Interest 1: 100 added. Total deposits was 1000. 
+    // Interest 1: 100 added. Total deposits was 1000.
     // AccYieldPerDeposit becomes 100 * SCALE / 1000.
     // Interest 2: 50 added. Total deposits was 2000.
     // AccYieldPerDeposit becomes (100/1000 + 50/2000) * SCALE.
-    
+
     assert_eq!(token_client.balance(&provider_a), 1500);
     assert_eq!(token_client.balance(&provider_b), 1000);
-    
+
     // Claim yield and verify
     pool_client.claim_yield(&provider_a);
     pool_client.claim_yield(&provider_b);
-    
+
     // Provider A yield: 100% of Int1 (100) + 50% of Int2 (25) = 125
     // Provider B yield: 0% of Int1 (0) + 50% of Int2 (25) = 25
     // Total yield = 150. Matches mints.
-    
+
     assert_eq!(token_client.balance(&provider_a), 1625);
     assert_eq!(token_client.balance(&provider_b), 1025);
-    
+
     assert_eq!(pool_client.get_total_deposits(), 1500);
 }

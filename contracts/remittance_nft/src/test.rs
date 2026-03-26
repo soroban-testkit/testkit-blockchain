@@ -734,7 +734,7 @@ fn test_score_cap_at_850() {
     client.initialize(&admin);
 
     let history_hash = create_test_hash(&env, 1);
-    
+
     // Test initial mint cap
     client.mint(&user, &900, &history_hash, &None);
     assert_eq!(client.get_score(&user), 850);

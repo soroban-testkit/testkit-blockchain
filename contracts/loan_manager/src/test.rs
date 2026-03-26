@@ -346,8 +346,6 @@ fn test_full_repayment_ignores_minimum_amount() {
 }
 
 #[test]
-#[test]
-#[should_panic(expected = "loan amount exceeds max loan amount")]
 fn test_request_loan_above_max_amount_fails() {
     let env = Env::default();
     env.mock_all_auths();

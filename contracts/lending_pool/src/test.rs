@@ -234,7 +234,59 @@ fn test_deposit_withdraw_invariants() {
     }
 }
 
-// ── MaxPoolSize tests ────────────────────────────────────────────────────────
+#[test]
+fn test_claim_yield_distributes_pro_rata_interest() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let token_admin = Address::generate(&env);
+    let (token_id, stellar_asset_client, token_client) = create_token_contract(&env, &token_admin);
+
+    let pool_id = env.register(LendingPool, ());
+    let pool_client = LendingPoolClient::new(&env, &pool_id);
+    pool_client.initialize(&token_id, &token_admin);
+
+    let provider_a = Address::generate(&env);
+    let provider_b = Address::generate(&env);
+    stellar_asset_client.mint(&provider_a, &1_000);
+    stellar_asset_client.mint(&provider_b, &1_000);
+
+    pool_client.deposit(&provider_a, &600);
+    pool_client.deposit(&provider_b, &400);
+
+    // Simulate realized interest returning to the pool.
+    stellar_asset_client.mint(&pool_id, &100);
+    assert_eq!(token_client.balance(&pool_id), 1_100);
+
+    pool_client.claim_yield(&provider_a);
+    pool_client.claim_yield(&provider_b);
+
+    assert_eq!(token_client.balance(&provider_a), 460);
+    assert_eq!(token_client.balance(&provider_b), 640);
+    assert_eq!(token_client.balance(&pool_id), 1_000);
+}
+
+#[test]
+fn test_admin_transfer_flow() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let token_admin = Address::generate(&env);
+    let (token_id, _stellar_asset_client, _token_client) =
+        create_token_contract(&env, &token_admin);
+
+    let pool_id = env.register(LendingPool, ());
+    let pool_client = LendingPoolClient::new(&env, &pool_id);
+    pool_client.initialize(&token_id, &token_admin);
+
+    let new_admin = Address::generate(&env);
+    pool_client.propose_admin(&new_admin);
+    pool_client.accept_admin();
+
+    assert_eq!(pool_client.get_admin(), new_admin);
+}
+
+// MaxPoolSize tests
 
 #[test]
 fn test_set_and_get_max_pool_size() {

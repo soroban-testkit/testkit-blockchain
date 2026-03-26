@@ -26,6 +26,7 @@ pub enum DataKey {
     Score(Address),
     AuthorizedMinter(Address),
     Seized(Address),
+    Version,
     ScoreHistory(Address),
     DefaultCount(Address),
     Burned(Address),
@@ -41,6 +42,7 @@ impl RemittanceNFT {
     const INSTANCE_TTL_BUMP: u32 = 518400;
     const PERSISTENT_TTL_THRESHOLD: u32 = 17280;
     const PERSISTENT_TTL_BUMP: u32 = 518400;
+    const CURRENT_VERSION: u32 = 1;
     const DEFAULT_BURN_THRESHOLD: u32 = 3;
     const MAX_SCORE_HISTORY: u32 = 10;
 
@@ -218,11 +220,38 @@ impl RemittanceNFT {
         env.storage()
             .instance()
             .set(&Self::burn_threshold_key(), &Self::DEFAULT_BURN_THRESHOLD);
+        env.storage()
+            .instance()
+            .set(&DataKey::Version, &Self::CURRENT_VERSION);
         Self::bump_instance_ttl(&env);
         // Admin is automatically authorized to mint
         let key = DataKey::AuthorizedMinter(admin.clone());
         env.storage().persistent().set(&key, &true);
         Self::bump_persistent_ttl(&env, &key);
+    }
+
+    pub fn version(env: Env) -> u32 {
+        Self::bump_instance_ttl(&env);
+        env.storage().instance().get(&DataKey::Version).unwrap_or(0)
+    }
+
+    pub fn upgrade(env: Env, new_wasm_hash: BytesN<32>) {
+        Self::admin(&env).require_auth();
+        env.deployer().update_current_contract_wasm(new_wasm_hash);
+    }
+
+    pub fn migrate(env: Env) {
+        Self::admin(&env).require_auth();
+
+        if !env.storage().instance().has(&Self::burn_threshold_key()) {
+            env.storage()
+                .instance()
+                .set(&Self::burn_threshold_key(), &Self::DEFAULT_BURN_THRESHOLD);
+        }
+        env.storage()
+            .instance()
+            .set(&DataKey::Version, &Self::CURRENT_VERSION);
+        Self::bump_instance_ttl(&env);
     }
 
     /// Authorize a contract or account to mint NFTs

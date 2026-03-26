@@ -1,4 +1,4 @@
-use soroban_sdk::{Address, Env, Symbol};
+use soroban_sdk::{Address, Env, String, Symbol};
 
 pub fn loan_requested(env: &Env, borrower: Address, amount: i128) {
     let topics = (Symbol::new(env, "LoanRequested"), borrower);
@@ -13,6 +13,16 @@ pub fn loan_approved(env: &Env, loan_id: u32) {
 pub fn loan_repaid(env: &Env, borrower: Address, loan_id: u32, amount: i128) {
     let topics = (Symbol::new(env, "LoanRepaid"), borrower, loan_id);
     env.events().publish(topics, amount);
+}
+
+pub fn loan_cancelled(env: &Env, borrower: Address, loan_id: u32) {
+    let topics = (Symbol::new(env, "LoanCancelled"), borrower);
+    env.events().publish(topics, loan_id);
+}
+
+pub fn loan_rejected(env: &Env, loan_id: u32, reason: String) {
+    let topics = (Symbol::new(env, "LoanRejected"), loan_id);
+    env.events().publish(topics, reason);
 }
 
 pub fn late_fee_charged(env: &Env, loan_id: u32, fee_amount: i128) {
@@ -33,6 +43,16 @@ pub fn unpaused(env: &Env) {
 pub fn min_score_updated(env: &Env, old_score: u32, new_score: u32) {
     let topics = (Symbol::new(env, "MinScoreUpdated"),);
     env.events().publish(topics, (old_score, new_score));
+}
+
+pub fn interest_rate_updated(env: &Env, old_rate: u32, new_rate: u32) {
+    let topics = (Symbol::new(env, "InterestRateUpdated"),);
+    env.events().publish(topics, (old_rate, new_rate));
+}
+
+pub fn default_term_updated(env: &Env, old_term: u32, new_term: u32) {
+    let topics = (Symbol::new(env, "DefaultTermUpdated"),);
+    env.events().publish(topics, (old_term, new_term));
 }
 
 pub fn loan_defaulted(env: &Env, loan_id: u32, borrower: Address) {

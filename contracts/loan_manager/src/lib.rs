@@ -316,7 +316,11 @@ impl LoanManager {
         use soroban_sdk::token::TokenClient;
 
         let collateral_key = DataKey::Collateral(loan_id);
-        let collateral = env.storage().persistent().get(&collateral_key).unwrap_or(0i128);
+        let collateral = env
+            .storage()
+            .persistent()
+            .get(&collateral_key)
+            .unwrap_or(0i128);
         if collateral <= 0 {
             return;
         }
@@ -336,7 +340,11 @@ impl LoanManager {
         use soroban_sdk::token::TokenClient;
 
         let collateral_key = DataKey::Collateral(loan_id);
-        let collateral = env.storage().persistent().get(&collateral_key).unwrap_or(0i128);
+        let collateral = env
+            .storage()
+            .persistent()
+            .get(&collateral_key)
+            .unwrap_or(0i128);
         if collateral <= 0 {
             return;
         }

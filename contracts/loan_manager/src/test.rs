@@ -635,7 +635,10 @@ fn test_deposit_collateral_and_auto_release_on_full_repayment() {
     manager.deposit_collateral(&loan_id, &300);
 
     assert_eq!(manager.get_collateral(&loan_id), 300);
-    assert_eq!(token_client.balance(&manager.address), contract_balance_before + 300);
+    assert_eq!(
+        token_client.balance(&manager.address),
+        contract_balance_before + 300
+    );
 
     let borrower_balance_before_full_repay = token_client.balance(&borrower);
     manager.repay(&borrower, &loan_id, &1_000);
@@ -677,7 +680,10 @@ fn test_collateral_is_seized_on_default() {
 
     assert_eq!(manager.get_loan(&loan_id).status, LoanStatus::Defaulted);
     assert_eq!(manager.get_collateral(&loan_id), 0);
-    assert_eq!(token_client.balance(&pool_address), pool_balance_before_default + 400);
+    assert_eq!(
+        token_client.balance(&pool_address),
+        pool_balance_before_default + 400
+    );
     assert_eq!(
         token_client.balance(&manager.address),
         contract_balance_before_default - 400

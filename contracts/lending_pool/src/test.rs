@@ -440,8 +440,7 @@ fn test_pool_stats() {
     env.mock_all_auths();
 
     let token_admin = Address::generate(&env);
-    let (token_id, stellar_asset_client, _token_client) =
-        create_token_contract(&env, &token_admin);
+    let (token_id, stellar_asset_client, _token_client) = create_token_contract(&env, &token_admin);
 
     let pool_id = env.register(LendingPool, ());
     let pool_client = LendingPoolClient::new(&env, &pool_id);

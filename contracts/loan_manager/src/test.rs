@@ -471,14 +471,14 @@ fn test_repayment_with_different_credit_scores() {
     env.mock_all_auths_allowing_non_root_auth();
 
     let (manager, nft_client, pool_address, token_id, _token_admin) = setup_test(&env);
-    
+
     // Test two borrowers with different credit scores
     let excellent_borrower = Address::generate(&env);
     let poor_borrower = Address::generate(&env);
 
     let history_hash = soroban_sdk::BytesN::from_array(&env, &[0u8; 32]);
     nft_client.mint(&excellent_borrower, &850, &history_hash, &None); // 500 bps
-    nft_client.mint(&poor_borrower, &550, &history_hash, &None);     // 1700 bps
+    nft_client.mint(&poor_borrower, &550, &history_hash, &None); // 1700 bps
 
     let stellar_token = StellarAssetClient::new(&env, &token_id);
     stellar_token.mint(&pool_address, &50_000);
@@ -492,7 +492,8 @@ fn test_repayment_with_different_credit_scores() {
     manager.approve_loan(&poor_loan_id);
 
     // Advance time to accrue interest
-    env.ledger().set_sequence_number(env.ledger().sequence() + 20000);
+    env.ledger()
+        .set_sequence_number(env.ledger().sequence() + 20000);
 
     let excellent_loan = manager.get_loan(&excellent_loan_id);
     let poor_loan = manager.get_loan(&poor_loan_id);
@@ -534,14 +535,15 @@ fn test_risk_based_interest_rate_calculation() {
     env.mock_all_auths();
 
     let (manager, nft_client, _pool, _token, _token_admin) = setup_test(&env);
-    
+
     // Test different credit scores and their corresponding interest rates
-    let test_cases = soroban_sdk::vec![&env,
-        (850, 500),   // Excellent credit - base rate
-        (750, 800),   // Good credit - base + 300
-        (650, 1200),  // Fair credit - base + 700
-        (550, 1700),  // Poor credit - base + 1200
-        (500, 1700),  // Very poor credit - max rate
+    let test_cases = soroban_sdk::vec![
+        &env,
+        (850, 500),  // Excellent credit - base rate
+        (750, 800),  // Good credit - base + 300
+        (650, 1200), // Fair credit - base + 700
+        (550, 1700), // Poor credit - base + 1200
+        (500, 1700), // Very poor credit - max rate
     ];
 
     for (score, expected_rate) in test_cases {
@@ -551,9 +553,12 @@ fn test_risk_based_interest_rate_calculation() {
 
         let loan_id = manager.request_loan(&borrower, &1000);
         let loan = manager.get_loan(&loan_id);
-        
-        assert_eq!(loan.interest_rate_bps, expected_rate, 
-            "Failed for score {}: expected {}, got {}", score, expected_rate, loan.interest_rate_bps);
+
+        assert_eq!(
+            loan.interest_rate_bps, expected_rate,
+            "Failed for score {}: expected {}, got {}",
+            score, expected_rate, loan.interest_rate_bps
+        );
     }
 }
 
@@ -578,10 +583,12 @@ fn test_full_repayment_with_interest() {
     manager.approve_loan(&loan_id);
 
     // Advance time to accrue interest
-    env.ledger().set_sequence_number(env.ledger().sequence() + 20000);
+    env.ledger()
+        .set_sequence_number(env.ledger().sequence() + 20000);
 
     let loan_before = manager.get_loan(&loan_id);
-    let total_debt = loan_before.amount + loan_before.accrued_interest + loan_before.accrued_late_fee;
+    let total_debt =
+        loan_before.amount + loan_before.accrued_interest + loan_before.accrued_late_fee;
 
     // Repay full amount including interest
     manager.repay(&borrower, &loan_id, &total_debt);
@@ -623,4 +630,3 @@ fn test_repayment_status_update_to_repaid() {
     let loan = manager.get_loan(&loan_id);
     assert_eq!(loan.status, LoanStatus::Repaid);
 }
-

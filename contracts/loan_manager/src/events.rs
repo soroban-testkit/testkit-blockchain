@@ -15,6 +15,11 @@ pub fn loan_repaid(env: &Env, borrower: Address, loan_id: u32, amount: i128) {
     env.events().publish(topics, amount);
 }
 
+pub fn late_fee_charged(env: &Env, loan_id: u32, fee_amount: i128) {
+    let topics = (Symbol::new(env, "LateFeeCharged"), loan_id);
+    env.events().publish(topics, fee_amount);
+}
+
 pub fn paused(env: &Env) {
     let topics = (Symbol::new(env, "Paused"),);
     env.events().publish(topics, ());

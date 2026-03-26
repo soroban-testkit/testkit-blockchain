@@ -273,6 +273,14 @@
                         "val": {
                           "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM"
                         }
+                      },
+                      {
+                        "key": {
+                          "symbol": "BURNTHR"
+                        },
+                        "val": {
+                          "u32": 3
+                        }
                       }
                     ]
                   }

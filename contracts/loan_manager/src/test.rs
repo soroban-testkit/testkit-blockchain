@@ -306,7 +306,7 @@ fn test_minimum_repayment_amount_enforced() {
     nft_client.mint(&borrower, &600, &history_hash, &None);
     assert_eq!(nft_client.get_score(&borrower), 600);
 
-    let history_hash = soroban_sdk::BytesN::from_array(&env, &[0u8; 32]);
+    let _history_hash = soroban_sdk::BytesN::from_array(&env, &[0u8; 32]);
     let stellar_token = StellarAssetClient::new(&env, &token_id);
     stellar_token.mint(&pool_address, &10_000);
     stellar_token.mint(&borrower, &10_000);
@@ -330,7 +330,7 @@ fn test_full_repayment_ignores_minimum_amount() {
     nft_client.mint(&borrower, &600, &history_hash, &None);
     assert_eq!(nft_client.get_score(&borrower), 600);
 
-    let history_hash = soroban_sdk::BytesN::from_array(&env, &[0u8; 32]);
+    let _history_hash = soroban_sdk::BytesN::from_array(&env, &[0u8; 32]);
     let stellar_token = StellarAssetClient::new(&env, &token_id);
     stellar_token.mint(&pool_address, &10_000);
     stellar_token.mint(&borrower, &10_000);

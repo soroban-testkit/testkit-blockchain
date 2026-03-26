@@ -26,10 +26,12 @@ pub enum DataKey {
     Score(Address),
     AuthorizedMinter(Address),
     Seized(Address),
+    Version,
     ScoreHistory(Address),
     DefaultCount(Address),
     Burned(Address),
     RemintApproval(Address),
+    TransferCooldown(Address),
 }
 
 #[contract]
@@ -41,8 +43,11 @@ impl RemittanceNFT {
     const INSTANCE_TTL_BUMP: u32 = 518400;
     const PERSISTENT_TTL_THRESHOLD: u32 = 17280;
     const PERSISTENT_TTL_BUMP: u32 = 518400;
+    const CURRENT_VERSION: u32 = 2;
     const DEFAULT_BURN_THRESHOLD: u32 = 3;
     const MAX_SCORE_HISTORY: u32 = 10;
+    const TRANSFER_COOLDOWN_LEDGERS: u32 = 17280;
+    pub const MAX_SCORE: u32 = 850;
 
     fn admin_key() -> soroban_sdk::Symbol {
         symbol_short!("ADMIN")
@@ -185,6 +190,40 @@ impl RemittanceNFT {
             .unwrap_or(Self::DEFAULT_BURN_THRESHOLD)
     }
 
+    fn has_any_remittance_state(env: &Env, user: &Address) -> bool {
+        env.storage()
+            .persistent()
+            .has(&DataKey::Metadata(user.clone()))
+            || env
+                .storage()
+                .persistent()
+                .has(&DataKey::Score(user.clone()))
+            || env
+                .storage()
+                .persistent()
+                .has(&DataKey::DefaultCount(user.clone()))
+            || env
+                .storage()
+                .persistent()
+                .has(&DataKey::Seized(user.clone()))
+            || env
+                .storage()
+                .persistent()
+                .has(&DataKey::ScoreHistory(user.clone()))
+            || env
+                .storage()
+                .persistent()
+                .has(&DataKey::RemintApproval(user.clone()))
+            || env
+                .storage()
+                .persistent()
+                .has(&DataKey::Burned(user.clone()))
+            || env
+                .storage()
+                .persistent()
+                .has(&DataKey::TransferCooldown(user.clone()))
+    }
+
     fn burn_internal(env: &Env, user: &Address) {
         env.storage()
             .persistent()
@@ -218,11 +257,38 @@ impl RemittanceNFT {
         env.storage()
             .instance()
             .set(&Self::burn_threshold_key(), &Self::DEFAULT_BURN_THRESHOLD);
+        env.storage()
+            .instance()
+            .set(&DataKey::Version, &Self::CURRENT_VERSION);
         Self::bump_instance_ttl(&env);
         // Admin is automatically authorized to mint
         let key = DataKey::AuthorizedMinter(admin.clone());
         env.storage().persistent().set(&key, &true);
         Self::bump_persistent_ttl(&env, &key);
+    }
+
+    pub fn version(env: Env) -> u32 {
+        Self::bump_instance_ttl(&env);
+        env.storage().instance().get(&DataKey::Version).unwrap_or(0)
+    }
+
+    pub fn upgrade(env: Env, new_wasm_hash: BytesN<32>) {
+        Self::admin(&env).require_auth();
+        env.deployer().update_current_contract_wasm(new_wasm_hash);
+    }
+
+    pub fn migrate(env: Env) {
+        Self::admin(&env).require_auth();
+
+        if !env.storage().instance().has(&Self::burn_threshold_key()) {
+            env.storage()
+                .instance()
+                .set(&Self::burn_threshold_key(), &Self::DEFAULT_BURN_THRESHOLD);
+        }
+        env.storage()
+            .instance()
+            .set(&DataKey::Version, &Self::CURRENT_VERSION);
+        Self::bump_instance_ttl(&env);
     }
 
     /// Authorize a contract or account to mint NFTs
@@ -294,7 +360,7 @@ impl RemittanceNFT {
         }
 
         let metadata = RemittanceMetadata {
-            score: initial_score,
+            score: initial_score.min(Self::MAX_SCORE),
             history_hash,
         };
 
@@ -332,12 +398,17 @@ impl RemittanceNFT {
             .unwrap_or_else(|| panic!("user does not have an NFT"));
 
         // Simple logic: 1 point per 100 units of repayment
-        let points = (repayment_amount / 100) as u32;
-        if points == 0 {
+        let points_i128 = repayment_amount / 100;
+        if points_i128 == 0 {
             return;
         }
+        let points = if points_i128 > (Self::MAX_SCORE as i128) {
+            Self::MAX_SCORE
+        } else {
+            points_i128 as u32
+        };
         let old_score = metadata.score;
-        metadata.score = metadata.score.checked_add(points).expect("score overflow");
+        metadata.score = metadata.score.saturating_add(points).min(Self::MAX_SCORE);
 
         env.storage().persistent().set(&metadata_key, &metadata);
         Self::bump_persistent_ttl(&env, &metadata_key);
@@ -441,6 +512,95 @@ impl RemittanceNFT {
         }
 
         Self::burn_internal(&env, &user);
+    }
+
+    pub fn transfer(env: Env, from: Address, to: Address, minter: Option<Address>) {
+        if from == to {
+            panic!("source and destination must differ");
+        }
+
+        from.require_auth();
+        Self::require_admin_or_authorized_minter(&env, minter);
+
+        let transfer_cooldown_key = DataKey::TransferCooldown(from.clone());
+        if let Some(next_allowed_ledger) = env
+            .storage()
+            .persistent()
+            .get::<DataKey, u32>(&transfer_cooldown_key)
+        {
+            Self::bump_persistent_ttl(&env, &transfer_cooldown_key);
+            if env.ledger().sequence() < next_allowed_ledger {
+                panic!("transfer cooldown active");
+            }
+        }
+
+        let metadata = Self::get_or_migrate_metadata(&env, &from)
+            .unwrap_or_else(|| panic!("user does not have an NFT"));
+
+        if Self::has_any_remittance_state(&env, &to) {
+            panic!("destination address has existing remittance state");
+        }
+
+        let from_metadata_key = DataKey::Metadata(from.clone());
+        let to_metadata_key = DataKey::Metadata(to.clone());
+        env.storage().persistent().set(&to_metadata_key, &metadata);
+        Self::bump_persistent_ttl(&env, &to_metadata_key);
+        env.storage().persistent().remove(&from_metadata_key);
+        env.storage()
+            .persistent()
+            .remove(&DataKey::Score(from.clone()));
+
+        let from_history_key = DataKey::ScoreHistory(from.clone());
+        if let Some(history) = env
+            .storage()
+            .persistent()
+            .get::<DataKey, Vec<ScoreHistoryEntry>>(&from_history_key)
+        {
+            let to_history_key = DataKey::ScoreHistory(to.clone());
+            env.storage().persistent().set(&to_history_key, &history);
+            Self::bump_persistent_ttl(&env, &to_history_key);
+            env.storage().persistent().remove(&from_history_key);
+        }
+
+        let from_default_key = DataKey::DefaultCount(from.clone());
+        if let Some(default_count) = env
+            .storage()
+            .persistent()
+            .get::<DataKey, u32>(&from_default_key)
+        {
+            let to_default_key = DataKey::DefaultCount(to.clone());
+            env.storage()
+                .persistent()
+                .set(&to_default_key, &default_count);
+            Self::bump_persistent_ttl(&env, &to_default_key);
+            env.storage().persistent().remove(&from_default_key);
+        }
+
+        let from_seized_key = DataKey::Seized(from.clone());
+        if env.storage().persistent().has(&from_seized_key) {
+            let to_seized_key = DataKey::Seized(to.clone());
+            env.storage().persistent().set(&to_seized_key, &true);
+            Self::bump_persistent_ttl(&env, &to_seized_key);
+            env.storage().persistent().remove(&from_seized_key);
+        }
+
+        env.storage()
+            .persistent()
+            .remove(&DataKey::RemintApproval(from.clone()));
+
+        env.storage().persistent().remove(&transfer_cooldown_key);
+        let to_cooldown_key = DataKey::TransferCooldown(to.clone());
+        let next_allowed_ledger = env
+            .ledger()
+            .sequence()
+            .saturating_add(Self::TRANSFER_COOLDOWN_LEDGERS);
+        env.storage()
+            .persistent()
+            .set(&to_cooldown_key, &next_allowed_ledger);
+        Self::bump_persistent_ttl(&env, &to_cooldown_key);
+
+        env.events()
+            .publish((symbol_short!("Transfer"), from, to), ());
     }
 
     pub fn is_seized(env: Env, user: Address) -> bool {

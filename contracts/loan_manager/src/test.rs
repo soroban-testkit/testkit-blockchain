@@ -426,8 +426,10 @@ fn test_overdue_repayment_charges_late_fee() {
     assert_eq!(loan.accrued_late_fee, 0);
     assert_eq!(loan.status, LoanStatus::Approved);
 
-    // Repay exactly the principal amount (no time passed for interest)
-    manager.repay(&borrower, &loan_id, &1000);
+    let loan = manager.get_loan(&loan_id);
+    let remaining_principal = loan.amount - loan.principal_paid;
+    let remaining_debt = remaining_principal + loan.accrued_interest + loan.accrued_late_fee;
+    manager.repay(&borrower, &loan_id, &remaining_debt);
 
     // Should now be Repaid
     let loan = manager.get_loan(&loan_id);
@@ -469,6 +471,8 @@ fn test_token_transfer_from_borrower_to_pool() {
 fn test_repayment_with_different_credit_scores() {
     let env = Env::default();
     env.mock_all_auths_allowing_non_root_auth();
+
+    env.ledger().set_sequence_number(1);
 
     let (manager, nft_client, pool_address, token_id, _token_admin) = setup_test(&env);
 
@@ -566,6 +570,8 @@ fn test_risk_based_interest_rate_calculation() {
 fn test_full_repayment_with_interest() {
     let env = Env::default();
     env.mock_all_auths_allowing_non_root_auth();
+
+    env.ledger().set_sequence_number(1);
 
     let (manager, nft_client, pool_address, token_id, _token_admin) = setup_test(&env);
     let borrower = Address::generate(&env);

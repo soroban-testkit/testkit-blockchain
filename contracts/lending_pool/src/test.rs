@@ -267,6 +267,59 @@ fn test_claim_yield_distributes_pro_rata_interest() {
 }
 
 #[test]
+fn test_claim_yield_with_no_realized_yield_is_noop() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let token_admin = Address::generate(&env);
+    let (token_id, stellar_asset_client, token_client) = create_token_contract(&env, &token_admin);
+
+    let pool_id = env.register(LendingPool, ());
+    let pool_client = LendingPoolClient::new(&env, &pool_id);
+    pool_client.initialize(&token_id, &token_admin);
+
+    let provider = Address::generate(&env);
+    stellar_asset_client.mint(&provider, &1_000);
+    pool_client.deposit(&provider, &1_000);
+
+    let provider_balance_before = token_client.balance(&provider);
+    let pool_balance_before = token_client.balance(&pool_id);
+
+    // Should not panic when no yield is available.
+    pool_client.claim_yield(&provider);
+
+    assert_eq!(token_client.balance(&provider), provider_balance_before);
+    assert_eq!(token_client.balance(&pool_id), pool_balance_before);
+    assert_eq!(pool_client.get_deposit(&provider), 1_000);
+}
+
+#[test]
+fn test_second_claim_without_new_yield_is_noop() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let token_admin = Address::generate(&env);
+    let (token_id, stellar_asset_client, token_client) = create_token_contract(&env, &token_admin);
+
+    let pool_id = env.register(LendingPool, ());
+    let pool_client = LendingPoolClient::new(&env, &pool_id);
+    pool_client.initialize(&token_id, &token_admin);
+
+    let provider = Address::generate(&env);
+    stellar_asset_client.mint(&provider, &1_000);
+    pool_client.deposit(&provider, &1_000);
+
+    // Realize yield and claim it once.
+    stellar_asset_client.mint(&pool_id, &100);
+    pool_client.claim_yield(&provider);
+    let balance_after_first_claim = token_client.balance(&provider);
+
+    // No new realized yield; second claim should be a no-op.
+    pool_client.claim_yield(&provider);
+    assert_eq!(token_client.balance(&provider), balance_after_first_claim);
+}
+
+#[test]
 fn test_admin_transfer_flow() {
     let env = Env::default();
     env.mock_all_auths();

@@ -116,10 +116,17 @@ impl LoanManager {
 
     fn read_interest_rate(env: &Env) -> u32 {
         Self::bump_instance_ttl(env);
-        env.storage()
+        let configured_rate = env
+            .storage()
             .instance()
             .get(&DataKey::InterestRateBps)
-            .unwrap_or(Self::DEFAULT_INTEREST_RATE_BPS)
+            .unwrap_or(Self::DEFAULT_INTEREST_RATE_BPS);
+
+        if configured_rate == 0 {
+            Self::DEFAULT_INTEREST_RATE_BPS
+        } else {
+            configured_rate
+        }
     }
 
     fn read_default_term(env: &Env) -> u32 {

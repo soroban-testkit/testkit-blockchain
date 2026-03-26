@@ -69,6 +69,8 @@ impl LoanManager {
     const DEFAULT_TERM_LEDGERS: u32 = 17280;
     const DEFAULT_LATE_FEE_RATE_BPS: u32 = 500;
     const MAX_LATE_FEE_CAP_BPS: u32 = 2500;
+    const BASE_INTEREST_RATE_BPS: u32 = 500;
+    const MAX_INTEREST_RATE_BPS: u32 = 3000;
 
     fn bump_instance_ttl(env: &Env) {
         env.storage()
@@ -101,6 +103,20 @@ impl LoanManager {
             .unwrap_or(false);
         if paused {
             panic!("contract is paused");
+        }
+    }
+
+    fn calculate_interest_rate_bps(score: u32) -> u32 {
+        if score >= 800 {
+            return Self::BASE_INTEREST_RATE_BPS; // Best rate for excellent credit
+        } else if score >= 700 {
+            return Self::BASE_INTEREST_RATE_BPS + 300; // Good credit
+        } else if score >= 600 {
+            return Self::BASE_INTEREST_RATE_BPS + 700; // Fair credit
+        } else if score >= 500 {
+            return Self::BASE_INTEREST_RATE_BPS + 1200; // Poor credit
+        } else {
+            return Self::MAX_INTEREST_RATE_BPS; // Maximum rate for very poor credit
         }
     }
 
@@ -269,6 +285,9 @@ impl LoanManager {
             panic!("score too low for loan");
         }
 
+        // Calculate risk-based interest rate
+        let interest_rate_bps = Self::calculate_interest_rate_bps(score);
+
         // Create loan record
         let mut loan_counter: u32 = env
             .storage()
@@ -285,7 +304,7 @@ impl LoanManager {
             accrued_interest: 0,
             late_fee_paid: 0,
             accrued_late_fee: 0,
-            interest_rate_bps: Self::DEFAULT_INTEREST_RATE_BPS,
+            interest_rate_bps,
             due_date: 0,
             last_interest_ledger: 0,
             last_late_fee_ledger: 0,

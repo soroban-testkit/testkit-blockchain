@@ -153,6 +153,22 @@ impl LoanManager {
             .expect("not initialized")
     }
 
+    fn lending_pool(env: &Env) -> Address {
+        Self::bump_instance_ttl(env);
+        env.storage()
+            .instance()
+            .get(&DataKey::LendingPool)
+            .expect("not initialized")
+    }
+
+    fn loan_counter(env: &Env) -> u32 {
+        Self::bump_instance_ttl(env);
+        env.storage()
+            .instance()
+            .get(&DataKey::LoanCounter)
+            .unwrap_or(0)
+    }
+
     fn read_interest_rate(env: &Env) -> u32 {
         Self::bump_instance_ttl(env);
         let configured_rate = env
@@ -1212,6 +1228,22 @@ impl LoanManager {
 
     pub fn get_borrower_loan_count(env: Env, borrower: Address) -> u32 {
         Self::borrower_loan_count(&env, &borrower)
+    }
+
+    pub fn get_admin(env: Env) -> Address {
+        Self::admin(&env)
+    }
+
+    pub fn get_total_loans(env: Env) -> u32 {
+        Self::loan_counter(&env)
+    }
+
+    pub fn get_lending_pool(env: Env) -> Address {
+        Self::lending_pool(&env)
+    }
+
+    pub fn get_nft_contract(env: Env) -> Address {
+        Self::nft_contract(&env)
     }
 
     pub fn get_min_score(env: Env) -> u32 {

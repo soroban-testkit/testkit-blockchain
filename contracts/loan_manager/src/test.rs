@@ -917,3 +917,35 @@ fn test_small_loan_interest_accrual_precision() {
         assert!(loan_after_accrual.interest_residual > 0);
     }
 }
+
+#[test]
+fn test_query_functions() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (manager, nft_client, pool_address, token_id, token_admin) = setup_test(&env);
+    let borrower = Address::generate(&env);
+
+    // Test get_admin
+    assert_eq!(manager.get_admin(), token_admin);
+
+    // Test get_lending_pool
+    assert_eq!(manager.get_lending_pool(), pool_address);
+
+    // Test get_nft_contract
+    let nft_contract_id = env.register(RemittanceNFT, ());
+    assert_eq!(manager.get_nft_contract(), nft_contract_id);
+
+    // Test get_total_loans initially
+    assert_eq!(manager.get_total_loans(), 0);
+
+    // Create a loan and test get_total_loans
+    let history_hash = soroban_sdk::BytesN::from_array(&env, &[0u8; 32]);
+    nft_client.mint(&borrower, &600, &history_hash, &None);
+
+    let stellar_token = StellarAssetClient::new(&env, &token_id);
+    stellar_token.mint(&pool_address, &10_000);
+
+    let loan_id = manager.request_loan(&borrower, &1000);
+    assert_eq!(manager.get_total_loans(), 1);
+}

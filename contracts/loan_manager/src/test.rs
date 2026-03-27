@@ -951,3 +951,63 @@ fn test_query_functions() {
     let _loan_id = manager.request_loan(&borrower, &1000);
     assert_eq!(manager.get_total_loans(), 1);
 }
+
+#[test]
+fn test_get_borrower_loans() {
+    let env = Env::default();
+    env.mock_all_auths_allowing_non_root_auth();
+
+    let (manager, nft_client, pool_address, token_id, _admin) = setup_test(&env);
+    let borrower = Address::generate(&env);
+
+    // Initially no loans
+    assert_eq!(manager.get_borrower_loans(&borrower).len(), 0);
+
+    // Mint NFT for borrower
+    let history_hash = soroban_sdk::BytesN::from_array(&env, &[0u8; 32]);
+    nft_client.mint(&borrower, &600, &history_hash, &None);
+
+    // Setup liquidity
+    let _token_client = TokenClient::new(&env, &token_id);
+    let stellar_token = StellarAssetClient::new(&env, &token_id);
+    stellar_token.mint(&pool_address, &10_000);
+    stellar_token.mint(&borrower, &10_000);
+
+    // Request first loan
+    let loan_id_1 = manager.request_loan(&borrower, &1000);
+    let borrower_loans = manager.get_borrower_loans(&borrower);
+    assert_eq!(borrower_loans.len(), 1);
+    assert_eq!(borrower_loans.get(0).unwrap(), loan_id_1);
+
+    // Request second loan (while first is still pending)
+    let loan_id_2 = manager.request_loan(&borrower, &500);
+    let borrower_loans = manager.get_borrower_loans(&borrower);
+    assert_eq!(borrower_loans.len(), 2);
+    assert_eq!(borrower_loans.get(0).unwrap(), loan_id_1);
+    assert_eq!(borrower_loans.get(1).unwrap(), loan_id_2);
+
+    // Approve first loan
+    manager.approve_loan(&loan_id_1);
+
+    // Approve second loan
+    manager.approve_loan(&loan_id_2);
+
+    // Advance ledger for interest accrual
+    env.ledger()
+        .set_sequence_number(env.ledger().sequence() + 100);
+
+    // Repay first loan completely
+    let loan_1 = manager.get_loan(&loan_id_1);
+    let repay_amount_1 = loan_1.amount + loan_1.accrued_interest + loan_1.accrued_late_fee;
+    manager.repay(&borrower, &loan_id_1, &repay_amount_1);
+
+    // Borrower loans should still contain both loans (historical record)
+    let borrower_loans = manager.get_borrower_loans(&borrower);
+    assert_eq!(borrower_loans.len(), 2);
+    assert_eq!(borrower_loans.get(0).unwrap(), loan_id_1);
+    assert_eq!(borrower_loans.get(1).unwrap(), loan_id_2);
+
+    // Verify first loan is marked as repaid
+    let repaid_loan = manager.get_loan(&loan_id_1);
+    assert_eq!(repaid_loan.status, LoanStatus::Repaid);
+}

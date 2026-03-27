@@ -88,6 +88,7 @@ pub enum DataKey {
     MaxLoanAmount,
     MaxLoansPerBorrower,
     BorrowerLoanCount(Address),
+    BorrowerLoans(Address),
     Paused,
     InterestRateBps,
     DefaultTermLedgers,
@@ -632,6 +633,19 @@ impl LoanManager {
             .set(&DataKey::LoanCounter, &loan_counter);
         Self::bump_instance_ttl(&env);
         Self::bump_persistent_ttl(&env, &DataKey::Loan(loan_counter));
+
+        // Add loan ID to borrower's loan list
+        let borrower_loans_key = DataKey::BorrowerLoans(borrower.clone());
+        let mut borrower_loans: Vec<u32> = env
+            .storage()
+            .instance()
+            .get(&borrower_loans_key)
+            .unwrap_or(Vec::new(&env));
+        borrower_loans.push_back(loan_counter);
+        env.storage()
+            .instance()
+            .set(&borrower_loans_key, &borrower_loans);
+        Self::bump_instance_ttl(&env);
 
         events::loan_requested(&env, borrower.clone(), amount);
         env.events()
@@ -1244,6 +1258,14 @@ impl LoanManager {
 
     pub fn get_nft_contract(env: Env) -> Address {
         Self::nft_contract(&env)
+    }
+
+    pub fn get_borrower_loans(env: Env, borrower: Address) -> Vec<u32> {
+        Self::bump_instance_ttl(&env);
+        env.storage()
+            .instance()
+            .get(&DataKey::BorrowerLoans(borrower))
+            .unwrap_or(Vec::new(&env))
     }
 
     pub fn get_min_score(env: Env) -> u32 {

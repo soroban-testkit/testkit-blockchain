@@ -71,6 +71,7 @@ pub struct Loan {
     pub last_interest_ledger: u32,
     pub last_late_fee_ledger: u32,
     pub status: LoanStatus,
+    pub interest_residual: i128,
 }
 
 #[contracttype]
@@ -111,7 +112,7 @@ impl LoanManager {
     const PERSISTENT_TTL_BUMP: u32 = 518400;
     const DEFAULT_INTEREST_RATE_BPS: u32 = 1200;
     const DEFAULT_TERM_LEDGERS: u32 = 17280;
-    const CURRENT_VERSION: u32 = 2;
+    const CURRENT_VERSION: u32 = 3;
     const DEFAULT_LATE_FEE_RATE_BPS: u32 = 500;
     const MAX_LATE_FEE_CAP_BPS: u32 = 2500;
     const DEFAULT_MAX_LOAN_AMOUNT: i128 = 50_000;
@@ -224,17 +225,34 @@ impl LoanManager {
         }
 
         let elapsed_ledgers = current_ledger - loan.last_interest_ledger;
-        let interest_delta = remaining_principal
+        const PRECISION: i128 = 1_000_000;
+        
+        // Calculate interest with high precision to avoid truncation for small loans
+        let numerator = remaining_principal
             .checked_mul(loan.interest_rate_bps as i128)
-            .and_then(|value| value.checked_mul(elapsed_ledgers as i128))
-            .and_then(|value| value.checked_div(10_000))
-            .and_then(|value| value.checked_div(Self::DEFAULT_TERM_LEDGERS as i128))
-            .expect("interest overflow");
+            .and_then(|v| v.checked_mul(elapsed_ledgers as i128))
+            .and_then(|v| v.checked_mul(PRECISION))
+            .expect("interest calculation overflow");
+        
+        let denominator = 10_000i128
+            .checked_mul(Self::DEFAULT_TERM_LEDGERS as i128)
+            .expect("denominator overflow");
+        
+        let total_interest = numerator / denominator;
+        let interest_delta = total_interest / PRECISION;
+        let new_residual = total_interest % PRECISION;
+        
+        // Add the previous residual to the new calculation
+        let combined_residual = loan.interest_residual + new_residual;
+        let additional_interest = combined_residual / PRECISION;
+        let final_residual = combined_residual % PRECISION;
 
         loan.accrued_interest = loan
             .accrued_interest
             .checked_add(interest_delta)
+            .and_then(|v| v.checked_add(additional_interest))
             .expect("interest overflow");
+        loan.interest_residual = final_residual;
         loan.last_interest_ledger = current_ledger;
     }
 
@@ -587,6 +605,7 @@ impl LoanManager {
             last_interest_ledger: 0,
             last_late_fee_ledger: 0,
             status: LoanStatus::Pending,
+            interest_residual: 0,
         };
 
         env.storage()

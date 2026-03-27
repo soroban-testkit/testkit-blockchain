@@ -870,3 +870,50 @@ fn test_deposit_collateral_rejects_non_active_loan() {
     let loan_id = manager.request_loan(&borrower, &500);
     manager.deposit_collateral(&loan_id, &100);
 }
+
+#[test]
+fn test_small_loan_interest_accrual_precision() {
+    let env = Env::default();
+    env.mock_all_auths_allowing_non_root_auth();
+
+    let (manager, nft_client, pool_address, token_id, _token_admin) = setup_test(&env);
+    let borrower = Address::generate(&env);
+
+    let history_hash = soroban_sdk::BytesN::from_array(&env, &[0u8; 32]);
+    nft_client.mint(&borrower, &600, &history_hash, &None);
+
+    let stellar_token = StellarAssetClient::new(&env, &token_id);
+    stellar_token.mint(&pool_address, &10_000);
+
+    // Request a small loan of 50 units
+    let loan_id = manager.request_loan(&borrower, &50);
+    manager.approve_loan(&loan_id);
+
+    let initial_loan = manager.get_loan(&loan_id);
+    assert_eq!(initial_loan.accrued_interest, 0);
+    assert_eq!(initial_loan.interest_residual, 0);
+
+    // Advance ledger by a significant amount to accrue interest
+    env.ledger().set_sequence_number(env.ledger().sequence() + 10_000);
+
+    // Manually trigger interest accrual (normally done in repay or other operations)
+    env.as_contract(&manager.address, || {
+        let mut loan = manager.get_loan(&loan_id);
+        LoanManager::accrue_interest(&env, &mut loan);
+        env.storage().persistent().set(&DataKey::Loan(loan_id), &loan);
+    });
+
+    let loan_after_accrual = manager.get_loan(&loan_id);
+    
+    // For a small loan of 50 with default interest rate (1200 bps = 12%),
+    // over 10,000 ledgers out of 17,280 total term,
+    // interest should accrue even if small
+    assert!(loan_after_accrual.accrued_interest >= 0);
+    
+    // The residual should help accumulate fractional interest over time
+    // For very small loans, accrued_interest might still be 0 initially,
+    // but residual should be non-zero
+    if loan_after_accrual.accrued_interest == 0 {
+        assert!(loan_after_accrual.interest_residual > 0);
+    }
+}

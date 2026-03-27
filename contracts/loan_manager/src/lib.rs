@@ -242,22 +242,22 @@ impl LoanManager {
 
         let elapsed_ledgers = current_ledger - loan.last_interest_ledger;
         const PRECISION: i128 = 1_000_000;
-        
+
         // Calculate interest with high precision to avoid truncation for small loans
         let numerator = remaining_principal
             .checked_mul(loan.interest_rate_bps as i128)
             .and_then(|v| v.checked_mul(elapsed_ledgers as i128))
             .and_then(|v| v.checked_mul(PRECISION))
             .expect("interest calculation overflow");
-        
+
         let denominator = 10_000i128
             .checked_mul(Self::DEFAULT_TERM_LEDGERS as i128)
             .expect("denominator overflow");
-        
+
         let total_interest = numerator / denominator;
         let interest_delta = total_interest / PRECISION;
         let new_residual = total_interest % PRECISION;
-        
+
         // Add the previous residual to the new calculation
         let combined_residual = loan.interest_residual + new_residual;
         let additional_interest = combined_residual / PRECISION;

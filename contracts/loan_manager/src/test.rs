@@ -894,22 +894,25 @@ fn test_small_loan_interest_accrual_precision() {
     assert_eq!(initial_loan.interest_residual, 0);
 
     // Advance ledger by a significant amount to accrue interest
-    env.ledger().set_sequence_number(env.ledger().sequence() + 10_000);
+    env.ledger()
+        .set_sequence_number(env.ledger().sequence() + 10_000);
 
     // Manually trigger interest accrual (normally done in repay or other operations)
     env.as_contract(&manager.address, || {
         let mut loan = manager.get_loan(&loan_id);
         LoanManager::accrue_interest(&env, &mut loan);
-        env.storage().persistent().set(&DataKey::Loan(loan_id), &loan);
+        env.storage()
+            .persistent()
+            .set(&DataKey::Loan(loan_id), &loan);
     });
 
     let loan_after_accrual = manager.get_loan(&loan_id);
-    
+
     // For a small loan of 50 with default interest rate (1200 bps = 12%),
     // over 10,000 ledgers out of 17,280 total term,
     // interest should accrue even if small
     assert!(loan_after_accrual.accrued_interest >= 0);
-    
+
     // The residual should help accumulate fractional interest over time
     // For very small loans, accrued_interest might still be 0 initially,
     // but residual should be non-zero

@@ -99,14 +99,6 @@
                       },
                       {
                         "key": {
-                          "symbol": "CANCEL_AT"
-                        },
-                        "val": {
-                          "u64": 0
-                        }
-                      },
-                      {
-                        "key": {
                           "symbol": "TARGET"
                         },
                         "val": {

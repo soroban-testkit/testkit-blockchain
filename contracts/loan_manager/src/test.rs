@@ -42,7 +42,7 @@ fn setup_test<'a>(
         nft_client,
         pool_address,
         token_id,
-        token_admin,
+        admin,
     )
 }
 
@@ -935,9 +935,8 @@ fn test_query_functions() {
     // Test get_lending_pool
     assert_eq!(manager.get_lending_pool(), pool_address);
 
-    // Test get_nft_contract
-    let nft_contract_id = env.register(RemittanceNFT, ());
-    assert_eq!(manager.get_nft_contract(), nft_contract_id);
+    // Test get_nft_contract - get the contract address from the nft_client
+    assert_eq!(manager.get_nft_contract(), nft_client.address);
 
     // Test get_total_loans initially
     assert_eq!(manager.get_total_loans(), 0);
@@ -949,6 +948,6 @@ fn test_query_functions() {
     let stellar_token = StellarAssetClient::new(&env, &token_id);
     stellar_token.mint(&pool_address, &10_000);
 
-    let loan_id = manager.request_loan(&borrower, &1000);
+    let _loan_id = manager.request_loan(&borrower, &1000);
     assert_eq!(manager.get_total_loans(), 1);
 }

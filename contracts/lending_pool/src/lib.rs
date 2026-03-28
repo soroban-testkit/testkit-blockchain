@@ -577,6 +577,14 @@ impl LendingPool {
         Self::bump_instance_ttl(&env);
         env.events().publish((symbol_short!("Unpaused"),), ());
     }
+
+    pub fn is_paused(env: Env) -> bool {
+        Self::bump_instance_ttl(&env);
+        env.storage()
+            .instance()
+            .get(&DataKey::Paused)
+            .unwrap_or(false)
+    }
 }
 
 #[cfg(test)]

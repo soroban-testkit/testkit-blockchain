@@ -1,8 +1,7 @@
 #![no_std]
 use soroban_sdk::token::Client as TokenClient;
 use soroban_sdk::{
-    contract, contracterror, contractimpl, contracttype, symbol_short, Address, BytesN, Env,
-    Symbol,
+    contract, contracterror, contractimpl, contracttype, symbol_short, Address, BytesN, Env, Symbol,
 };
 
 #[contracterror]
@@ -209,7 +208,9 @@ impl LendingPool {
         Self::admin(&env).require_auth();
         let old_version = Self::version(env.clone());
         let new_version = old_version.saturating_add(1);
-        env.storage().instance().set(&DataKey::Version, &new_version);
+        env.storage()
+            .instance()
+            .set(&DataKey::Version, &new_version);
         env.events().publish(
             (Symbol::new(&env, "ContractUpgraded"),),
             (old_version, new_version),

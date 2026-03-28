@@ -1,4 +1,4 @@
-use soroban_sdk::{Address, Env, Symbol, i128};
+use soroban_sdk::{Address, Env, Symbol};
 
 pub fn deposit(env: &Env, provider: Address, token: Address, amount: i128, shares_minted: i128) {
     let topics = (Symbol::new(env, "Deposit"), provider, token);
@@ -10,6 +10,7 @@ pub fn withdraw(env: &Env, provider: Address, token: Address, amount: i128, shar
     env.events().publish(topics, (amount, shares_burned));
 }
 
+#[allow(dead_code)]
 pub fn yield_distributed(env: &Env, token: Address, amount: i128) {
     let topics = (Symbol::new(env, "YieldDistributed"), token);
     env.events().publish(topics, amount);

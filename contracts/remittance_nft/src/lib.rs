@@ -222,30 +222,6 @@ impl RemittanceNFT {
                 .storage()
                 .persistent()
                 .has(&DataKey::Score(user.clone()))
-            || env
-                .storage()
-                .persistent()
-                .has(&DataKey::DefaultCount(user.clone()))
-            || env
-                .storage()
-                .persistent()
-                .has(&DataKey::Seized(user.clone()))
-            || env
-                .storage()
-                .persistent()
-                .has(&DataKey::ScoreHistory(user.clone()))
-            || env
-                .storage()
-                .persistent()
-                .has(&DataKey::RemintApproval(user.clone()))
-            || env
-                .storage()
-                .persistent()
-                .has(&DataKey::Burned(user.clone()))
-            || env
-                .storage()
-                .persistent()
-                .has(&DataKey::TransferCooldown(user.clone()))
     }
 
     fn burn_internal(env: &Env, user: &Address) {

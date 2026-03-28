@@ -1,7 +1,8 @@
 #![no_std]
 use soroban_sdk::token::Client as TokenClient;
 use soroban_sdk::{
-    contract, contracterror, contractimpl, contracttype, symbol_short, Address, BytesN, Env, Symbol,
+    contract, contracterror, contractimpl, contracttype, symbol_short, Address, BytesN, Env,
+    Symbol,
 };
 
 #[contracterror]

@@ -279,7 +279,13 @@ impl LendingPool {
             .set(&DataKey::TotalDeposits(token.clone()), &new_total_deposits);
 
         Self::bump_instance_ttl(env);
-        withdraw(env, provider.clone(), token.clone(), assets_to_return, shares);
+        withdraw(
+            env,
+            provider.clone(),
+            token.clone(),
+            assets_to_return,
+            shares,
+        );
         Ok(())
     }
 
@@ -330,28 +336,28 @@ impl LendingPool {
         if max < 0 {
             return Err(PoolError::InvalidMaxPoolSize);
         }
-        
+
         let old_max = Self::get_max_pool_size(env.clone(), token.clone());
-        
+
         env.storage()
             .instance()
             .set(&DataKey::MaxPoolSize(token.clone()), &max);
         Self::bump_instance_ttl(&env);
-        
+
         deposit_cap_updated(&env, token, old_max, max);
         Ok(())
     }
 
     pub fn set_withdrawal_cooldown(env: Env, ledgers: u32) {
         Self::admin(&env).require_auth();
-        
+
         let old_cooldown = Self::get_withdrawal_cooldown(env.clone());
-        
+
         env.storage()
             .instance()
             .set(&DataKey::WithdrawalCooldown, &ledgers);
         Self::bump_instance_ttl(&env);
-        
+
         withdrawal_cooldown_updated(&env, old_cooldown, ledgers);
     }
 
@@ -463,7 +469,13 @@ impl LendingPool {
             .set(&DataKey::TotalDeposits(token.clone()), &new_total_deposits);
 
         Self::bump_instance_ttl(&env);
-        deposit(&env, provider.clone(), token.clone(), amount, shares_to_mint);
+        deposit(
+            &env,
+            provider.clone(),
+            token.clone(),
+            amount,
+            shares_to_mint,
+        );
         Ok(())
     }
 
@@ -546,7 +558,7 @@ impl LendingPool {
             .instance()
             .set(&DataKey::ProposedAdmin, &new_admin);
         Self::bump_instance_ttl(&env);
-        
+
         admin_proposed(&env, current_admin.clone(), new_admin.clone());
     }
 
@@ -563,7 +575,7 @@ impl LendingPool {
             .set(&DataKey::Admin, &proposed_admin);
         env.storage().instance().remove(&DataKey::ProposedAdmin);
         Self::bump_instance_ttl(&env);
-        
+
         admin_transferred(&env, proposed_admin.clone());
         Ok(())
     }
@@ -572,7 +584,7 @@ impl LendingPool {
         Self::admin(&env).require_auth();
         env.storage().instance().set(&DataKey::Paused, &true);
         Self::bump_instance_ttl(&env);
-        
+
         pool_paused(&env);
     }
 
@@ -580,7 +592,7 @@ impl LendingPool {
         Self::admin(&env).require_auth();
         env.storage().instance().set(&DataKey::Paused, &false);
         Self::bump_instance_ttl(&env);
-        
+
         pool_unpaused(&env);
     }
 }

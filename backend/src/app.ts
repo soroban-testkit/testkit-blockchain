@@ -47,10 +47,10 @@ app.use(
     },
     strictTransportSecurity: isProduction
       ? {
-          maxAge: 31536000,
-          includeSubDomains: true,
-          preload: true,
-        }
+        maxAge: 31536000,
+        includeSubDomains: true,
+        preload: true,
+      }
       : false,
   }),
 );
@@ -61,12 +61,11 @@ const allowedOrigins = process.env.CORS_ALLOWED_ORIGINS
 
 const corsOptions: cors.CorsOptions = {
   origin: (origin, callback) => {
-    if (
-      !origin ||
-      allowedOrigins.includes(origin) ||
-      origin.startsWith("http://localhost:")
-    ) {
+    if (!origin) {
       return callback(null, true);
+    }
+    if (allowedOrigins.includes(origin)) {
+      return callback(null, true)
     }
     return callback(new Error("Not allowed by CORS"));
   },
@@ -119,6 +118,7 @@ app.get(
   }),
 );
 
+// Legacy routes (deprecated, maintained for backward compatibility)
 app.use("/api", simulationRoutes);
 app.use("/api/score", scoreRoutes);
 app.use("/api/loans", loanRoutes);
@@ -128,6 +128,14 @@ app.use("/api/admin", adminRoutes);
 app.use("/api/auth", authRoutes);
 app.use("/api/notifications", notificationsRoutes);
 app.use("/api/events", eventRoutes);
+
+// Versioned API routes (v1 - current)
+app.use("/api/v1", simulationRoutes);
+app.use("/api/v1/score", scoreRoutes);
+app.use("/api/v1/loans", loanRoutes);
+app.use("/api/v1/indexer", indexerRoutes);
+app.use("/api/v1/admin", adminRoutes);
+app.use("/api/v1/auth", authRoutes);
 
 // ── Diagnostic / Test Routes ─────────────────────────────────────
 // Only exposed in test environment to verify centralized error handling.

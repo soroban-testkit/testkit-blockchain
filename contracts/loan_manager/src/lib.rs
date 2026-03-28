@@ -8,10 +8,17 @@ use soroban_sdk::{
 pub trait RemittanceNftInterface {
     fn get_score(env: Env, user: Address) -> u32;
     fn update_score(env: Env, user: Address, repayment_amount: i128, minter: Option<Address>);
+    fn apply_score_delta(env: Env, user: Address, delta: i32, minter: Option<Address>);
+    fn decrease_score(env: Env, user: Address, penalty_points: u32, minter: Option<Address>);
     fn seize_collateral(env: Env, user: Address, minter: Option<Address>);
     fn is_seized(env: Env, user: Address) -> bool;
     fn record_default(env: Env, user: Address, minter: Option<Address>);
     fn is_authorized_minter(env: Env, minter: Address) -> bool;
+}
+
+#[contractclient(name = "RateOracleClient")]
+pub trait RateOracleInterface {
+    fn get_rate(env: Env, borrower: Address, amount: i128, score: u32) -> u32;
 }
 
 mod events;
@@ -88,6 +95,10 @@ pub enum DataKey {
     LateFeeRateBps,
     MinTermLedgers,
     MaxTermLedgers,
+    Collateral(u32),
+    GracePeriodLedgers,
+    DefaultWindowLedgers,
+    RateOracle,
 }
 
 #[contract]
@@ -106,6 +117,10 @@ impl LoanManager {
     const MAX_LATE_FEE_CAP_BPS: u32 = 2500;
     const DEFAULT_MAX_LOAN_AMOUNT: i128 = 50_000;
     const DEFAULT_MAX_LOANS_PER_BORROWER: u32 = 3;
+    const DEFAULT_GRACE_PERIOD_LEDGERS: u32 = 4_320;
+    const DEFAULT_DEFAULT_WINDOW_LEDGERS: u32 = Self::DEFAULT_TERM_LEDGERS;
+    const LATE_REPAYMENT_SCORE_PENALTY: i32 = 10;
+    const DEFAULT_SCORE_PENALTY_POINTS: u32 = 50;
     const DEFAULT_MIN_REPAYMENT_AMOUNT: i128 = 100;
 
     fn bump_instance_ttl(env: &Env) {
@@ -150,6 +165,19 @@ impl LoanManager {
             Self::DEFAULT_INTEREST_RATE_BPS
         } else {
             configured_rate
+        }
+    }
+
+    fn compute_interest_rate(env: &Env, borrower: &Address, amount: i128, score: u32) -> u32 {
+        if let Some(oracle_addr) = env
+            .storage()
+            .instance()
+            .get::<_, Address>(&DataKey::RateOracle)
+        {
+            let client = RateOracleClient::new(env, &oracle_addr);
+            client.get_rate(borrower, &amount, &score)
+        } else {
+            Self::read_interest_rate(env)
         }
     }
 
@@ -219,6 +247,22 @@ impl LoanManager {
             .unwrap_or(Self::DEFAULT_LATE_FEE_RATE_BPS)
     }
 
+    fn grace_period_ledgers(env: &Env) -> u32 {
+        Self::bump_instance_ttl(env);
+        env.storage()
+            .instance()
+            .get(&DataKey::GracePeriodLedgers)
+            .unwrap_or(Self::DEFAULT_GRACE_PERIOD_LEDGERS)
+    }
+
+    fn default_window_ledgers(env: &Env) -> u32 {
+        Self::bump_instance_ttl(env);
+        env.storage()
+            .instance()
+            .get(&DataKey::DefaultWindowLedgers)
+            .unwrap_or(Self::DEFAULT_DEFAULT_WINDOW_LEDGERS)
+    }
+
     fn max_loan_amount(env: &Env) -> i128 {
         Self::bump_instance_ttl(env);
         env.storage()
@@ -281,11 +325,19 @@ impl LoanManager {
         }
 
         let current_ledger = env.ledger().sequence();
-        if loan.due_date == 0 || current_ledger <= loan.due_date {
+        if loan.due_date == 0 {
             return 0;
         }
 
-        let late_fee_start = loan.last_late_fee_ledger.max(loan.due_date);
+        let grace_ends = loan
+            .due_date
+            .checked_add(Self::grace_period_ledgers(env))
+            .expect("grace period overflow");
+        if current_ledger <= grace_ends {
+            return 0;
+        }
+
+        let late_fee_start = loan.last_late_fee_ledger.max(grace_ends);
         if current_ledger <= late_fee_start {
             return 0;
         }
@@ -342,6 +394,85 @@ impl LoanManager {
             .and_then(|value| value.checked_add(loan.accrued_late_fee))
             .expect("debt overflow");
         (total_debt, late_fee_delta)
+    }
+
+    /// Split a repayment across principal, interest, and late fees based on
+    /// each component's share of the current total debt. This avoids a strict
+    /// waterfall where a borrower can repeatedly clear one bucket first while
+    /// delaying principal reduction.
+    fn proportional_repayment_split(loan: &Loan, amount: i128) -> (i128, i128, i128) {
+        let principal_due = Self::remaining_principal(loan);
+        let total_debt = principal_due
+            .checked_add(loan.accrued_interest)
+            .and_then(|value| value.checked_add(loan.accrued_late_fee))
+            .expect("debt overflow");
+
+        if total_debt == 0 {
+            return (0, 0, 0);
+        }
+
+        let dues = [principal_due, loan.accrued_interest, loan.accrued_late_fee];
+        let mut payments = [0i128; 3];
+        let mut remainders = [-1i128; 3];
+        let mut allocated = 0i128;
+
+        for idx in 0..3 {
+            let due = dues[idx];
+            if due <= 0 {
+                continue;
+            }
+
+            let scaled = amount
+                .checked_mul(due)
+                .expect("repayment allocation overflow");
+            let payment = scaled
+                .checked_div(total_debt)
+                .expect("repayment allocation underflow");
+
+            payments[idx] = payment;
+            remainders[idx] = scaled
+                .checked_rem(total_debt)
+                .expect("repayment allocation underflow");
+            allocated = allocated
+                .checked_add(payment)
+                .expect("repayment allocation overflow");
+        }
+
+        let mut unallocated = amount
+            .checked_sub(allocated)
+            .expect("repayment allocation underflow");
+
+        while unallocated > 0 {
+            let mut selected: Option<usize> = None;
+
+            for idx in 0..3 {
+                if dues[idx] <= payments[idx] || remainders[idx] < 0 {
+                    continue;
+                }
+
+                match selected {
+                    None => selected = Some(idx),
+                    Some(current) => {
+                        if remainders[idx] > remainders[current] {
+                            selected = Some(idx);
+                        }
+                    }
+                }
+            }
+
+            let idx = selected.expect("repayment allocation exhausted");
+            payments[idx] = payments[idx]
+                .checked_add(1)
+                .expect("repayment allocation overflow");
+            remainders[idx] = -1;
+            unallocated -= 1;
+        }
+
+        let principal_payment = payments[0];
+        let interest_payment = payments[1];
+        let late_fee_payment = payments[2];
+
+        (principal_payment, interest_payment, late_fee_payment)
     }
 
     fn collateral_amount(env: &Env, loan_id: u32) -> i128 {
@@ -453,6 +584,14 @@ impl LoanManager {
         env.storage()
             .instance()
             .set(&DataKey::LateFeeRateBps, &Self::DEFAULT_LATE_FEE_RATE_BPS);
+        env.storage().instance().set(
+            &DataKey::GracePeriodLedgers,
+            &Self::DEFAULT_GRACE_PERIOD_LEDGERS,
+        );
+        env.storage().instance().set(
+            &DataKey::DefaultWindowLedgers,
+            &Self::DEFAULT_DEFAULT_WINDOW_LEDGERS,
+        );
         Self::bump_instance_ttl(&env);
         Ok(())
     }
@@ -533,7 +672,7 @@ impl LoanManager {
             accrued_interest: 0,
             late_fee_paid: 0,
             accrued_late_fee: 0,
-            interest_rate_bps: Self::read_interest_rate(&env),
+            interest_rate_bps: Self::compute_interest_rate(&env, &borrower, amount, score),
             due_date: 0,
             last_interest_ledger: 0,
             last_late_fee_ledger: 0,
@@ -579,7 +718,10 @@ impl LoanManager {
         loan.status = LoanStatus::Approved;
         loan.due_date = env.ledger().sequence() + term_ledgers;
         loan.last_interest_ledger = env.ledger().sequence();
-        loan.last_late_fee_ledger = loan.due_date;
+        loan.last_late_fee_ledger = loan
+            .due_date
+            .checked_add(Self::grace_period_ledgers(&env))
+            .expect("grace period overflow");
         env.storage().persistent().set(&loan_key, &loan);
         Self::bump_persistent_ttl(&env, &loan_key);
 
@@ -673,14 +815,8 @@ impl LoanManager {
         let token_client = TokenClient::new(&env, &token);
         token_client.transfer(&borrower, &lending_pool, &amount);
 
-        let interest_payment = amount.min(loan.accrued_interest);
-        let after_interest_payment = amount
-            .checked_sub(interest_payment)
-            .expect("repayment underflow");
-        let late_fee_payment = after_interest_payment.min(loan.accrued_late_fee);
-        let principal_payment = after_interest_payment
-            .checked_sub(late_fee_payment)
-            .expect("repayment underflow");
+        let (principal_payment, interest_payment, late_fee_payment) =
+            Self::proportional_repayment_split(&loan, amount);
 
         loan.interest_paid = loan
             .interest_paid
@@ -703,6 +839,13 @@ impl LoanManager {
             .checked_add(principal_payment)
             .expect("principal paid overflow");
 
+        let was_late = env.ledger().sequence()
+            > loan
+                .due_date
+                .checked_add(Self::grace_period_ledgers(&env))
+                .expect("grace period overflow");
+
+        let mut completed = false;
         if loan.principal_paid == loan.amount
             && loan.accrued_interest == 0
             && loan.accrued_late_fee == 0
@@ -711,6 +854,7 @@ impl LoanManager {
             loan.collateral_amount = 0;
             Self::decrement_borrower_loan_count(&env, &loan.borrower);
             Self::release_collateral_internal(&env, loan_id, &loan.borrower);
+            completed = true;
         }
 
         env.storage().persistent().set(&loan_key, &loan);
@@ -719,7 +863,15 @@ impl LoanManager {
         if amount >= 100 {
             let nft_contract = Self::nft_contract(&env);
             let nft_client = NftClient::new(&env, &nft_contract);
-            nft_client.update_score(&borrower, &amount, &Some(env.current_contract_address()));
+            if completed && was_late {
+                nft_client.decrease_score(
+                    &borrower,
+                    &Self::LATE_REPAYMENT_SCORE_PENALTY.unsigned_abs(),
+                    &Some(env.current_contract_address()),
+                );
+            } else {
+                nft_client.update_score(&borrower, &amount, &Some(env.current_contract_address()));
+            }
         }
 
         if late_fee_delta > 0 {
@@ -1007,6 +1159,46 @@ impl LoanManager {
         Self::late_fee_rate_bps(&env)
     }
 
+    pub fn set_grace_period_ledgers(env: Env, ledgers: u32) {
+        let admin: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .expect("not initialized");
+        admin.require_auth();
+
+        env.storage()
+            .instance()
+            .set(&DataKey::GracePeriodLedgers, &ledgers);
+        Self::bump_instance_ttl(&env);
+    }
+
+    pub fn get_grace_period_ledgers(env: Env) -> u32 {
+        Self::grace_period_ledgers(&env)
+    }
+
+    pub fn set_default_window_ledgers(env: Env, ledgers: u32) {
+        if ledgers == 0 {
+            panic!("default window must be positive");
+        }
+
+        let admin: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .expect("not initialized");
+        admin.require_auth();
+
+        env.storage()
+            .instance()
+            .set(&DataKey::DefaultWindowLedgers, &ledgers);
+        Self::bump_instance_ttl(&env);
+    }
+
+    pub fn get_default_window_ledgers(env: Env) -> u32 {
+        Self::default_window_ledgers(&env)
+    }
+
     pub fn set_min_score(env: Env, min_score: u32) {
         Self::admin(&env).require_auth();
 
@@ -1122,6 +1314,22 @@ impl LoanManager {
         Self::read_interest_rate(&env)
     }
 
+    pub fn set_rate_oracle(env: Env, rate_oracle: Address) {
+        Self::admin(&env).require_auth();
+
+        let old_oracle = env.storage().instance().get(&DataKey::RateOracle);
+        env.storage()
+            .instance()
+            .set(&DataKey::RateOracle, &rate_oracle);
+        Self::bump_instance_ttl(&env);
+        events::rate_oracle_updated(&env, old_oracle, rate_oracle);
+    }
+
+    pub fn get_rate_oracle(env: Env) -> Option<Address> {
+        Self::bump_instance_ttl(&env);
+        env.storage().instance().get(&DataKey::RateOracle)
+    }
+
     pub fn set_default_term(env: Env, ledgers: u32) -> Result<(), LoanError> {
         Self::admin(&env).require_auth();
         if ledgers == 0 {
@@ -1235,7 +1443,11 @@ impl LoanManager {
         }
 
         let current_ledger = env.ledger().sequence();
-        if current_ledger <= loan.due_date {
+        let default_eligible_after = loan
+            .due_date
+            .checked_add(Self::default_window_ledgers(&env))
+            .expect("default window overflow");
+        if current_ledger <= default_eligible_after {
             return Err(LoanError::LoanNotPastDue);
         }
 
@@ -1247,6 +1459,11 @@ impl LoanManager {
 
         let nft_contract = Self::nft_contract(&env);
         let nft_client = NftClient::new(&env, &nft_contract);
+        nft_client.decrease_score(
+            &loan.borrower,
+            &Self::DEFAULT_SCORE_PENALTY_POINTS,
+            &Some(env.current_contract_address()),
+        );
         nft_client.record_default(&loan.borrower, &Some(env.current_contract_address()));
 
         events::loan_defaulted(&env, loan_id, loan.borrower.clone());
@@ -1271,7 +1488,11 @@ impl LoanManager {
             }
 
             let current_ledger = env.ledger().sequence();
-            if current_ledger <= loan.due_date {
+            let default_eligible_after = loan
+                .due_date
+                .checked_add(Self::default_window_ledgers(&env))
+                .expect("default window overflow");
+            if current_ledger <= default_eligible_after {
                 continue;
             }
 
@@ -1284,6 +1505,11 @@ impl LoanManager {
 
             let nft_contract = Self::nft_contract(&env);
             let nft_client = NftClient::new(&env, &nft_contract);
+            nft_client.decrease_score(
+                &loan.borrower,
+                &Self::DEFAULT_SCORE_PENALTY_POINTS,
+                &Some(env.current_contract_address()),
+            );
             nft_client.record_default(&loan.borrower, &Some(env.current_contract_address()));
 
             events::loan_defaulted(&env, loan_id, loan.borrower.clone());

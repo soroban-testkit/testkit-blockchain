@@ -1,7 +1,7 @@
 #![no_std]
 use soroban_sdk::{
     contract, contractclient, contracterror, contractimpl, contracttype, symbol_short, Address,
-    BytesN, Env, String, Vec,
+    BytesN, Env, String, Symbol, Vec,
 };
 
 #[contractclient(name = "NftClient")]
@@ -593,6 +593,13 @@ impl LoanManager {
 
     pub fn upgrade(env: Env, new_wasm_hash: BytesN<32>) {
         Self::admin(&env).require_auth();
+        let old_version = Self::version(env.clone());
+        let new_version = old_version.saturating_add(1);
+        env.storage().instance().set(&DataKey::Version, &new_version);
+        env.events().publish(
+            (Symbol::new(&env, "ContractUpgraded"),),
+            (old_version, new_version),
+        );
         env.deployer().update_current_contract_wasm(new_wasm_hash);
     }
 

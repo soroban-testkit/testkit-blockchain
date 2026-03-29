@@ -219,6 +219,63 @@ describe("POST /api/loans/submit", () => {
   });
 });
 
+describe("GET /api/loans/:loanId/amortization-schedule", () => {
+  it("should return amortization schedule for an approved loan", async () => {
+    mockedQuery
+      .mockResolvedValueOnce({ rows: [{ borrower: "GABC123" }] })
+      .mockResolvedValueOnce({
+        rows: [
+          {
+            event_type: "LoanRequested",
+            amount: "1000",
+            ledger_closed_at: "2025-01-01T00:00:00.000Z",
+          },
+          {
+            event_type: "LoanApproved",
+            amount: null,
+            ledger_closed_at: "2025-01-01T00:00:00.000Z",
+            interest_rate_bps: 1200,
+            term_ledgers: 518400,
+          },
+        ],
+      });
+
+    const response = await request(app)
+      .get("/api/loans/123/amortization-schedule")
+      .set(bearer("GABC123"));
+
+    expect(response.status).toBe(200);
+    expect(response.body.success).toBe(true);
+    expect(response.body.amortization).toMatchObject({
+      principal: 1000,
+      interestRateBps: 1200,
+      termLedgers: 518400,
+    });
+    expect(Array.isArray(response.body.amortization.schedule)).toBe(true);
+    expect(response.body.amortization.schedule.length).toBeGreaterThan(0);
+  });
+
+  it("should return 404 when loan is not fully approved", async () => {
+    mockedQuery
+      .mockResolvedValueOnce({ rows: [{ borrower: "GABC123" }] })
+      .mockResolvedValueOnce({
+        rows: [
+          {
+            event_type: "LoanRequested",
+            amount: "1000",
+            ledger_closed_at: "2025-01-01T00:00:00.000Z",
+          },
+        ],
+      });
+
+    const response = await request(app)
+      .get("/api/loans/123/amortization-schedule")
+      .set(bearer("GABC123"));
+
+    expect(response.status).toBe(404);
+  });
+});
+
 // ---------------------------------------------------------------------------
 // POST /api/loans/:loanId/repay
 // ---------------------------------------------------------------------------

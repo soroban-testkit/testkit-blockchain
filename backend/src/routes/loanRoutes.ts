@@ -3,6 +3,7 @@ import {
   getLoanConfigEndpoint,
   getBorrowerLoans,
   getLoanDetails,
+  getLoanAmortizationSchedule,
   requestLoan,
   repayLoan,
   submitTransaction,
@@ -101,6 +102,14 @@ router.get(
   requireScopes("read:loans"),
   requireLoanBorrowerAccess,
   getLoanDetails,
+);
+
+router.get(
+  "/:loanId/amortization-schedule",
+  requireJwtAuth,
+  requireScopes("read:loans"),
+  requireLoanBorrowerAccess,
+  getLoanAmortizationSchedule,
 );
 
 /**

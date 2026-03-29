@@ -822,6 +822,7 @@ impl LoanManager {
             .persistent()
             .get(&loan_key)
             .ok_or(LoanError::LoanNotFound)?;
+        Self::bump_persistent_ttl(&env, &loan_key);
 
         if loan.borrower != borrower {
             return Err(LoanError::BorrowerMismatch);
@@ -1081,6 +1082,7 @@ impl LoanManager {
             .persistent()
             .get(&loan_key)
             .ok_or(LoanError::LoanNotFound)?;
+        Self::bump_persistent_ttl(&env, &loan_key);
 
         // Borrower must also sign.
         loan.borrower.require_auth();

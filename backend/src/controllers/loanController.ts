@@ -36,6 +36,79 @@ const getLatestLedger = async (): Promise<number> => {
   return result.rows[0]?.last_indexed_ledger ?? 0;
 };
 
+const roundToCents = (value: number): number =>
+  Math.round((value + Number.EPSILON) * 100) / 100;
+
+const addDays = (date: Date, days: number): Date => {
+  const result = new Date(date);
+  result.setUTCDate(result.getUTCDate() + days);
+  return result;
+};
+
+const buildAmortizationSchedule = (
+  principal: number,
+  interestRateBps: number,
+  termLedgers: number,
+  startDate: Date,
+) => {
+  const totalInterest = principal * (interestRateBps / 10000);
+  const totalDue = principal + totalInterest;
+
+  const LEDGER_DAY = 17280; // 1 day in ledgers
+  const termDays = termLedgers / LEDGER_DAY;
+
+  const periodCount = Math.max(1, Math.round(termDays / 30) || 1);
+  const daysPerPeriod = termDays / periodCount;
+
+  const rawPrincipalPortion = principal / periodCount;
+  const rawInterestPortion = totalInterest / periodCount;
+
+  const schedule = [] as Array<{
+    date: string;
+    principalPortion: number;
+    interestPortion: number;
+    totalDue: number;
+    runningBalance: number;
+  }>;
+
+  let remainingPrincipal = principal;
+  let remainingInterest = totalInterest;
+
+  for (let i = 1; i <= periodCount; i++) {
+    const isLast = i === periodCount;
+
+    const principalPortion = isLast
+      ? roundToCents(remainingPrincipal)
+      : roundToCents(rawPrincipalPortion);
+
+    const interestPortion = isLast
+      ? roundToCents(remainingInterest)
+      : roundToCents(rawInterestPortion);
+
+    remainingPrincipal = roundToCents(remainingPrincipal - principalPortion);
+    remainingInterest = roundToCents(remainingInterest - interestPortion);
+
+    const dueDate = addDays(startDate, Math.round(daysPerPeriod * i));
+
+    schedule.push({
+      date: dueDate.toISOString(),
+      principalPortion,
+      interestPortion,
+      totalDue: roundToCents(principalPortion + interestPortion),
+      runningBalance: Math.max(0, remainingPrincipal),
+    });
+  }
+
+  return {
+    principal: roundToCents(principal),
+    interestRateBps,
+    termLedgers,
+    totalInterest: roundToCents(totalInterest),
+    totalDue: roundToCents(totalDue),
+    schedule,
+  };
+};
+
 /**
  * Get active loans for a borrower
  *
@@ -254,6 +327,53 @@ export const getLoanDetails = asyncHandler(
           tx: event.tx_hash,
         })),
       },
+    });
+  },
+);
+
+export const getLoanAmortizationSchedule = asyncHandler(
+  async (req: Request, res: Response) => {
+    const { loanId } = req.params;
+
+    const eventsResult = await query(
+      `SELECT event_type, amount, ledger_closed_at, interest_rate_bps, term_ledgers
+       FROM loan_events
+       WHERE loan_id = $1
+       ORDER BY ledger_closed_at ASC`,
+      [loanId],
+    );
+
+    if (eventsResult.rows.length === 0) {
+      throw AppError.notFound("Loan not found", ErrorCode.LOAN_NOT_FOUND, "loanId");
+    }
+
+    const events = eventsResult.rows;
+    const requestEvent = events.find((event: any) => event.event_type === "LoanRequested");
+    const approvalEvent = events.find((event: any) => event.event_type === "LoanApproved");
+
+    if (!requestEvent || !approvalEvent || !requestEvent.amount) {
+      throw AppError.notFound("Loan not fully approved", ErrorCode.LOAN_NOT_FOUND, "loanId");
+    }
+
+    const principal = Number.parseFloat(String(requestEvent.amount));
+    const interestRateBps = Number.parseInt(String(approvalEvent.interest_rate_bps ?? DEFAULT_INTEREST_RATE_BPS), 10);
+    const termLedgers = Number.parseInt(String(approvalEvent.term_ledgers ?? DEFAULT_TERM_LEDGERS), 10);
+
+    const approvedAt = approvalEvent.ledger_closed_at
+      ? new Date(approvalEvent.ledger_closed_at)
+      : new Date();
+
+    const amortization = buildAmortizationSchedule(
+      principal,
+      interestRateBps,
+      termLedgers,
+      approvedAt,
+    );
+
+    res.json({
+      success: true,
+      loanId,
+      amortization,
     });
   },
 );

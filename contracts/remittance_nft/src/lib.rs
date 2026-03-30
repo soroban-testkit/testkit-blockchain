@@ -523,7 +523,7 @@ impl RemittanceNFT {
 
         let old_score = metadata.score as i64;
         let next_score = old_score + delta as i64;
-        let bounded_score = if next_score < 0 { 0 } else { next_score };
+        let bounded_score = next_score.clamp(0, Self::MAX_SCORE as i64);
         let next_score_u32 = u32::try_from(bounded_score).expect("score overflow");
 
         if next_score_u32 == metadata.score {

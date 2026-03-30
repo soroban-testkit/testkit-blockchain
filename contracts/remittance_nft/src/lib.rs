@@ -509,41 +509,6 @@ impl RemittanceNFT {
         );
     }
 
-    pub fn apply_score_delta(env: Env, user: Address, delta: i32, minter: Option<Address>) {
-        Self::require_admin_or_authorized_minter(&env, minter)
-            .unwrap_or_else(|_| panic!("unauthorized minter"));
-
-        let metadata_key = DataKey::Metadata(user.clone());
-        let mut metadata = Self::get_or_migrate_metadata(&env, &user)
-            .unwrap_or_else(|| panic!("user does not have an NFT"));
-
-        let old_score = metadata.score as i64;
-        let next_score = old_score + delta as i64;
-        let min_score = Self::MIN_CREDIT_SCORE as i64;
-        let max_score = Self::MAX_CREDIT_SCORE as i64;
-        let bounded_score = next_score.clamp(min_score, max_score);
-        let next_score_u32 = u32::try_from(bounded_score).expect("score overflow");
-
-        if next_score_u32 == metadata.score {
-            return;
-        }
-
-        let previous_score = metadata.score;
-        metadata.score = next_score_u32;
-
-        env.storage().persistent().set(&metadata_key, &metadata);
-        Self::bump_persistent_ttl(&env, &metadata_key);
-        Self::append_score_history(
-            &env,
-            &user,
-            previous_score,
-            metadata.score,
-            symbol_short!("ADJ"),
-        );
-        env.events()
-            .publish((symbol_short!("ScoreUpd"), user), metadata.score);
-    }
-
     /// Update the history hash for a user's NFT.
     pub fn apply_score_delta(
         env: Env,

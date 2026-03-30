@@ -576,6 +576,18 @@ impl RemittanceNFT {
         Ok(())
     }
 
+    /// Mark a borrower's collateral as seized.
+    ///
+    /// # Seized flag semantics
+    /// The `seized` flag gates **new credit activity only**:
+    /// - Blocks: new loan requests, new collateral deposits
+    /// - Does NOT block: repayment of existing approved loans,
+    ///   collateral release after full repayment, or score reads.
+    ///
+    /// This ensures that a seized borrower retains a path to clear
+    /// their outstanding debt and avoid permanent bad-debt accumulation
+    /// in the lending pool.
+
     pub fn seize_collateral(
         env: Env,
         user: Address,
@@ -747,6 +759,8 @@ impl RemittanceNFT {
         Ok(())
     }
 
+    /// Returns true if the borrower's collateral has been seized.
+    /// See `seize_collateral` for the full list of operations this flag blocks.
     pub fn is_seized(env: Env, user: Address) -> bool {
         let seized_key = DataKey::Seized(user.clone());
         let is_seized = env.storage().persistent().has(&seized_key);

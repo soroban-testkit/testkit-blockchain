@@ -856,12 +856,12 @@ impl LoanManager {
         }
 
         let min_repayment_amount = Self::min_repayment_amount(&env);
+        if amount < total_debt && amount < min_repayment_amount {
+            panic!("repayment amount below minimum");
+        }
 
-        // Fix for rounding dust: if amount covers all but 1 unit of remaining debt, treat as full repayment
-        let is_rounding_dust_forgiveness = amount >= total_debt.saturating_sub(1);
-
-        // Skip minimum amount check if this is a rounding dust forgiveness or full repayment
-        if amount < total_debt && !is_rounding_dust_forgiveness && amount < min_repayment_amount {
+        let min_repayment_amount = Self::min_repayment_amount(&env);
+        if amount < total_debt && amount < min_repayment_amount {
             panic!("repayment amount below minimum");
         }
 

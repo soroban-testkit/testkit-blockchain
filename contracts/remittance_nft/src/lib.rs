@@ -71,7 +71,6 @@ impl RemittanceNFT {
     pub const MAX_SCORE_HISTORY_ENTRIES: u32 = 50;
     const TRANSFER_COOLDOWN_LEDGERS: u32 = 17280;
     const MIN_CREDIT_SCORE: u32 = 300;
-    const MAX_CREDIT_SCORE: u32 = 850;
     pub const MAX_SCORE: u32 = 850;
 
     fn admin_key() -> soroban_sdk::Symbol {

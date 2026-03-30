@@ -1073,3 +1073,112 @@ fn test_new_admin_can_act_after_transfer() {
     client.mint(&user, &500, &create_test_hash(&env, 40), &None);
     assert_eq!(client.get_score(&user), 500);
 }
+
+#[test]
+fn test_remint_requires_approval() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register(RemittanceNFT, ());
+    let client = RemittanceNFTClient::new(&env, &contract_id);
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+
+    client.initialize(&admin);
+
+    // Mint then burn
+    client.mint(&user, &500, &BytesN::from_array(&env, &[1u8; 32]), &None);
+    client.burn(&user, &None);
+
+    // Remint without approval should fail — even for admin calling directly
+    let result = client.try_mint(
+        &user,
+        &500,
+        &BytesN::from_array(&env, &[1u8; 32]),
+        &None,
+    );
+    assert_eq!(result, Err(Ok(NftError::RemintNotApproved)));
+
+    // Grant approval
+    client.approve_remint(&user);
+
+    // Remint should now succeed
+    client.mint(&user, &500, &BytesN::from_array(&env, &[1u8; 32]), &None);
+    assert_eq!(client.get_score(&user), 500);
+}
+
+#[test]
+fn test_remint_approval_is_single_use() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register(RemittanceNFT, ());
+    let client = RemittanceNFTClient::new(&env, &contract_id);
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+
+    client.initialize(&admin);
+
+    // Mint, burn, approve, remint
+    client.mint(&user, &500, &BytesN::from_array(&env, &[1u8; 32]), &None);
+    client.burn(&user, &None);
+    client.approve_remint(&user);
+    client.mint(&user, &500, &BytesN::from_array(&env, &[1u8; 32]), &None);
+
+    // Approval was consumed — burn and try reminting again without a new approval
+    client.burn(&user, &None);
+    let result = client.try_mint(
+        &user,
+        &500,
+        &BytesN::from_array(&env, &[1u8; 32]),
+        &None,
+    );
+    assert_eq!(result, Err(Ok(NftError::RemintNotApproved)));
+
+    // Second approval unblocks it again
+    client.approve_remint(&user);
+    client.mint(&user, &500, &BytesN::from_array(&env, &[1u8; 32]), &None);
+    assert_eq!(client.get_score(&user), 500);
+}
+
+#[test]
+fn test_remint_approval_consumed_after_use() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register(RemittanceNFT, ());
+    let client = RemittanceNFTClient::new(&env, &contract_id);
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+
+    client.initialize(&admin);
+
+    client.mint(&user, &500, &BytesN::from_array(&env, &[1u8; 32]), &None);
+    client.burn(&user, &None);
+    client.approve_remint(&user);
+
+    // Approval exists
+    assert!(client.is_remint_approved(&user));
+
+    client.mint(&user, &500, &BytesN::from_array(&env, &[1u8; 32]), &None);
+
+    // Approval was consumed
+    assert!(!client.is_remint_approved(&user));
+}
+
+#[test]
+fn test_first_time_mint_does_not_require_approval() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register(RemittanceNFT, ());
+    let client = RemittanceNFTClient::new(&env, &contract_id);
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+
+    client.initialize(&admin);
+
+    // First mint never requires approval
+    client.mint(&user, &600, &BytesN::from_array(&env, &[1u8; 32]), &None);
+    assert_eq!(client.get_score(&user), 600);
+}

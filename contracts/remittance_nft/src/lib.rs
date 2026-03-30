@@ -22,6 +22,7 @@ pub enum NftError {
     ContractPaused = 13,
     InvalidHistoryHash = 14,
     NoProposedAdmin = 15,
+    RemintNotApproved = 16,
 }
 
 #[contracttype]
@@ -383,7 +384,7 @@ impl RemittanceNFT {
         history_hash: BytesN<32>,
         minter: Option<Address>,
     ) -> Result<(), NftError> {
-        let admin_direct_mint = minter.is_none();
+        let _admin_direct_mint = minter.is_none();
         Self::require_admin_or_authorized_minter(&env, minter)?;
 
         let metadata_key = DataKey::Metadata(user.clone());
@@ -397,15 +398,18 @@ impl RemittanceNFT {
         }
 
         if env.storage().persistent().has(&burned_key) {
+            // Re-minting a burned NFT always requires an explicit prior call to
+            // approve_remint() — even when the admin calls mint() directly.
+            // This prevents accidental or unauthorized remints and ensures the
+            // approval flow is the single gated path for burned account recovery.
             let remint_approval_key = DataKey::RemintApproval(user.clone());
-            let has_approval = env.storage().persistent().has(&remint_approval_key);
-
-            if !admin_direct_mint && !has_approval {
-                return Err(NftError::BurnedRequiresApproval);
+            if !env.storage().persistent().has(&remint_approval_key) {
+                return Err(NftError::RemintNotApproved);
             }
 
-            env.storage().persistent().remove(&burned_key);
+            // Consume the one-time approval so it cannot be reused.
             env.storage().persistent().remove(&remint_approval_key);
+            env.storage().persistent().remove(&burned_key);
             env.storage()
                 .persistent()
                 .remove(&DataKey::Seized(user.clone()));
@@ -779,6 +783,14 @@ impl RemittanceNFT {
         count
     }
 
+    /// Grant one-time approval for a burned account to be re-minted.
+    ///
+    /// This must be called by the admin before `mint()` can succeed for a
+    /// previously-burned user. The approval is consumed on use and cannot
+    /// be reused — a new `approve_remint()` call is required for each
+    /// subsequent remint attempt.
+    ///
+    /// Reverts with `ContractPaused` if the contract is paused.
     pub fn approve_remint(env: Env, user: Address) -> Result<(), NftError> {
         Self::admin(&env).require_auth();
         Self::assert_not_paused(&env)?;

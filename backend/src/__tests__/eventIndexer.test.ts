@@ -11,6 +11,7 @@ const mockGetScoreConfig = jest.fn(() => ({
   repaymentDelta: 15,
   defaultPenalty: 50,
 }));
+const mockUpdateUserScoresBulk = jest.fn<(updates: Map<string, number>) => Promise<void>>().mockResolvedValue(undefined);
 
 jest.unstable_mockModule("../db/connection.js", () => ({
   query: mockQuery,
@@ -32,6 +33,10 @@ jest.unstable_mockModule("../services/notificationService.js", () => ({
 
 jest.unstable_mockModule("../services/sorobanService.js", () => ({
   sorobanService: { getScoreConfig: mockGetScoreConfig },
+}));
+
+jest.unstable_mockModule("../services/scoresService.js", () => ({
+  updateUserScoresBulk: mockUpdateUserScoresBulk,
 }));
 
 jest.unstable_mockModule("../utils/logger.js", () => ({
@@ -151,6 +156,12 @@ describe("EventIndexer", () => {
       return { rows: [], rowCount: 0 };
     });
 
+    mockUpdateUserScoresBulk.mockImplementation(async (updates: Map<string, number>) => {
+      for (const [userId, delta] of updates) {
+        scoreUpdates.push([userId, delta]);
+      }
+    });
+
     const indexer = new EventIndexer({
       rpcUrl: "https://rpc.test",
       contractId: "CINDEXERTEST",
@@ -213,7 +224,7 @@ describe("EventIndexer", () => {
     expect(insertedLoanEvents[3]?.[2]).toBe(9);
     expect(insertedLoanEvents[3]?.[3]).toBe(borrowerDefaulted);
 
-    expect(scoreUpdates).toEqual([[borrowerRepaid, 15, borrowerDefaulted, -50]]);
+    expect(scoreUpdates).toEqual([[borrowerRepaid, 15], [borrowerDefaulted, -50]]);
     expect(mockGetScoreConfig).toHaveBeenCalledTimes(2);
     expect(mockDispatch).toHaveBeenCalledTimes(4);
     expect(mockBroadcast).toHaveBeenCalledTimes(4);

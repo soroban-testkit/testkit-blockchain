@@ -734,19 +734,22 @@ impl LoanManager {
         env.storage()
             .persistent()
             .set(&DataKey::Loan(loan_counter), &loan);
+
         env.storage()
             .instance()
             .set(&DataKey::LoanCounter, &loan_counter);
+
+        // Count pending loans against the borrower cap immediately.
+        Self::increment_borrower_loan_count(&env, &borrower);
+
         Self::bump_instance_ttl(&env);
         Self::bump_persistent_ttl(&env, &DataKey::Loan(loan_counter));
-
         events::loan_requested(&env, borrower.clone(), amount);
         env.events()
             .publish((symbol_short!("LoanReq"), borrower), loan_counter);
-
         Ok(loan_counter)
     }
-
+    
     pub fn approve_loan(env: Env, loan_id: u32) -> Result<(), LoanError> {
         use soroban_sdk::token::TokenClient;
 
@@ -795,7 +798,6 @@ impl LoanManager {
         Self::bump_persistent_ttl(&env, &loan_key);
         let token_client = TokenClient::new(&env, &token);
 
-        Self::increment_borrower_loan_count(&env, &loan.borrower);
         token_client.transfer(&lending_pool, &loan.borrower, &loan.amount);
 
         events::loan_approved(&env, loan_id, loan.borrower.clone());

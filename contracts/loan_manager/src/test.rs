@@ -1202,3 +1202,23 @@ fn test_set_default_window_below_minimum_rejected() {
     let result = manager.try_set_default_window_ledgers(&99);
     assert_eq!(result, Err(Ok(LoanError::InvalidConfiguration)));
 }
+
+#[test]
+fn test_pending_loans_count_against_cap() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (client, nft_client, _pool_client, _token_id, _token_admin) = setup_test(&env);
+
+    let borrower = Address::generate(&env);
+    nft_client.mint(&borrower, &600, &BytesN::from_array(&env, &[1u8; 32]), &None);
+
+    // Fill the cap with pending loans (default cap = 3)
+    client.request_loan(&borrower, &1_000);
+    client.request_loan(&borrower, &1_000);
+    client.request_loan(&borrower, &1_000);
+
+    // Fourth request must be rejected
+    let result = client.try_request_loan(&borrower, &1_000);
+    assert_eq!(result, Err(Ok(LoanError::MaxLoansReached)));
+}

@@ -211,6 +211,18 @@ impl GovernanceContract {
         if signers.len() > MAX_SIGNERS {
             panic!("signer list exceeds MAX_SIGNERS of 20 (4008)");
         }
+        // Ensure signer list contains unique addresses. Duplicates would allow
+        // the same key to be listed multiple times and potentially bypass
+        // the multi-signer threshold semantics.
+        {
+            let mut seen: Vec<Address> = Vec::new(&env);
+            for s in signers.iter() {
+                if seen.iter().any(|x| x == s) {
+                    panic!("duplicate signer in signer list (4020)");
+                }
+                seen.push_back(s.clone());
+            }
+        }
         if threshold < 1 {
             panic!("threshold must be >= 1 (4007)");
         }

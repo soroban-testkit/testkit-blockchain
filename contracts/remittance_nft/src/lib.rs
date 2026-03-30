@@ -398,24 +398,7 @@ impl RemittanceNFT {
         }
 
         if env.storage().persistent().has(&burned_key) {
-            // Re-minting a burned NFT always requires an explicit prior call to
-            // approve_remint() — even when the admin calls mint() directly.
-            // This prevents accidental or unauthorized remints and ensures the
-            // approval flow is the single gated path for burned account recovery.
-            let remint_approval_key = DataKey::RemintApproval(user.clone());
-            if !env.storage().persistent().has(&remint_approval_key) {
-                return Err(NftError::RemintNotApproved);
-            }
-
-            // Consume the one-time approval so it cannot be reused.
-            env.storage().persistent().remove(&remint_approval_key);
-            env.storage().persistent().remove(&burned_key);
-            env.storage()
-                .persistent()
-                .remove(&DataKey::Seized(user.clone()));
-            env.storage()
-                .persistent()
-                .remove(&DataKey::TransferCooldown(user.clone()));
+            return Err(NftError::BurnedRequiresApproval);
         }
 
         let metadata = RemittanceMetadata {
@@ -427,6 +410,75 @@ impl RemittanceNFT {
         Self::bump_persistent_ttl(&env, &metadata_key);
         env.events()
             .publish((symbol_short!("Mint"), user), initial_score);
+
+        Ok(())
+    }
+
+    /// Re-mint an NFT for a previously burned account.
+    ///
+    /// Unlike `mint()`, this function:
+    /// - Is admin-only (no authorized minter path)
+    /// - Requires a prior `approve_remint()` call (enforced via RemintApproval storage key)
+    /// - Emits a distinct `AdminRemint` event for audit trail separation
+    /// - Cannot be used for first-time mints (only works if `Burned(user)` is set)
+    ///
+    /// This separation ensures that burned-account recovery is always
+    /// intentional, admin-gated, and auditable on-chain separately from
+    /// normal minting activity.
+    pub fn admin_remint(
+        env: Env,
+        user: Address,
+        initial_score: u32,
+        history_hash: BytesN<32>,
+    ) -> Result<(), NftError> {
+        // Admin-only — no minter bypass allowed for remints.
+        Self::admin(&env).require_auth();
+        Self::assert_not_paused(&env)?;
+
+        // Must be a previously burned account — not a first-time mint.
+        let burned_key = DataKey::Burned(user.clone());
+        if !env.storage().persistent().has(&burned_key) {
+            return Err(NftError::NftNotFound);
+        }
+
+        // Require explicit prior approval even for admin.
+        // approve_remint() must be called in a separate transaction first.
+        let remint_approval_key = DataKey::RemintApproval(user.clone());
+        if !env.storage().persistent().has(&remint_approval_key) {
+            return Err(NftError::RemintNotApproved);
+        }
+
+        // User must not already have an active NFT (sanity check).
+        let metadata_key = DataKey::Metadata(user.clone());
+        if env.storage().persistent().has(&metadata_key)
+            || env.storage().persistent().has(&DataKey::Score(user.clone()))
+        {
+            return Err(NftError::NftAlreadyExists);
+        }
+
+        // Consume the one-time approval.
+        env.storage().persistent().remove(&remint_approval_key);
+
+        // Clear burned state and associated flags.
+        env.storage().persistent().remove(&burned_key);
+        env.storage()
+            .persistent()
+            .remove(&DataKey::Seized(user.clone()));
+        env.storage()
+            .persistent()
+            .remove(&DataKey::TransferCooldown(user.clone()));
+
+        // Write the new NFT metadata.
+        let metadata = RemittanceMetadata {
+            score: initial_score.min(Self::MAX_SCORE),
+            history_hash,
+        };
+        env.storage().persistent().set(&metadata_key, &metadata);
+        Self::bump_persistent_ttl(&env, &metadata_key);
+
+        // Emit a distinct AdminRemint event — auditably separate from Mint events.
+        env.events()
+            .publish((symbol_short!("AdmRemint"), user.clone()), initial_score);
 
         Ok(())
     }

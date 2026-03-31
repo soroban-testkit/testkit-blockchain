@@ -895,8 +895,19 @@ impl LoanManager {
         if loan.borrower != borrower {
             return Err(LoanError::BorrowerMismatch);
         }
+
         if loan.status != LoanStatus::Approved {
             return Err(LoanError::LoanNotActive);
+        }
+
+        // Allow repayment until end of default window
+        let current_ledger = env.ledger().sequence();
+        let default_ends = loan
+            .due_date
+            .checked_add(Self::default_window_ledgers(&env))
+            .expect("default window overflow");
+        if current_ledger > default_ends {
+            return Err(LoanError::LoanPastDue);
         }
 
         let (total_debt, late_fee_delta) = Self::current_total_debt(&env, &mut loan);
@@ -1181,13 +1192,18 @@ impl LoanManager {
         // Borrower must also sign.
         loan.borrower.require_auth();
 
+
         if loan.status != LoanStatus::Approved {
             return Err(LoanError::LoanNotActive);
         }
 
-        // Good-standing check: must not be past due.
+        // Allow refinance until end of default window
         let current_ledger = env.ledger().sequence();
-        if current_ledger > loan.due_date {
+        let default_ends = loan
+            .due_date
+            .checked_add(Self::default_window_ledgers(&env))
+            .expect("default window overflow");
+        if current_ledger > default_ends {
             return Err(LoanError::LoanPastDue);
         }
 

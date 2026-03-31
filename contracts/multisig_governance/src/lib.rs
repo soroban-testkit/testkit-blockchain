@@ -217,14 +217,14 @@ impl GovernanceContract {
         // deduplicated `unique_signers` Vec that preserves order but rejects
         // input lists containing duplicates.
         let mut unique_signers: Vec<Address> = Vec::new(&env);
-            for s in signers.iter() {
-                if unique_signers.iter().any(|x| x == s) {
-                    // Explicitly reject proposals containing duplicate signer
-                    // entries to avoid any ambiguity in quorum semantics.
-                    panic!("duplicate signer in signer list (4020)");
-                }
-                unique_signers.push_back(s.clone());
+        for s in signers.iter() {
+            if unique_signers.iter().any(|x| x == s) {
+                // Explicitly reject proposals containing duplicate signer
+                // entries to avoid any ambiguity in quorum semantics.
+                panic!("duplicate signer in signer list (4020)");
             }
+            unique_signers.push_back(s.clone());
+        }
         if threshold < 1 {
             panic!("threshold must be >= 1 (4007)");
         }

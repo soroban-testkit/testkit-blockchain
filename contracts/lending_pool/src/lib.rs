@@ -493,8 +493,11 @@ impl LendingPool {
         if cur_total_shares == 0 {
             return (shares, 0);
         }
-        let asset_value =
-            Self::calc_assets_to_redeem(shares, Self::read_pool_balance(&env, &token), cur_total_shares);
+        let asset_value = Self::calc_assets_to_redeem(
+            shares,
+            Self::read_pool_balance(&env, &token),
+            cur_total_shares,
+        );
         (shares, asset_value)
     }
 

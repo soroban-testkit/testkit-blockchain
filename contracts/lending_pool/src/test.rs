@@ -844,7 +844,10 @@ fn test_get_depositor_yield_no_deposit() {
     pool_client.initialize(&admin);
 
     let provider = Address::generate(&env);
-    assert_eq!(pool_client.get_depositor_yield(&provider, &token_id), (0, 0));
+    assert_eq!(
+        pool_client.get_depositor_yield(&provider, &token_id),
+        (0, 0)
+    );
 }
 
 #[test]

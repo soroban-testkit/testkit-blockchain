@@ -73,6 +73,7 @@ impl RemittanceNFT {
     const MIN_CREDIT_SCORE: u32 = 300;
     const MAX_CREDIT_SCORE: u32 = 850;
     pub const MAX_SCORE: u32 = 850;
+    pub const MAX_ALLOWED_BURN_THRESHOLD: u32 = 1000; // Set as appropriate for your business logic
 
     fn admin_key() -> soroban_sdk::Symbol {
         symbol_short!("ADMIN")
@@ -776,7 +777,7 @@ impl RemittanceNFT {
     }
 
     pub fn set_default_burn_threshold(env: Env, threshold: u32) -> Result<(), NftError> {
-        if threshold == 0 {
+        if threshold == 0 || threshold > Self::MAX_ALLOWED_BURN_THRESHOLD {
             return Err(NftError::InvalidThreshold);
         }
         Self::admin(&env).require_auth();

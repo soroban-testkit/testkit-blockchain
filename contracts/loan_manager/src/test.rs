@@ -125,8 +125,7 @@ fn test_approve_loan_flow() {
     let env = Env::default();
     env.mock_all_auths_allowing_non_root_auth();
 
-    let (manager, nft_client, _pool_client, token_id, _token_admin) = setup_test(&env);
-    let pool_contract_id = manager.get_pool_address();
+    let (manager, nft_client, pool_client, token_id, _token_admin) = setup_test(&env);
     let borrower = Address::generate(&env);
 
     // 1. Give borrower a score high enough to pass
@@ -317,8 +316,7 @@ fn test_configurable_interest_rate_and_default_term() {
     let env = Env::default();
     env.mock_all_auths_allowing_non_root_auth();
 
-    let (manager, nft_client, _pool_client, token_id, _token_admin) = setup_test(&env);
-    let pool_contract_id = manager.get_pool_address();
+    let (manager, nft_client, pool_client, token_id, _token_admin) = setup_test(&env);
     let borrower = Address::generate(&env);
 
     let history_hash = soroban_sdk::BytesN::from_array(&env, &[0u8; 32]);

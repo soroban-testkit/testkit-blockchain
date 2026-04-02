@@ -1223,7 +1223,7 @@ fn test_pending_loans_count_against_cap() {
     let env = Env::default();
     env.mock_all_auths();
 
-    let (client, nft_client, _pool_client, _token_id, _token_admin) = setup_test(&env);
+    let (client, nft_client, pool_client, token_id, _token_admin) = setup_test(&env);
 
     let borrower = Address::generate(&env);
     nft_client.mint(
@@ -1237,19 +1237,19 @@ fn test_pending_loans_count_against_cap() {
     let stellar_token = StellarAssetClient::new(&env, &token_id);
     stellar_token.mint(&pool_client, &10_000);
 
-    let loan_id = manager.request_loan(&borrower, &1000);
-    manager.approve_loan(&loan_id);
+    let loan_id = client.request_loan(&borrower, &1000);
+    client.approve_loan(&loan_id);
 
     // Make a partial repayment that leaves a small remaining balance
     // Use 998 to leave 2 units remaining (which should trigger dust forgiveness)
-    manager.repay(&borrower, &loan_id, &998);
+    client.repay(&borrower, &loan_id, &998);
 
-    let loan = manager.get_loan(&loan_id);
+    let loan = client.get_loan(&loan_id);
     let remaining_debt =
         loan.amount - loan.principal_paid + loan.accrued_interest + loan.accrued_late_fee;
 
     // Set minimum repayment amount higher than the remaining dust
-    manager.set_min_repayment_amount(&100);
+    client.set_min_repayment_amount(&100);
 
     // Fourth request must be rejected
     let result = client.try_request_loan(&borrower, &1_000);

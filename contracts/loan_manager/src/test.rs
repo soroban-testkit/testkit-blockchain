@@ -1233,25 +1233,19 @@ fn test_pending_loans_count_against_cap() {
         &None,
     );
 
-    // Fund the lending pool so it has liquidity for the loan
     let stellar_token = StellarAssetClient::new(&env, &token_id);
     stellar_token.mint(&pool_client, &10_000);
 
-    let loan_id = client.request_loan(&borrower, &1000);
-    client.approve_loan(&loan_id);
+    // Set cap to 2
+    client.set_max_loans_per_borrower(&2);
 
-    // Make a partial repayment that leaves a small remaining balance
-    // Use 998 to leave 2 units remaining (which should trigger dust forgiveness)
-    client.repay(&borrower, &loan_id, &998);
+    // Request two loans (both pending) — should consume the full cap
+    let _loan_id_1 = client.request_loan(&borrower, &500);
+    let _loan_id_2 = client.request_loan(&borrower, &500);
 
-    let loan = client.get_loan(&loan_id);
-    let _remaining_debt =
-        loan.amount - loan.principal_paid + loan.accrued_interest + loan.accrued_late_fee;
+    assert_eq!(client.get_borrower_loan_count(&borrower), 2);
 
-    // Set minimum repayment amount higher than the remaining dust
-    client.set_min_repayment_amount(&100);
-
-    // Fourth request must be rejected
-    let result = client.try_request_loan(&borrower, &1_000);
+    // Third request must be rejected even though neither loan is approved yet
+    let result = client.try_request_loan(&borrower, &500);
     assert_eq!(result, Err(Ok(LoanError::MaxLoansReached)));
 }

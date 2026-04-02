@@ -451,7 +451,10 @@ impl RemittanceNFT {
         // User must not already have an active NFT (sanity check).
         let metadata_key = DataKey::Metadata(user.clone());
         if env.storage().persistent().has(&metadata_key)
-            || env.storage().persistent().has(&DataKey::Score(user.clone()))
+            || env
+                .storage()
+                .persistent()
+                .has(&DataKey::Score(user.clone()))
         {
             return Err(NftError::NftAlreadyExists);
         }

@@ -812,7 +812,7 @@ impl LoanManager {
             .publish((symbol_short!("LoanReq"), borrower), loan_counter);
         Ok(loan_counter)
     }
-    
+
     pub fn approve_loan(env: Env, loan_id: u32) -> Result<(), LoanError> {
         use soroban_sdk::token::TokenClient;
 
@@ -1017,7 +1017,11 @@ impl LoanManager {
                         &Some(env.current_contract_address()),
                     );
                 } else {
-                    nft_client.update_score(&borrower, &amount, &Some(env.current_contract_address()));
+                    nft_client.update_score(
+                        &borrower,
+                        &amount,
+                        &Some(env.current_contract_address()),
+                    );
                 }
             }
         }

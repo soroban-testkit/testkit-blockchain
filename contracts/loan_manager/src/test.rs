@@ -1226,7 +1226,12 @@ fn test_pending_loans_count_against_cap() {
     let (client, nft_client, _pool_client, _token_id, _token_admin) = setup_test(&env);
 
     let borrower = Address::generate(&env);
-    nft_client.mint(&borrower, &600, &BytesN::from_array(&env, &[1u8; 32]), &None);
+    nft_client.mint(
+        &borrower,
+        &600,
+        &BytesN::from_array(&env, &[1u8; 32]),
+        &None,
+    );
 
     // Fund the lending pool so it has liquidity for the loan
     let stellar_token = StellarAssetClient::new(&env, &token_id);

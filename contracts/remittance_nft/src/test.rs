@@ -690,7 +690,12 @@ fn test_approve_remint_allows_authorized_minter_remint() {
     client.authorize_minter(&minter);
 
     // First mint via authorized minter
-    client.mint(&user, &650, &BytesN::from_array(&env, &[5u8; 32]), &Some(minter.clone()));
+    client.mint(
+        &user,
+        &650,
+        &BytesN::from_array(&env, &[5u8; 32]),
+        &Some(minter.clone()),
+    );
     client.burn(&user, &None);
 
     // Reminting a burned user via mint() is rejected even for authorized minters —
@@ -1147,11 +1152,7 @@ fn test_remint_requires_approval() {
     client.burn(&user, &None);
 
     // admin_remint without approval should fail
-    let result = client.try_admin_remint(
-        &user,
-        &500,
-        &BytesN::from_array(&env, &[1u8; 32]),
-    );
+    let result = client.try_admin_remint(&user, &500, &BytesN::from_array(&env, &[1u8; 32]));
     assert_eq!(result, Err(Ok(NftError::RemintNotApproved)));
 
     // Grant approval then remint succeeds
@@ -1180,11 +1181,7 @@ fn test_remint_approval_is_single_use() {
 
     // Approval was consumed — burn and try again without new approval
     client.burn(&user, &None);
-    let result = client.try_admin_remint(
-        &user,
-        &500,
-        &BytesN::from_array(&env, &[1u8; 32]),
-    );
+    let result = client.try_admin_remint(&user, &500, &BytesN::from_array(&env, &[1u8; 32]));
     assert_eq!(result, Err(Ok(NftError::RemintNotApproved)));
 
     // Second approval unblocks it
@@ -1249,11 +1246,7 @@ fn test_admin_remint_requires_approval() {
     client.burn(&user, &None);
 
     // admin_remint without approval should fail
-    let result = client.try_admin_remint(
-        &user,
-        &500,
-        &BytesN::from_array(&env, &[1u8; 32]),
-    );
+    let result = client.try_admin_remint(&user, &500, &BytesN::from_array(&env, &[1u8; 32]));
     assert_eq!(result, Err(Ok(NftError::RemintNotApproved)));
 }
 
@@ -1290,11 +1283,7 @@ fn test_admin_remint_fails_for_non_burned_user() {
     client.initialize(&admin);
 
     // User was never burned — admin_remint should fail
-    let result = client.try_admin_remint(
-        &user,
-        &500,
-        &BytesN::from_array(&env, &[1u8; 32]),
-    );
+    let result = client.try_admin_remint(&user, &500, &BytesN::from_array(&env, &[1u8; 32]));
     assert_eq!(result, Err(Ok(NftError::NftNotFound)));
 }
 
@@ -1314,12 +1303,7 @@ fn test_mint_rejects_burned_user_and_redirects_to_admin_remint() {
 
     // mint() must reject burned users — even with approval
     client.approve_remint(&user);
-    let result = client.try_mint(
-        &user,
-        &500,
-        &BytesN::from_array(&env, &[1u8; 32]),
-        &None,
-    );
+    let result = client.try_mint(&user, &500, &BytesN::from_array(&env, &[1u8; 32]), &None);
     assert_eq!(result, Err(Ok(NftError::BurnedRequiresApproval)));
 }
 

@@ -902,8 +902,19 @@ impl LoanManager {
         if loan.borrower != borrower {
             return Err(LoanError::BorrowerMismatch);
         }
+
         if loan.status != LoanStatus::Approved {
             return Err(LoanError::LoanNotActive);
+        }
+
+        // Allow repayment until end of default window
+        let current_ledger = env.ledger().sequence();
+        let default_ends = loan
+            .due_date
+            .checked_add(Self::default_window_ledgers(&env))
+            .expect("default window overflow");
+        if current_ledger > default_ends {
+            return Err(LoanError::LoanPastDue);
         }
 
         let (total_debt, late_fee_delta) = Self::current_total_debt(&env, &mut loan);
@@ -913,11 +924,11 @@ impl LoanManager {
 
         let min_repayment_amount = Self::min_repayment_amount(&env);
 
-        // Fix for rounding dust: if amount covers all but 1 unit of remaining debt, treat as full repayment
-        let is_rounding_dust_forgiveness = amount >= total_debt.saturating_sub(1);
+        // Allow below-minimum repayment only when it fully clears the remaining debt
+        // or when the remaining debt itself is just small rounding dust.
+        let is_rounding_dust_forgiveness = total_debt <= min_repayment_amount;
 
-        // Skip minimum amount check if this is a rounding dust forgiveness or full repayment
-        if amount < total_debt && !is_rounding_dust_forgiveness && amount < min_repayment_amount {
+        if amount < total_debt && amount < min_repayment_amount && !is_rounding_dust_forgiveness {
             panic!("repayment amount below minimum");
         }
 
@@ -966,21 +977,18 @@ impl LoanManager {
 
         let mut completed = false;
 
-        // Check if loan is fully repaid (including rounding dust forgiveness)
         let is_fully_repaid = loan.principal_paid == loan.amount
             && loan.accrued_interest == 0
             && loan.accrued_late_fee == 0;
 
-        // If this is rounding dust forgiveness, treat as full repayment
         if is_rounding_dust_forgiveness && !is_fully_repaid {
-            // Forgive the remaining dust and mark as fully repaid
             loan.accrued_interest = 0;
             loan.accrued_late_fee = 0;
-            // Note: principal should already be fully paid or very close to it
+
             if loan.principal_paid < loan.amount {
-                // Forgive any remaining principal dust (should be at most 1 unit)
                 loan.principal_paid = loan.amount;
             }
+
             completed = true;
         } else if is_fully_repaid {
             completed = true;
@@ -994,7 +1002,6 @@ impl LoanManager {
         }
 
         env.storage().persistent().set(&loan_key, &loan);
-        Self::bump_persistent_ttl(&env, &loan_key);
         Self::bump_persistent_ttl(&env, &loan_key);
 
         if amount >= 100 {
@@ -1206,9 +1213,13 @@ impl LoanManager {
             return Err(LoanError::LoanNotActive);
         }
 
-        // Good-standing check: must not be past due.
+        // Allow refinance until end of default window
         let current_ledger = env.ledger().sequence();
-        if current_ledger > loan.due_date {
+        let default_ends = loan
+            .due_date
+            .checked_add(Self::default_window_ledgers(&env))
+            .expect("default window overflow");
+        if current_ledger > default_ends {
             return Err(LoanError::LoanPastDue);
         }
 

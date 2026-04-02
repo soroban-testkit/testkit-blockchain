@@ -1228,10 +1228,23 @@ fn test_pending_loans_count_against_cap() {
     let borrower = Address::generate(&env);
     nft_client.mint(&borrower, &600, &BytesN::from_array(&env, &[1u8; 32]), &None);
 
-    // Fill the cap with pending loans (default cap = 3)
-    client.request_loan(&borrower, &1_000);
-    client.request_loan(&borrower, &1_000);
-    client.request_loan(&borrower, &1_000);
+    // Fund the lending pool so it has liquidity for the loan
+    let stellar_token = StellarAssetClient::new(&env, &token_id);
+    stellar_token.mint(&pool_client, &10_000);
+
+    let loan_id = manager.request_loan(&borrower, &1000);
+    manager.approve_loan(&loan_id);
+
+    // Make a partial repayment that leaves a small remaining balance
+    // Use 998 to leave 2 units remaining (which should trigger dust forgiveness)
+    manager.repay(&borrower, &loan_id, &998);
+
+    let loan = manager.get_loan(&loan_id);
+    let remaining_debt =
+        loan.amount - loan.principal_paid + loan.accrued_interest + loan.accrued_late_fee;
+
+    // Set minimum repayment amount higher than the remaining dust
+    manager.set_min_repayment_amount(&100);
 
     // Fourth request must be rejected
     let result = client.try_request_loan(&borrower, &1_000);

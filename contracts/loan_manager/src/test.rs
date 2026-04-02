@@ -1221,7 +1221,7 @@ fn test_get_borrower_loans() {
 #[test]
 fn test_pending_loans_count_against_cap() {
     let env = Env::default();
-    env.mock_all_auths();
+    env.mock_all_auths_allowing_non_root_auth();
 
     let (client, nft_client, pool_client, token_id, _token_admin) = setup_test(&env);
 

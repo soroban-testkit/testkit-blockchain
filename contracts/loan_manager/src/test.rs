@@ -1245,7 +1245,7 @@ fn test_pending_loans_count_against_cap() {
     client.repay(&borrower, &loan_id, &998);
 
     let loan = client.get_loan(&loan_id);
-    let remaining_debt =
+    let _remaining_debt =
         loan.amount - loan.principal_paid + loan.accrued_interest + loan.accrued_late_fee;
 
     // Set minimum repayment amount higher than the remaining dust

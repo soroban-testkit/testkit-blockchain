@@ -1335,7 +1335,6 @@ fn test_pending_loans_count_against_cap() {
     assert_eq!(result, Err(Ok(LoanError::MaxLoansReached)));
 }
 
-
 // ── extend_loan tests ──────────────────────────────────────────────────────
 
 #[test]
@@ -1619,7 +1618,6 @@ fn test_extend_loan_not_found() {
     assert_eq!(result, Err(Ok(LoanError::LoanNotFound)));
 }
 
-
 // ── Oracle rate bounds tests ───────────────────────────────────────────────
 
 #[test]
@@ -1639,7 +1637,7 @@ fn test_oracle_rate_within_bounds_accepted() {
     // Request loan - should use default rate since no oracle is set
     let loan_id = manager.request_loan(&borrower, &1000, &17280);
     let loan = manager.get_loan(&loan_id);
-    
+
     // Default rate should be 1200 BPS (12%)
     assert_eq!(loan.interest_rate_bps, 1200);
 }
@@ -1801,7 +1799,7 @@ fn test_oracle_rate_below_min_falls_back_to_default() {
     // Request loan - should use default rate (1200) since no oracle is set
     let loan_id = manager.request_loan(&borrower, &1000, &17280);
     let loan = manager.get_loan(&loan_id);
-    
+
     // Should use default rate (1200 BPS) which is within bounds
     assert_eq!(loan.interest_rate_bps, 1200);
 }
@@ -1826,7 +1824,7 @@ fn test_oracle_rate_above_max_falls_back_to_default() {
     // Request loan - should use default rate (1200) since no oracle is set
     let loan_id = manager.request_loan(&borrower, &1000, &17280);
     let loan = manager.get_loan(&loan_id);
-    
+
     // Should use default rate (1200 BPS) which is within bounds
     assert_eq!(loan.interest_rate_bps, 1200);
 }

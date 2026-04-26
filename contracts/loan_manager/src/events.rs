@@ -157,7 +157,13 @@ pub fn loan_liquidated(
         .publish(topics, (debt_repaid, liquidator_bonus, borrower_refund));
 }
 
-pub fn loan_extended(env: &Env, loan_id: u32, borrower: Address, new_due_date: u32, extension_fee: i128) {
+pub fn loan_extended(
+    env: &Env,
+    loan_id: u32,
+    borrower: Address,
+    new_due_date: u32,
+    extension_fee: i128,
+) {
     let topics = (Symbol::new(env, "LoanExtended"), loan_id, borrower);
     env.events().publish(topics, (new_due_date, extension_fee));
 }

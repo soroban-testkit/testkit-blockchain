@@ -234,11 +234,11 @@ impl LoanManager {
         {
             let client = RateOracleClient::new(env, &oracle_addr);
             let oracle_rate = client.get_rate(borrower, &amount, &score);
-            
+
             // Validate oracle rate is within bounds
             let min_rate = Self::min_rate_bps(env);
             let max_rate = Self::max_rate_bps(env);
-            
+
             if oracle_rate < min_rate || oracle_rate > max_rate {
                 // If oracle rate is out of bounds, fall back to default rate
                 Self::read_interest_rate(env)
@@ -1940,12 +1940,12 @@ impl LoanManager {
 
     pub fn set_min_rate_bps(env: Env, min_rate: u32) -> Result<(), LoanError> {
         Self::admin(&env).require_auth();
-        
+
         // Validate min_rate is not zero and doesn't exceed max_rate
         if min_rate == 0 {
             return Err(LoanError::InvalidRate);
         }
-        
+
         let max_rate = Self::max_rate_bps(&env);
         if min_rate > max_rate {
             return Err(LoanError::InvalidConfiguration);
@@ -1967,12 +1967,12 @@ impl LoanManager {
 
     pub fn set_max_rate_bps(env: Env, max_rate: u32) -> Result<(), LoanError> {
         Self::admin(&env).require_auth();
-        
+
         // Validate max_rate is not zero and is >= min_rate
         if max_rate == 0 {
             return Err(LoanError::InvalidRate);
         }
-        
+
         let min_rate = Self::min_rate_bps(&env);
         if max_rate < min_rate {
             return Err(LoanError::InvalidConfiguration);

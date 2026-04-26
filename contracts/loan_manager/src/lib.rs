@@ -118,6 +118,7 @@ pub enum DataKey {
     DefaultWindowLedgers,
     RateOracle,
     ProposedAdmin,
+    TotalOutstanding(Address),
 }
 
 #[contract]
@@ -368,6 +369,33 @@ impl LoanManager {
             .instance()
             .get(&DataKey::MinRepaymentAmount)
             .unwrap_or(Self::DEFAULT_MIN_REPAYMENT_AMOUNT)
+    }
+
+    fn total_outstanding(env: &Env, token: &Address) -> i128 {
+        Self::bump_instance_ttl(env);
+        env.storage()
+            .instance()
+            .get(&DataKey::TotalOutstanding(token.clone()))
+            .unwrap_or(0)
+    }
+
+    fn adjust_total_outstanding(env: &Env, token: &Address, delta: i128) {
+        if delta == 0 {
+            return;
+        }
+
+        let key = DataKey::TotalOutstanding(token.clone());
+        let current = Self::total_outstanding(env, token);
+        let updated = current
+            .checked_add(delta)
+            .expect("total outstanding overflow");
+
+        if updated < 0 {
+            panic!("total outstanding underflow");
+        }
+
+        env.storage().instance().set(&key, &updated);
+        Self::bump_instance_ttl(env);
     }
 
     fn borrower_loan_count(env: &Env, borrower: &Address) -> u32 {
@@ -859,7 +887,11 @@ impl LoanManager {
         // Cross-contract READ for liquidity check — still in the CHECKS phase.
         let pool_client = PoolClient::new(&env, &lending_pool);
         let pool_balance = pool_client.pool_balance(&token);
-        if pool_balance < loan.amount {
+        let total_outstanding = Self::total_outstanding(&env, &token);
+        let available_liquidity = pool_balance
+            .checked_sub(total_outstanding)
+            .unwrap_or(0);
+        if available_liquidity < loan.amount {
             return Err(LoanError::InsufficientPoolLiquidity);
         }
 
@@ -877,6 +909,7 @@ impl LoanManager {
             .due_date
             .checked_add(Self::grace_period_ledgers(&env))
             .expect("grace period overflow");
+        Self::adjust_total_outstanding(&env, &token, transfer_amount);
 
         // Commit state before any cross-contract call (CEI pattern).
         env.storage().persistent().set(&loan_key, &loan);
@@ -1018,6 +1051,7 @@ impl LoanManager {
         }
 
         if completed {
+            Self::adjust_total_outstanding(&env, &token, -loan.amount);
             loan.status = LoanStatus::Repaid;
             loan.collateral_amount = 0;
             Self::decrement_borrower_loan_count(&env, &loan.borrower);
@@ -1342,7 +1376,13 @@ impl LoanManager {
                     .checked_sub(remaining_principal)
                     .expect("underflow");
                 let pool_balance = token_client.balance(&lending_pool);
-                if pool_balance < additional {
+                let outstanding_after_excluding_current = Self::total_outstanding(&env, &token)
+                    .checked_sub(loan.amount)
+                    .expect("total outstanding underflow");
+                let available_liquidity = pool_balance
+                    .checked_sub(outstanding_after_excluding_current)
+                    .unwrap_or(0);
+                if available_liquidity < additional {
                     return Err(LoanError::InsufficientPoolLiquidity);
                 }
                 token_client.transfer(&lending_pool, &loan.borrower, &additional);
@@ -1377,6 +1417,11 @@ impl LoanManager {
             }
             core::cmp::Ordering::Equal => {}
         }
+
+        let outstanding_delta = new_amount
+            .checked_sub(loan.amount)
+            .expect("outstanding delta overflow");
+        Self::adjust_total_outstanding(&env, &token, outstanding_delta);
 
         // Reset loan terms with new amount and rate.
         loan.amount = new_amount;
@@ -1800,6 +1845,12 @@ impl LoanManager {
         }
 
         loan.status = LoanStatus::Defaulted;
+        let token: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Token)
+            .expect("token not set");
+        Self::adjust_total_outstanding(&env, &token, -loan.amount);
         env.storage().persistent().set(&loan_key, &loan);
         Self::bump_persistent_ttl(&env, &loan_key);
         Self::decrement_borrower_loan_count(&env, &loan.borrower);
@@ -1848,6 +1899,12 @@ impl LoanManager {
             }
 
             loan.status = LoanStatus::Defaulted;
+            let token: Address = env
+                .storage()
+                .instance()
+                .get(&DataKey::Token)
+                .expect("token not set");
+            Self::adjust_total_outstanding(&env, &token, -loan.amount);
             env.storage().persistent().set(&loan_key, &loan);
             Self::bump_persistent_ttl(&env, &loan_key);
             Self::decrement_borrower_loan_count(&env, &loan.borrower);

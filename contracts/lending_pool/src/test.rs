@@ -969,3 +969,344 @@ fn test_get_depositor_yield_reflects_accrued_interest() {
     assert_eq!(shares2, 1000);
     assert_eq!(asset_value2, 1200); // 1000 shares * 1200 assets / 1000 total_shares
 }
+
+// ── Additional test coverage for Issue #753 ───────────────────────────────────
+
+#[test]
+fn test_deposit_mints_correct_shares() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let token_admin = Address::generate(&env);
+    let (token_id, stellar_asset_client, _token_client) = create_token_contract(&env, &token_admin);
+
+    let pool_id = env.register(LendingPool, ());
+    let pool_client = LendingPoolClient::new(&env, &pool_id);
+    pool_client.initialize(&token_admin);
+    pool_client.set_withdrawal_cooldown(&0);
+
+    let provider = Address::generate(&env);
+    stellar_asset_client.mint(&provider, &10_000);
+
+    // First deposit: 1:1 ratio
+    pool_client.deposit(&provider, &token_id, &5_000);
+    assert_eq!(pool_client.get_shares(&provider, &token_id), 5_000);
+    assert_eq!(pool_client.get_total_shares(&token_id), 5_000);
+
+    // Add yield to pool
+    stellar_asset_client.mint(&pool_id, &1_000);
+
+    // Second deposit at new exchange rate: shares = amount * total_shares / pool_balance
+    // shares = 3_000 * 5_000 / 6_000 = 2_500
+    pool_client.deposit(&provider, &token_id, &3_000);
+    assert_eq!(pool_client.get_shares(&provider, &token_id), 7_500);
+    assert_eq!(pool_client.get_total_shares(&token_id), 7_500);
+}
+
+#[test]
+fn test_withdraw_redeems_correct_assets() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let token_admin = Address::generate(&env);
+    let (token_id, stellar_asset_client, token_client) = create_token_contract(&env, &token_admin);
+
+    let pool_id = env.register(LendingPool, ());
+    let pool_client = LendingPoolClient::new(&env, &pool_id);
+    pool_client.initialize(&token_admin);
+    pool_client.set_withdrawal_cooldown(&0);
+
+    let provider = Address::generate(&env);
+    stellar_asset_client.mint(&provider, &10_000);
+
+    pool_client.deposit(&provider, &token_id, &5_000);
+    
+    // Add yield
+    stellar_asset_client.mint(&pool_id, &1_000);
+    
+    // Withdraw 2_500 shares: assets = 2_500 * 6_000 / 5_000 = 3_000
+    let balance_before = token_client.balance(&provider);
+    pool_client.withdraw(&provider, &token_id, &2_500);
+    let balance_after = token_client.balance(&provider);
+    
+    assert_eq!(balance_after - balance_before, 3_000);
+    assert_eq!(pool_client.get_shares(&provider, &token_id), 2_500);
+}
+
+#[test]
+fn test_late_depositor_gets_correct_yield() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let token_admin = Address::generate(&env);
+    let (token_id, stellar_asset_client, token_client) = create_token_contract(&env, &token_admin);
+
+    let pool_id = env.register(LendingPool, ());
+    let pool_client = LendingPoolClient::new(&env, &pool_id);
+    pool_client.initialize(&token_admin);
+    pool_client.set_withdrawal_cooldown(&0);
+
+    let early_provider = Address::generate(&env);
+    let late_provider = Address::generate(&env);
+    
+    stellar_asset_client.mint(&early_provider, &10_000);
+    stellar_asset_client.mint(&late_provider, &10_000);
+
+    // Early provider deposits
+    pool_client.deposit(&early_provider, &token_id, &5_000);
+    
+    // Yield arrives
+    stellar_asset_client.mint(&pool_id, &1_000);
+    
+    // Late provider deposits at new rate
+    pool_client.deposit(&late_provider, &token_id, &6_000);
+    
+    // More yield arrives
+    stellar_asset_client.mint(&pool_id, &2_000);
+    
+    // Both withdraw all shares
+    pool_client.withdraw(&early_provider, &token_id, &5_000);
+    pool_client.withdraw(&late_provider, &token_id, &5_000);
+    
+    // Early provider should have more due to earlier entry
+    assert!(token_client.balance(&early_provider) > token_client.balance(&late_provider));
+}
+
+#[test]
+#[should_panic(expected = "withdrawal_cooldown_active")]
+fn test_withdrawal_cooldown_enforced() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let token_admin = Address::generate(&env);
+    let (token_id, stellar_asset_client, _token_client) = create_token_contract(&env, &token_admin);
+
+    let pool_id = env.register(LendingPool, ());
+    let pool_client = LendingPoolClient::new(&env, &pool_id);
+    pool_client.initialize(&token_admin);
+    pool_client.set_withdrawal_cooldown(&100);
+
+    let provider = Address::generate(&env);
+    stellar_asset_client.mint(&provider, &5_000);
+    
+    pool_client.deposit(&provider, &token_id, &5_000);
+    
+    // Try to withdraw immediately - should panic
+    pool_client.withdraw(&provider, &token_id, &1_000);
+}
+
+#[test]
+#[should_panic]
+fn test_max_pool_size_cap_enforced() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let token_admin = Address::generate(&env);
+    let (token_id, stellar_asset_client, _token_client) = create_token_contract(&env, &token_admin);
+
+    let pool_id = env.register(LendingPool, ());
+    let pool_client = LendingPoolClient::new(&env, &pool_id);
+    pool_client.initialize(&token_admin);
+    pool_client.set_max_pool_size(&token_id, &10_000);
+
+    let provider = Address::generate(&env);
+    stellar_asset_client.mint(&provider, &20_000);
+    
+    // Try to deposit more than cap - should panic
+    pool_client.deposit(&provider, &token_id, &15_000);
+}
+
+#[test]
+fn test_emergency_withdraw_bypasses_cooldown() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let token_admin = Address::generate(&env);
+    let (token_id, stellar_asset_client, token_client) = create_token_contract(&env, &token_admin);
+
+    let pool_id = env.register(LendingPool, ());
+    let pool_client = LendingPoolClient::new(&env, &pool_id);
+    pool_client.initialize(&token_admin);
+    pool_client.set_withdrawal_cooldown(&1000);
+
+    let provider = Address::generate(&env);
+    stellar_asset_client.mint(&provider, &5_000);
+    
+    pool_client.deposit(&provider, &token_id, &5_000);
+    pool_client.pause();
+    
+    // Emergency withdraw should work immediately despite cooldown and pause
+    pool_client.emergency_withdraw(&provider, &token_id, &5_000);
+    
+    assert_eq!(token_client.balance(&provider), 5_000);
+    assert_eq!(pool_client.get_shares(&provider, &token_id), 0);
+}
+
+#[test]
+fn test_propose_and_accept_admin() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let old_admin = Address::generate(&env);
+    let new_admin = Address::generate(&env);
+    
+    let pool_id = env.register(LendingPool, ());
+    let pool_client = LendingPoolClient::new(&env, &pool_id);
+    pool_client.initialize(&old_admin);
+    
+    assert_eq!(pool_client.get_admin(), old_admin);
+    
+    pool_client.propose_admin(&new_admin);
+    pool_client.accept_admin();
+    
+    assert_eq!(pool_client.get_admin(), new_admin);
+}
+
+#[test]
+fn test_multi_token_pool_isolation() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let token_admin = Address::generate(&env);
+    let (token_a, stellar_a, _) = create_token_contract(&env, &token_admin);
+    let (token_b, stellar_b, _) = create_token_contract(&env, &token_admin);
+
+    let pool_id = env.register(LendingPool, ());
+    let pool_client = LendingPoolClient::new(&env, &pool_id);
+    pool_client.initialize(&token_admin);
+    pool_client.set_withdrawal_cooldown(&0);
+
+    let provider = Address::generate(&env);
+    stellar_a.mint(&provider, &10_000);
+    stellar_b.mint(&provider, &10_000);
+
+    // Deposit to both tokens
+    pool_client.deposit(&provider, &token_a, &5_000);
+    pool_client.deposit(&provider, &token_b, &3_000);
+    
+    // Verify isolation
+    assert_eq!(pool_client.get_shares(&provider, &token_a), 5_000);
+    assert_eq!(pool_client.get_shares(&provider, &token_b), 3_000);
+    assert_eq!(pool_client.get_total_shares(&token_a), 5_000);
+    assert_eq!(pool_client.get_total_shares(&token_b), 3_000);
+    
+    // Add yield to token_a only
+    stellar_a.mint(&pool_id, &1_000);
+    
+    // Token A should reflect yield, Token B should not
+    assert_eq!(pool_client.get_deposit(&provider, &token_a), 6_000);
+    assert_eq!(pool_client.get_deposit(&provider, &token_b), 3_000);
+}
+
+#[test]
+fn test_get_depositor_yield_calculation() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let token_admin = Address::generate(&env);
+    let (token_id, stellar_asset_client, _) = create_token_contract(&env, &token_admin);
+
+    let pool_id = env.register(LendingPool, ());
+    let pool_client = LendingPoolClient::new(&env, &pool_id);
+    pool_client.initialize(&token_admin);
+    pool_client.set_withdrawal_cooldown(&0);
+
+    let provider = Address::generate(&env);
+    stellar_asset_client.mint(&provider, &10_000);
+    
+    pool_client.deposit(&provider, &token_id, &5_000);
+    
+    let (shares_before, value_before) = pool_client.get_depositor_yield(&provider, &token_id);
+    assert_eq!(shares_before, 5_000);
+    assert_eq!(value_before, 5_000);
+    
+    // Add 20% yield
+    stellar_asset_client.mint(&pool_id, &1_000);
+    
+    let (shares_after, value_after) = pool_client.get_depositor_yield(&provider, &token_id);
+    assert_eq!(shares_after, 5_000);
+    assert_eq!(value_after, 6_000);
+    
+    // Yield calculation: value_after - shares_after = 1_000
+    assert_eq!(value_after - shares_after, 1_000);
+}
+
+#[test]
+fn test_zero_deposit_edge_case() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let token_admin = Address::generate(&env);
+    let (token_id, _stellar_asset_client, _token_client) = create_token_contract(&env, &token_admin);
+
+    let pool_id = env.register(LendingPool, ());
+    let pool_client = LendingPoolClient::new(&env, &pool_id);
+    pool_client.initialize(&token_admin);
+
+    let provider = Address::generate(&env);
+    
+    // Zero deposit should be rejected
+    let result = pool_client.try_deposit(&provider, &token_id, &0);
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_single_depositor_scenario() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let token_admin = Address::generate(&env);
+    let (token_id, stellar_asset_client, token_client) = create_token_contract(&env, &token_admin);
+
+    let pool_id = env.register(LendingPool, ());
+    let pool_client = LendingPoolClient::new(&env, &pool_id);
+    pool_client.initialize(&token_admin);
+    pool_client.set_withdrawal_cooldown(&0);
+
+    let provider = Address::generate(&env);
+    stellar_asset_client.mint(&provider, &10_000);
+    
+    pool_client.deposit(&provider, &token_id, &10_000);
+    
+    // Add yield
+    stellar_asset_client.mint(&pool_id, &2_000);
+    
+    // Single depositor gets all yield
+    pool_client.withdraw(&provider, &token_id, &10_000);
+    assert_eq!(token_client.balance(&provider), 12_000);
+}
+
+#[test]
+fn test_sequential_deposits_maintain_share_value() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let token_admin = Address::generate(&env);
+    let (token_id, stellar_asset_client, _token_client) = create_token_contract(&env, &token_admin);
+
+    let pool_id = env.register(LendingPool, ());
+    let pool_client = LendingPoolClient::new(&env, &pool_id);
+    pool_client.initialize(&token_admin);
+    pool_client.set_withdrawal_cooldown(&0);
+
+    let provider = Address::generate(&env);
+    stellar_asset_client.mint(&provider, &20_000);
+    
+    // First deposit
+    pool_client.deposit(&provider, &token_id, &5_000);
+    let shares_1 = pool_client.get_shares(&provider, &token_id);
+    
+    // Second deposit (no yield)
+    pool_client.deposit(&provider, &token_id, &5_000);
+    let shares_2 = pool_client.get_shares(&provider, &token_id);
+    
+    // Should have exactly double the shares
+    assert_eq!(shares_2, shares_1 * 2);
+    
+    // Third deposit (no yield)
+    pool_client.deposit(&provider, &token_id, &5_000);
+    let shares_3 = pool_client.get_shares(&provider, &token_id);
+    
+    // Should have exactly triple the original shares
+    assert_eq!(shares_3, shares_1 * 3);
+}

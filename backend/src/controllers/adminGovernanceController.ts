@@ -23,9 +23,13 @@ function parseSignersFromEnv() {
 
 export const getPendingGovernance = asyncHandler(
   async (_req: Request, res: Response) => {
-    const currentAdmin = process.env.GOVERNANCE_CURRENT_ADMIN ?? process.env.ADMIN_PUBLIC_KEY ?? null;
+    const currentAdmin =
+      process.env.GOVERNANCE_CURRENT_ADMIN ??
+      process.env.ADMIN_PUBLIC_KEY ??
+      null;
     const targetContract = process.env.MULTISIG_GOVERNANCE_CONTRACT_ID ?? null;
-    const threshold = Number.parseInt(process.env.GOVERNANCE_THRESHOLD ?? "0", 10) || 0;
+    const threshold =
+      Number.parseInt(process.env.GOVERNANCE_THRESHOLD ?? "0", 10) || 0;
 
     try {
       const result = await query(

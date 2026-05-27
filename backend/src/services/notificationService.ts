@@ -152,7 +152,9 @@ async function sendSMS(phone: string, message: string) {
 }
 
 class NotificationService {
-  async getNotificationPreferences(userId: string): Promise<NotificationPreferences> {
+  async getNotificationPreferences(
+    userId: string,
+  ): Promise<NotificationPreferences> {
     const result = await query(
       `SELECT email_enabled, sms_enabled, phone
        FROM user_profiles
@@ -181,7 +183,10 @@ class NotificationService {
 
   async updateNotificationPreferences(
     userId: string,
-    payload: Pick<NotificationPreferences, "emailEnabled" | "smsEnabled" | "phone">,
+    payload: Pick<
+      NotificationPreferences,
+      "emailEnabled" | "smsEnabled" | "phone"
+    >,
   ): Promise<NotificationPreferences> {
     const result = await query(
       `UPDATE user_profiles

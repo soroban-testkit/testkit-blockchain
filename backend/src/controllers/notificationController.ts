@@ -65,7 +65,8 @@ export const getNotificationPreferences = asyncHandler(
     const userId = req.user?.publicKey;
     if (!userId) throw AppError.unauthorized("Authentication required");
 
-    const preferences = await notificationService.getNotificationPreferences(userId);
+    const preferences =
+      await notificationService.getNotificationPreferences(userId);
     res.json(preferences);
   },
 );
@@ -83,14 +84,19 @@ export const updateNotificationPreferences = asyncHandler(
     }
 
     if (parsed.smsEnabled && !phone) {
-      throw AppError.badRequest("Phone is required when SMS notifications are enabled");
+      throw AppError.badRequest(
+        "Phone is required when SMS notifications are enabled",
+      );
     }
 
-    const preferences = await notificationService.updateNotificationPreferences(userId, {
-      emailEnabled: parsed.emailEnabled,
-      smsEnabled: parsed.smsEnabled,
-      phone,
-    });
+    const preferences = await notificationService.updateNotificationPreferences(
+      userId,
+      {
+        emailEnabled: parsed.emailEnabled,
+        smsEnabled: parsed.smsEnabled,
+        phone,
+      },
+    );
 
     res.json(preferences);
   },

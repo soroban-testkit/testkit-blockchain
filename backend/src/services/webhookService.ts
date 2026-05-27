@@ -8,13 +8,53 @@ export const SUPPORTED_WEBHOOK_EVENT_TYPES = [
   "LoanRepaid",
   "LoanDefaulted",
   "CollateralLiquidated",
+  "CollateralReturned",
+  "ColDep",
+  "ColRel",
+  "LateFeeCharged",
+  "LoanExtended",
+  "LoanCancelled",
+  "LoanRejected",
+  "LoanRefinanced",
+  "InterestRateUpdated",
+  "DefaultTermUpdated",
+  "TermLimitsUpdated",
+  "LateFeeRateUpdated",
+  "GracePeriodUpdated",
+  "DefaultWindowUpdated",
+  "MaxLoanAmountUpdated",
+  "MinRepaymentUpdated",
+  "MaxLoansPerBorrower",
+  "MinRateBpsUpdated",
+  "MaxRateBpsUpdated",
+  "RateOracleUpdated",
   "Deposit",
   "Withdraw",
   "YieldDistributed",
   "EmergencyWithdraw",
+  "DepositCapUpdated",
+  "WithdrawalCooldownUpdated",
+  "NFTMinted",
+  "ScoreUpdated",
+  "NFTSeized",
+  "NFTBurned",
+  "ProposalCreated",
+  "ProposalApproved",
+  "ProposalFinalized",
+  "ProposalCancelled",
+  "LoanApprv",
+  "LoanLiquidated",
+  // Legacy aliases kept to preserve compatibility for existing subscribers.
   "Mint",
   "ScoreUpd",
+  "ScoreDecr",
   "Seized",
+  "NftBurned",
+  "AdmRemint",
+  "HashUpd",
+  "GovProp",
+  "GovAppr",
+  "GovFin",
   "Transfer",
   "MntAuth",
   "MntRev",
@@ -23,6 +63,9 @@ export const SUPPORTED_WEBHOOK_EVENT_TYPES = [
   "MinScoreUpdated",
   "PoolPaused",
   "PoolUnpaused",
+  "GovCncl",
+  "GovEmerg",
+  "GovExp",
 ] as const;
 
 export type WebhookEventType = (typeof SUPPORTED_WEBHOOK_EVENT_TYPES)[number];
@@ -31,7 +74,7 @@ export interface IndexedLoanEvent {
   eventId: string;
   eventType: WebhookEventType;
   loanId?: number;
-  borrower: string;
+  address?: string;
   amount?: string;
   interestRateBps?: number;
   termLedgers?: number;
@@ -106,7 +149,7 @@ function summarizeOversizedPayload(
     "eventId",
     "eventType",
     "loanId",
-    "borrower",
+    "address",
     "ledger",
   ] as const;
 
@@ -519,7 +562,7 @@ export class WebhookService {
       eventId: event.eventId,
       eventType: event.eventType,
       loanId: event.loanId,
-      borrower: event.borrower,
+      address: event.address,
     });
 
     try {

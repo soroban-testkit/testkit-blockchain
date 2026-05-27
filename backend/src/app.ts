@@ -23,6 +23,7 @@ import authRoutes from "./routes/authRoutes.js";
 import notificationsRoutes from "./routes/notificationsRoutes.js";
 import eventRoutes from "./routes/eventRoutes.js";
 import remittanceRoutes from "./routes/remittanceRoutes.js";
+import transactionRoutes from "./routes/transactionRoutes.js";
 import { globalRateLimiter } from "./middleware/rateLimiter.js";
 import { errorHandler } from "./middleware/errorHandler.js";
 import { requestLogger } from "./middleware/requestLogger.js";
@@ -35,7 +36,9 @@ const isProduction = process.env.NODE_ENV === "production";
 const configuredFrontendUrl = process.env.FRONTEND_URL?.trim();
 
 if (isProduction && !configuredFrontendUrl) {
-  throw new Error("FRONTEND_URL environment variable is required in production");
+  throw new Error(
+    "FRONTEND_URL environment variable is required in production",
+  );
 }
 
 // `CORS_ALLOWED_ORIGINS` is retained as a migration fallback while `FRONTEND_URL`
@@ -44,12 +47,15 @@ const additionalAllowedOrigins = process.env.CORS_ALLOWED_ORIGINS
   ? process.env.CORS_ALLOWED_ORIGINS.split(",").map((origin) => origin.trim())
   : [];
 
-const allowedOriginsList = [configuredFrontendUrl, ...additionalAllowedOrigins].filter(
-  (origin): origin is string => Boolean(origin),
-);
+const allowedOriginsList = [
+  configuredFrontendUrl,
+  ...additionalAllowedOrigins,
+].filter((origin): origin is string => Boolean(origin));
 
 if (isProduction && allowedOriginsList.length === 0) {
-  throw new Error("No allowed origins configured for CORS in production. Set FRONTEND_URL.");
+  throw new Error(
+    "No allowed origins configured for CORS in production. Set FRONTEND_URL.",
+  );
 }
 
 const allowedOrigins = new Set(allowedOriginsList);
@@ -90,11 +96,7 @@ const corsOptions: cors.CorsOptions = {
       return callback(null, true);
     }
 
-    return callback(
-      AppError.forbidden(
-        "Origin is not allowed by CORS policy",
-      ),
-    );
+    return callback(AppError.forbidden("Origin is not allowed by CORS policy"));
   },
   methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
   allowedHeaders: [
@@ -132,21 +134,23 @@ app.get(
       ]);
 
     const dbChecks = {
-      database: databaseStatus.status === "fulfilled" ? databaseStatus.value : "error",
+      database:
+        databaseStatus.status === "fulfilled" ? databaseStatus.value : "error",
       redis: redisStatus.status === "fulfilled" ? redisStatus.value : "error",
     };
 
     const checks = {
       api: "ok" as const,
       ...dbChecks,
-      soroban_rpc: sorobanStatus.status === "fulfilled" ? sorobanStatus.value : "error",
+      soroban_rpc:
+        sorobanStatus.status === "fulfilled" ? sorobanStatus.value : "error",
     };
 
     const coreOk = Object.values(dbChecks).every((c) => c === "ok");
     const allOk = coreOk && checks.soroban_rpc === "ok";
 
     res.status(coreOk ? 200 : 503).json({
-      status: allOk ? "ok" : (coreOk ? "degraded" : "down"),
+      status: allOk ? "ok" : coreOk ? "degraded" : "down",
       checks,
       uptime: process.uptime(),
       timestamp: Date.now(),
@@ -165,6 +169,7 @@ app.use("/api/auth", authRoutes);
 app.use("/api/notifications", notificationsRoutes);
 app.use("/api/events", eventRoutes);
 app.use("/api/remittances", remittanceRoutes);
+app.use("/api/transactions", transactionRoutes);
 
 // Versioned API routes (v1 - current)
 app.use("/api/v1", simulationRoutes);
@@ -174,6 +179,7 @@ app.use("/api/v1/indexer", indexerRoutes);
 app.use("/api/v1/admin", adminRoutes);
 app.use("/api/v1/auth", authRoutes);
 app.use("/api/v1/remittances", remittanceRoutes);
+app.use("/api/v1/transactions", transactionRoutes);
 
 // ── Diagnostic / Test Routes ─────────────────────────────────────
 // Only exposed in test environment to verify centralized error handling.
@@ -198,8 +204,6 @@ if (process.env.NODE_ENV === "test") {
     }),
   );
 }
-
-
 
 // ── 404 Catch-All ────────────────────────────────────────────────
 // Must be placed after all route definitions so that only truly

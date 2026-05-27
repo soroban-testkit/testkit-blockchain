@@ -10,6 +10,11 @@ import {
   previewLoanAmortizationSchedule,
   requestLoan,
   repayLoan,
+  depositCollateral,
+  releaseCollateral,
+  refinanceLoan,
+  extendLoan,
+  buildLiquidateLoan,
   submitTransaction,
 } from "../controllers/loanController.js";
 import {
@@ -19,7 +24,7 @@ import {
 } from "../middleware/jwtAuth.js";
 import {
   requireLoanBorrowerAccess,
-  requireLoanOwnership,
+  requireLoanOwner,
 } from "../middleware/loanAccess.js";
 import {
   validate,
@@ -34,11 +39,12 @@ import {
   repayLoanSchema,
   repayLoanParamsSchema,
   submitTxSchema,
+  depositCollateralSchema,
+  releaseCollateralSchema,
+  refinanceLoanSchema,
+  extendLoanSchema,
+  liquidateLoanSchema,
 } from "../schemas/loanSchemas.js";
-
-
-
-
 
 const router = Router();
 
@@ -52,7 +58,7 @@ if (process.env.NODE_ENV === "test" || process.env.NODE_ENV === "development") {
   router.post(
     "/:loanId/mark-defaulted",
     requireJwtAuth,
-    requireLoanOwnership,
+    requireLoanOwner,
     markLoanDefaulted,
   );
 }
@@ -62,11 +68,10 @@ if (process.env.NODE_ENV === "test" || process.env.NODE_ENV === "development") {
   router.post(
     "/:loanId/mark-defaulted",
     requireJwtAuth,
-    requireLoanOwnership,
+    requireLoanOwner,
     markLoanDefaulted,
   );
 }
-
 
 router.get("/config", getLoanConfigEndpoint);
 
@@ -121,7 +126,7 @@ router.post(
 router.post(
   "/:loanId/contest-default",
   requireJwtAuth,
-  requireLoanOwnership,
+  requireLoanOwner,
   contestDefault,
 );
 
@@ -268,6 +273,271 @@ router.post(
 
 /**
  * @swagger
+ * /loans/{loanId}/build-deposit-collateral:
+ *   post:
+ *     summary: Build an unsigned deposit_collateral transaction
+ *     description: >
+ *       Builds an unsigned Soroban `deposit_collateral(loan_id, amount)` transaction XDR.
+ *       The borrower signs it and submits via POST /api/loans/submit.
+ *     tags: [Loans]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: loanId
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         description: Loan ID
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - amount
+ *               - borrowerPublicKey
+ *             properties:
+ *               amount:
+ *                 type: integer
+ *                 description: Amount of collateral to deposit
+ *               borrowerPublicKey:
+ *                 type: string
+ *                 description: Borrower's Stellar public key
+ *     responses:
+ *       200:
+ *         description: Unsigned deposit_collateral transaction XDR returned
+ *       400:
+ *         description: Validation error
+ *       401:
+ *         description: Missing or invalid Bearer token
+ *       403:
+ *         description: Loan belongs to a different borrower
+ */
+router.post(
+  "/:loanId/build-deposit-collateral",
+  requireJwtAuth,
+  requireLoanOwner,
+  validateParams(repayLoanParamsSchema),
+  validateBody(depositCollateralSchema),
+  idempotencyMiddleware,
+  depositCollateral,
+);
+
+/**
+ * @swagger
+ * /loans/{loanId}/build-release-collateral:
+ *   post:
+ *     summary: Build an unsigned release_collateral transaction
+ *     description: >
+ *       Builds an unsigned Soroban `release_collateral(loan_id)` transaction XDR.
+ *       The borrower signs it and submits via POST /api/loans/submit.
+ *     tags: [Loans]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: loanId
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         description: Loan ID (must be repaid)
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - borrowerPublicKey
+ *             properties:
+ *               borrowerPublicKey:
+ *                 type: string
+ *                 description: Borrower's Stellar public key
+ *     responses:
+ *       200:
+ *         description: Unsigned release_collateral transaction XDR returned
+ *       400:
+ *         description: Validation error
+ *       401:
+ *         description: Missing or invalid Bearer token
+ *       403:
+ *         description: Loan belongs to a different borrower
+ */
+router.post(
+  "/:loanId/build-release-collateral",
+  requireJwtAuth,
+  requireLoanOwner,
+  validateParams(repayLoanParamsSchema),
+  validateBody(releaseCollateralSchema),
+  idempotencyMiddleware,
+  releaseCollateral,
+);
+
+/**
+ * @swagger
+ * /loans/{loanId}/build-refinance:
+ *   post:
+ *     summary: Build an unsigned refinance_loan transaction
+ *     description: >
+ *       Builds an unsigned Soroban `refinance_loan(loan_id, new_amount, new_term)`
+ *       transaction XDR. Both the admin and borrower must sign.
+ *     tags: [Loans]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: loanId
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         description: Loan ID
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - newAmount
+ *               - newTerm
+ *               - borrowerPublicKey
+ *             properties:
+ *               newAmount:
+ *                 type: integer
+ *                 description: New loan principal amount
+ *               newTerm:
+ *                 type: integer
+ *                 description: New loan term in ledgers
+ *               borrowerPublicKey:
+ *                 type: string
+ *                 description: Borrower's Stellar public key
+ *     responses:
+ *       200:
+ *         description: Unsigned refinance_loan transaction XDR returned
+ *       400:
+ *         description: Validation error
+ *       401:
+ *         description: Missing or invalid Bearer token
+ *       403:
+ *         description: Loan belongs to a different borrower
+ */
+router.post(
+  "/:loanId/build-refinance",
+  requireJwtAuth,
+  requireLoanOwner,
+  validateParams(repayLoanParamsSchema),
+  validateBody(refinanceLoanSchema),
+  idempotencyMiddleware,
+  refinanceLoan,
+);
+
+/**
+ * @swagger
+ * /loans/{loanId}/build-extend:
+ *   post:
+ *     summary: Build an unsigned extend_loan transaction
+ *     description: >
+ *       Builds an unsigned Soroban `extend_loan(borrower, loan_id, extra_ledgers)`
+ *       transaction XDR. The borrower signs it and submits via POST /api/loans/submit.
+ *     tags: [Loans]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: loanId
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         description: Loan ID
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - extraLedgers
+ *               - borrowerPublicKey
+ *             properties:
+ *               extraLedgers:
+ *                 type: integer
+ *                 description: Number of ledgers to extend the loan by
+ *               borrowerPublicKey:
+ *                 type: string
+ *                 description: Borrower's Stellar public key
+ *     responses:
+ *       200:
+ *         description: Unsigned extend_loan transaction XDR returned
+ *       400:
+ *         description: Validation error
+ *       401:
+ *         description: Missing or invalid Bearer token
+ *       403:
+ *         description: Loan belongs to a different borrower
+ */
+router.post(
+  "/:loanId/build-extend",
+  requireJwtAuth,
+  requireLoanOwner,
+  validateParams(repayLoanParamsSchema),
+  validateBody(extendLoanSchema),
+  idempotencyMiddleware,
+  extendLoan,
+);
+
+/**
+ * @swagger
+ * /loans/{loanId}/liquidate/build:
+ *   post:
+ *     summary: Build an unsigned liquidate transaction
+ *     description: >
+ *       Builds an unsigned Soroban `liquidate(liquidator, loan_id)` transaction XDR.
+ *       The liquidator signs it and submits via POST /api/loans/submit.
+ *     tags: [Loans]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: loanId
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         description: Loan ID
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - liquidatorPublicKey
+ *             properties:
+ *               liquidatorPublicKey:
+ *                 type: string
+ *                 description: Liquidator's Stellar public key
+ *     responses:
+ *       200:
+ *         description: Unsigned liquidate transaction XDR returned
+ *       400:
+ *         description: Validation error
+ *       401:
+ *         description: Missing or invalid Bearer token
+ *       403:
+ *         description: liquidatorPublicKey does not match authenticated wallet
+ */
+router.post(
+  "/:loanId/liquidate/build",
+  requireJwtAuth,
+  validateParams(repayLoanParamsSchema),
+  validateBody(liquidateLoanSchema),
+  idempotencyMiddleware,
+  buildLiquidateLoan,
+);
+
+/**
+ * @swagger
  * /loans/submit:
  *   post:
  *     summary: Submit a signed loan request transaction
@@ -363,7 +633,7 @@ router.post(
 router.post(
   "/:loanId/repay",
   requireJwtAuth,
-  requireLoanOwnership,
+  requireLoanOwner,
   validateParams(repayLoanParamsSchema),
   validateBody(repayLoanSchema),
   idempotencyMiddleware,
@@ -418,7 +688,7 @@ router.post(
 router.post(
   "/:loanId/submit",
   requireJwtAuth,
-  requireLoanOwnership,
+  requireLoanOwner,
   validateParams(repayLoanParamsSchema),
   validateBody(submitTxSchema),
   idempotencyMiddleware,

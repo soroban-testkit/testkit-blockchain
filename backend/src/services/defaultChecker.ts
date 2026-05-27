@@ -60,7 +60,11 @@ function chunk<T>(items: T[], size: number): T[][] {
   return out;
 }
 
-async function mapConcurrent<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+async function mapConcurrent<T, R>(
+  items: T[],
+  limit: number,
+  fn: (item: T) => Promise<R>,
+): Promise<R[]> {
   const results: R[] = new Array(items.length);
   let currentIndex = 0;
   const worker = async () => {
@@ -157,7 +161,7 @@ export class DefaultChecker {
       `
       WITH approved AS (
         SELECT loan_id, MAX(ledger) AS approved_ledger
-        FROM loan_events
+        FROM contract_events
         WHERE event_type = 'LoanApproved'
           AND loan_id IS NOT NULL
         GROUP BY loan_id
@@ -170,7 +174,7 @@ export class DefaultChecker {
         FROM approved a
         WHERE NOT EXISTS (
           SELECT 1
-          FROM loan_events e
+          FROM contract_events e
           WHERE e.loan_id = a.loan_id
             AND e.event_type IN ('LoanRepaid', 'LoanDefaulted')
         )
@@ -198,7 +202,7 @@ export class DefaultChecker {
       `
       WITH approved AS (
         SELECT loan_id, MAX(ledger) AS approved_ledger
-        FROM loan_events
+        FROM contract_events
         WHERE event_type = 'LoanApproved'
           AND loan_id IS NOT NULL
         GROUP BY loan_id
@@ -210,7 +214,7 @@ export class DefaultChecker {
         FROM approved a
         WHERE NOT EXISTS (
           SELECT 1
-          FROM loan_events e
+          FROM contract_events e
           WHERE e.loan_id = a.loan_id
             AND e.event_type IN ('LoanRepaid', 'LoanDefaulted')
         )
@@ -349,18 +353,17 @@ export class DefaultChecker {
       timeoutHandle.unref?.();
     });
 
-    const submissionPromise: Promise<DefaultCheckBatchResult> = this.submitCheckDefaults(
-      server,
-      signer,
-      passphrase,
-      loanIds,
-    ).catch((error) => {
-      const message = error instanceof Error ? error.message : String(error);
-      return {
-        loanIds,
-        error: `default check batch failed: ${message}`,
-      } satisfies DefaultCheckBatchResult;
-    });
+    const submissionPromise: Promise<DefaultCheckBatchResult> =
+      this.submitCheckDefaults(server, signer, passphrase, loanIds).catch(
+        (error) => {
+          const message =
+            error instanceof Error ? error.message : String(error);
+          return {
+            loanIds,
+            error: `default check batch failed: ${message}`,
+          } satisfies DefaultCheckBatchResult;
+        },
+      );
 
     const result = await Promise.race([submissionPromise, timeoutPromise]);
 
@@ -385,7 +388,11 @@ export class DefaultChecker {
   private async acquireLock(): Promise<boolean> {
     try {
       const lockValue = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
-      const acquired = await cacheService.setNotExists(LOCK_KEY, lockValue, LOCK_TTL_SECONDS);
+      const acquired = await cacheService.setNotExists(
+        LOCK_KEY,
+        lockValue,
+        LOCK_TTL_SECONDS,
+      );
       return acquired;
     } catch (error) {
       logger.error("Failed to acquire default checker lock", { error });
@@ -409,11 +416,15 @@ export class DefaultChecker {
    * - explicit `loanIds` (validated + de-duped), or
    * - all overdue loans discovered from `loan_events` (bounded by env limits).
    */
-  async checkOverdueLoans(loanIds?: number[]): Promise<DefaultCheckRunResult | null> {
+  async checkOverdueLoans(
+    loanIds?: number[],
+  ): Promise<DefaultCheckRunResult | null> {
     // Try to acquire distributed lock to prevent overlapping runs
     const lockAcquired = await this.acquireLock();
     if (!lockAcquired) {
-      logger.warn("Default checker run skipped - another instance is already running");
+      logger.warn(
+        "Default checker run skipped - another instance is already running",
+      );
       return null;
     }
 
@@ -451,31 +462,41 @@ export class DefaultChecker {
         targetLoanCount: targetIds.length,
       });
 
-      const allChunks = chunk(targetIds, this.batchSize).filter(b => b.length > 0);
-      const batchResults = await mapConcurrent(allChunks, this.concurrency, async (batch) => {
-        const result = await this.submitCheckDefaultsWithTimeout(
-          server,
-          signer,
-          passphrase,
-          batch,
-        );
+      const allChunks = chunk(targetIds, this.batchSize).filter(
+        (b) => b.length > 0,
+      );
+      const batchResults = await mapConcurrent(
+        allChunks,
+        this.concurrency,
+        async (batch) => {
+          const result = await this.submitCheckDefaultsWithTimeout(
+            server,
+            signer,
+            passphrase,
+            batch,
+          );
 
-        logger.info("default_check.batch", {
-          runId,
-          loanIds: result.loanIds,
-          txHash: result.txHash,
-          submitStatus: result.submitStatus,
-          txStatus: result.txStatus,
-          error: result.error,
-          timedOut: result.timedOut,
-        });
+          logger.info("default_check.batch", {
+            runId,
+            loanIds: result.loanIds,
+            txHash: result.txHash,
+            submitStatus: result.submitStatus,
+            txStatus: result.txStatus,
+            error: result.error,
+            timedOut: result.timedOut,
+          });
 
-        return result;
-      });
+          return result;
+        },
+      );
 
       const loansChecked = targetIds.length;
-      const successfulSubmissions = batchResults.filter((b) => !b.error && b.txHash).length;
-      const failedSubmissions = batchResults.filter((b) => b.error || !b.txHash).length;
+      const successfulSubmissions = batchResults.filter(
+        (b) => !b.error && b.txHash,
+      ).length;
+      const failedSubmissions = batchResults.filter(
+        (b) => b.error || !b.txHash,
+      ).length;
 
       logger.info("default_check.run.complete", {
         runId,

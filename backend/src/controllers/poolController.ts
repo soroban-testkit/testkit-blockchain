@@ -10,6 +10,16 @@ import logger from "../utils/logger.js";
 const ANNUAL_APY = 0.08; // 8% annual yield paid to depositors
 
 /**
+ * Parse a database value to a finite number, returning `fallback` (default 0)
+ * when the input is null, undefined, an empty string, or non-finite (NaN / Infinity).
+ * Prevents silent NaN propagation when SQL aggregations return null for empty tables.
+ */
+function safeFloat(value: unknown, fallback = 0): number {
+  const n = parseFloat(String(value ?? fallback));
+  return Number.isFinite(n) ? n : fallback;
+}
+
+/**
  * GET /api/pool/stats
  * Returns aggregate pool statistics for the lender dashboard.
  */
@@ -21,7 +31,7 @@ export const getPoolStats = asyncHandler(
         COALESCE(SUM(CASE WHEN event_type = 'Deposit' THEN CAST(amount AS NUMERIC) ELSE 0 END), 0)
           - COALESCE(SUM(CASE WHEN event_type = 'Withdraw' THEN CAST(amount AS NUMERIC) ELSE 0 END), 0)
         AS total_deposits
-      FROM loan_events
+      FROM contract_events
       WHERE event_type IN ('Deposit', 'Withdraw')
     `),
       query(`
@@ -32,20 +42,15 @@ export const getPoolStats = asyncHandler(
         COALESCE(SUM(CASE WHEN event_type = 'LoanApproved' THEN CAST(amount AS NUMERIC) ELSE 0 END), 0)
           - COALESCE(SUM(CASE WHEN event_type = 'LoanRepaid' THEN CAST(amount AS NUMERIC) ELSE 0 END), 0)
         AS total_outstanding
-      FROM loan_events
+      FROM contract_events
       WHERE event_type IN ('LoanApproved', 'LoanRepaid')
     `),
     ]);
 
-    const totalDeposits = parseFloat(
-      depositResult.rows[0]?.total_deposits ?? "0",
-    );
-    const totalOutstanding = parseFloat(
-      loanResult.rows[0]?.total_outstanding ?? "0",
-    );
-    const activeLoansCount = parseInt(
-      loanResult.rows[0]?.active_loans_count ?? "0",
-      10,
+    const totalDeposits = safeFloat(depositResult.rows[0]?.total_deposits);
+    const totalOutstanding = safeFloat(loanResult.rows[0]?.total_outstanding);
+    const activeLoansCount = Math.trunc(
+      safeFloat(loanResult.rows[0]?.active_loans_count),
     );
 
     const utilizationRate =
@@ -81,9 +86,9 @@ export const getDepositorPortfolio = asyncHandler(
           - COALESCE(SUM(CASE WHEN event_type = 'Withdraw' THEN CAST(amount AS NUMERIC) ELSE 0 END), 0)
         AS deposit_amount,
         MIN(CASE WHEN event_type = 'Deposit' THEN ledger_closed_at END) AS first_deposit_at
-      FROM loan_events
+      FROM contract_events
       WHERE event_type IN ('Deposit', 'Withdraw')
-        AND borrower = $1
+        AND address = $1
       `,
         [address],
       ),
@@ -92,15 +97,13 @@ export const getDepositorPortfolio = asyncHandler(
         COALESCE(SUM(CASE WHEN event_type = 'Deposit' THEN CAST(amount AS NUMERIC) ELSE 0 END), 0)
           - COALESCE(SUM(CASE WHEN event_type = 'Withdraw' THEN CAST(amount AS NUMERIC) ELSE 0 END), 0)
         AS pool_total
-      FROM loan_events
+      FROM contract_events
       WHERE event_type IN ('Deposit', 'Withdraw')
     `),
     ]);
 
-    const depositAmount = parseFloat(
-      depositorResult.rows[0]?.deposit_amount ?? "0",
-    );
-    const poolTotal = parseFloat(poolTotalResult.rows[0]?.pool_total ?? "0");
+    const depositAmount = safeFloat(depositorResult.rows[0]?.deposit_amount);
+    const poolTotal = safeFloat(poolTotalResult.rows[0]?.pool_total);
     const firstDepositAt = depositorResult.rows[0]?.first_deposit_at ?? null;
 
     const sharePercent = poolTotal > 0 ? depositAmount / poolTotal : 0;

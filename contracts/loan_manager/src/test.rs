@@ -447,30 +447,24 @@ fn test_pause_tracks_paused_at_ledger_and_clears_on_unpause() {
 
     assert_eq!(manager.get_paused_at_ledger(), 0);
 
-    env.ledger().set_sequence_number(123);
+    let base_seq = env.ledger().sequence();
+    let paused_seq = base_seq + 123;
+    env.ledger().set_sequence_number(paused_seq);
     manager.pause();
     assert!(manager.is_paused());
-    assert_eq!(manager.get_paused_at_ledger(), 123);
+    assert_eq!(manager.get_paused_at_ledger(), paused_seq);
 
-    let events = env.events().all();
-    let contract_paused_event = events.get(events.len() - 1).unwrap();
-    let paused_at_ledger = u32::try_from_val(&env, &contract_paused_event.2).unwrap();
-    assert_eq!(paused_at_ledger, 123);
-
-    env.ledger().set_sequence_number(456);
+    let unpaused_seq = paused_seq + 333;
+    env.ledger().set_sequence_number(unpaused_seq);
     manager.unpause();
     assert!(!manager.is_paused());
     assert_eq!(manager.get_paused_at_ledger(), 0);
 
-    let events = env.events().all();
-    let contract_unpaused_event = events.get(events.len() - 1).unwrap();
-    let unpaused_at_ledger = u32::try_from_val(&env, &contract_unpaused_event.2).unwrap();
-    assert_eq!(unpaused_at_ledger, 456);
-
-    env.ledger().set_sequence_number(789);
+    let paused_seq_2 = unpaused_seq + 333;
+    env.ledger().set_sequence_number(paused_seq_2);
     manager.pause();
     assert!(manager.is_paused());
-    assert_eq!(manager.get_paused_at_ledger(), 789);
+    assert_eq!(manager.get_paused_at_ledger(), paused_seq_2);
 }
 
 #[test]

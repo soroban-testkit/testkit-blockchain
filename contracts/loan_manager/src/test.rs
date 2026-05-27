@@ -3276,8 +3276,7 @@ fn test_get_loan_health_matches_liquidation_state() {
     assert!(manager.is_liquidatable(&loan_id));
 
     let pending_id = manager.request_loan(&borrower, &500, &17_280);
-    let (pending_collateral, pending_debt, pending_ratio) =
-        manager.get_loan_health(&pending_id);
+    let (pending_collateral, pending_debt, pending_ratio) = manager.get_loan_health(&pending_id);
     assert_eq!(pending_collateral, 0);
     assert_eq!(pending_debt, 0);
     assert_eq!(pending_ratio, 0);

@@ -369,7 +369,9 @@ fn test_yield_distributed_event_updates_total_yield_distributed() {
 
     assert_eq!(pool_client.get_total_yield_distributed(&token_id), 150);
     assert_eq!(
-        pool_client.get_pool_stats(&token_id).total_yield_distributed,
+        pool_client
+            .get_pool_stats(&token_id)
+            .total_yield_distributed,
         150
     );
 }

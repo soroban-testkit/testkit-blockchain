@@ -55,7 +55,9 @@ describe("notification preferences endpoints", () => {
 
     const response = await request(app)
       .get("/api/notifications/preferences")
-      .set(bearer("GTESTUSER1111111111111111111111111111111111111111111111111"));
+      .set(
+        bearer("GTESTUSER1111111111111111111111111111111111111111111111111"),
+      );
 
     expect(response.status).toBe(200);
     expect(response.body).toEqual({

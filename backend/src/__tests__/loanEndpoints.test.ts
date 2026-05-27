@@ -652,7 +652,11 @@ describe("POST /api/loans/:loanId/build-refinance", () => {
   it("should reject unauthenticated requests", async () => {
     const response = await request(app)
       .post("/api/loans/1/build-refinance")
-      .send({ newAmount: 2000, newTerm: 34560, borrowerPublicKey: TEST_BORROWER });
+      .send({
+        newAmount: 2000,
+        newTerm: 34560,
+        borrowerPublicKey: TEST_BORROWER,
+      });
     expect(response.status).toBe(401);
   });
 
@@ -669,7 +673,11 @@ describe("POST /api/loans/:loanId/build-refinance", () => {
     const response = await request(app)
       .post("/api/loans/1/build-refinance")
       .set(bearer(TEST_BORROWER))
-      .send({ newAmount: 2000, newTerm: 34560, borrowerPublicKey: TEST_BORROWER });
+      .send({
+        newAmount: 2000,
+        newTerm: 34560,
+        borrowerPublicKey: TEST_BORROWER,
+      });
 
     expect(response.status).toBe(200);
     expect(response.body.success).toBe(true);
@@ -685,7 +693,11 @@ describe("POST /api/loans/:loanId/build-refinance", () => {
     const response = await request(app)
       .post("/api/loans/1/build-refinance")
       .set(bearer(TEST_BORROWER))
-      .send({ newAmount: 2000, newTerm: 34560, borrowerPublicKey: TEST_BORROWER });
+      .send({
+        newAmount: 2000,
+        newTerm: 34560,
+        borrowerPublicKey: TEST_BORROWER,
+      });
 
     expect(response.status).toBe(403);
   });

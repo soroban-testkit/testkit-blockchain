@@ -54,6 +54,9 @@ export const refinanceLoanSchema = z.object({
 });
 
 export const extendLoanSchema = z.object({
-  extraLedgers: z.number().int().positive("Extra ledgers must be a positive integer"),
+  extraLedgers: z
+    .number()
+    .int()
+    .positive("Extra ledgers must be a positive integer"),
   borrowerPublicKey: stellarAddressSchema,
 });

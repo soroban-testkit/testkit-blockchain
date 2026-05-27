@@ -142,7 +142,7 @@ export const getDepositorPortfolio = asyncHandler(
  */
 export const getDepositorYieldHistory = asyncHandler(
   async (req: Request, res: Response) => {
-    const { address } = req.params;
+    const address = req.params.address as string;
     const days = normalizeYieldHistoryDays(
       req.query.days ? Number(req.query.days) : undefined,
     );

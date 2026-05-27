@@ -159,7 +159,7 @@ export async function buildDepositorYieldHistory(
   const poolContractId = process.env.LENDING_POOL_CONTRACT_ID ?? "";
 
   const [poolEventsResult, depositorEventsResult] = await Promise.all([
-    query<PoolEventRow>(
+    query(
       `
       SELECT event_type, amount, ledger_closed_at, value
       FROM contract_events
@@ -170,7 +170,7 @@ export async function buildDepositorYieldHistory(
       `,
       [poolContractId, since.toISOString()],
     ),
-    query<PoolEventRow>(
+    query(
       `
       SELECT event_type, amount, ledger_closed_at, value
       FROM contract_events
@@ -183,8 +183,8 @@ export async function buildDepositorYieldHistory(
     ),
   ]);
 
-  const poolEvents = poolEventsResult.rows;
-  const depositorEvents = depositorEventsResult.rows;
+  const poolEvents = poolEventsResult.rows as PoolEventRow[];
+  const depositorEvents = depositorEventsResult.rows as PoolEventRow[];
 
   if (depositorEvents.length === 0) {
     return [];

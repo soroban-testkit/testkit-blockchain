@@ -1,7 +1,14 @@
 import { jest, describe, it, expect, beforeEach } from "@jest/globals";
 import type { NextFunction, Request, Response } from "express";
 
-const mockBuildHistory = jest.fn<() => Promise<unknown[]>>();
+const mockBuildHistory = jest.fn<
+  (
+    address: string,
+    token: string,
+    days: number,
+    currentSharePrice?: number,
+  ) => Promise<unknown[]>
+>();
 const mockGetSharePrice = jest.fn<() => Promise<number>>();
 
 jest.unstable_mockModule("../services/yieldHistoryService.js", () => ({

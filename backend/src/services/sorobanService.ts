@@ -878,7 +878,10 @@ class SorobanService {
         .map((byte) => byte.toString(16).padStart(2, "0"))
         .join("");
     }
-    if (Array.isArray(value) && value.every((item) => typeof item === "number")) {
+    if (
+      Array.isArray(value) &&
+      value.every((item) => typeof item === "number")
+    ) {
       return value.map((byte) => byte.toString(16).padStart(2, "0")).join("");
     }
     if (value && typeof value === "object" && "toString" in value) {
@@ -923,7 +926,9 @@ class SorobanService {
       );
     }
 
-    return simulation.result?.retval ? scValToNative(simulation.result.retval) : null;
+    return simulation.result?.retval
+      ? scValToNative(simulation.result.retval)
+      : null;
   }
 
   async getRemittanceNftMetadata(userPublicKey: string): Promise<{
@@ -945,7 +950,10 @@ class SorobanService {
 
     const [defaultCountNative, cooldownNative, history] = await Promise.all([
       this.simulateRemittanceNftRead("get_default_count", userPublicKey),
-      this.simulateRemittanceNftRead("get_transfer_cooldown_remaining", userPublicKey),
+      this.simulateRemittanceNftRead(
+        "get_transfer_cooldown_remaining",
+        userPublicKey,
+      ),
       this.getOnChainScoreHistory(userPublicKey).catch(() => []),
     ]);
 
@@ -991,6 +999,57 @@ class SorobanService {
         error: error instanceof Error ? error.message : String(error),
       };
     }
+  }
+
+  /**
+   * Reads the current LP share price from the LendingPool contract.
+   * Returns the on-chain value scaled by SHARE_PRICE_SCALE (1_000_000 = 1.0).
+   */
+  async getSharePrice(tokenAddress?: string): Promise<number> {
+    const server = this.getRpcServer();
+    const token = tokenAddress ?? this.getPoolTokenAddress();
+    const poolId = this.getLendingPoolContractId();
+    const passphrase = this.getNetworkPassphrase();
+    const source = this.getScoreReadSourceKeypair();
+
+    const account = await server.getAccount(source.publicKey());
+    const tokenScVal = nativeToScVal(Address.fromString(token), {
+      type: "address",
+    });
+
+    const tx = new TransactionBuilder(account, {
+      fee: BASE_FEE,
+      networkPassphrase: passphrase,
+    })
+      .addOperation(
+        Operation.invokeContractFunction({
+          contract: poolId,
+          function: "get_share_price",
+          args: [tokenScVal],
+        }),
+      )
+      .setTimeout(30)
+      .build();
+
+    const simulation = await server.simulateTransaction(tx);
+    if ("error" in simulation) {
+      throw AppError.internal(
+        `Failed to simulate get_share_price: ${simulation.error}`,
+      );
+    }
+
+    const retval = simulation.result?.retval;
+    if (!retval) {
+      throw AppError.internal("No share price returned by lending pool");
+    }
+
+    const nativePrice = scValToNative(retval);
+    const price = Number(nativePrice);
+    if (!Number.isFinite(price)) {
+      throw AppError.internal("Invalid on-chain share price returned");
+    }
+
+    return price;
   }
 
   /**

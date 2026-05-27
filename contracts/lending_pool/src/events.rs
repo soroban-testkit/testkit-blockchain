@@ -11,6 +11,7 @@ pub fn withdraw(env: &Env, provider: Address, token: Address, amount: i128, shar
     env.events().publish(topics, (amount, shares_burned));
 }
 
+#[allow(dead_code)]
 pub fn yield_distributed(env: &Env, token: Address, amount: i128) {
     if amount > 0 {
         let total = env

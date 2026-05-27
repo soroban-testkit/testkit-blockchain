@@ -1,4 +1,5 @@
 import logger from "../utils/logger.js";
+import { refreshWebhookRetryQueueDepth } from "../middleware/metrics.js";
 import { WebhookService } from "./webhookService.js";
 
 let retryProcessorInterval: NodeJS.Timeout | null = null;
@@ -20,7 +21,9 @@ export function startWebhookRetryProcessor(): void {
   // Run retry processor every 10 seconds
   retryProcessorInterval = setInterval(async () => {
     try {
+      await refreshWebhookRetryQueueDepth();
       await WebhookService.processRetries();
+      await refreshWebhookRetryQueueDepth();
     } catch (error) {
       logger.error("Error in webhook retry processor interval", { error });
     }

@@ -19,6 +19,7 @@ import {
 import { sorobanService } from "./sorobanService.js";
 import { updateUserScoresBulk } from "./scoresService.js";
 import { AppError } from "../errors/AppError.js";
+import { recordIndexerLedgers } from "../middleware/metrics.js";
 
 const EVENT_TYPE_ALIASES: Record<string, WebhookEventType> = {
   Mint: "NFTMinted",
@@ -239,6 +240,7 @@ export class EventIndexer {
     const latestLedger = await this.getLatestLedgerSequence();
 
     if (latestLedger <= lastIndexedLedger) {
+      recordIndexerLedgers(lastIndexedLedger, latestLedger);
       return;
     }
 
@@ -247,6 +249,7 @@ export class EventIndexer {
 
     const result = await this.processChunk(fromLedger, toLedger);
     await this.updateLastIndexedLedger(result.lastProcessedLedger);
+    recordIndexerLedgers(result.lastProcessedLedger, latestLedger);
   }
 
   private async getLatestLedgerSequence(): Promise<number> {

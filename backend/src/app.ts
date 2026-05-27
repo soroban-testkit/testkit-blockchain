@@ -23,8 +23,13 @@ import authRoutes from "./routes/authRoutes.js";
 import notificationsRoutes from "./routes/notificationsRoutes.js";
 import eventRoutes from "./routes/eventRoutes.js";
 import remittanceRoutes from "./routes/remittanceRoutes.js";
+import { requireApiKey } from "./middleware/auth.js";
 import { globalRateLimiter } from "./middleware/rateLimiter.js";
 import { errorHandler } from "./middleware/errorHandler.js";
+import {
+  metricsHandler,
+  metricsMiddleware,
+} from "./middleware/metrics.js";
 import { requestLogger } from "./middleware/requestLogger.js";
 import { requestIdMiddleware } from "./middleware/requestId.js";
 import { asyncHandler } from "./utils/asyncHandler.js";
@@ -114,6 +119,7 @@ app.use(express.json());
 app.use(globalRateLimiter);
 app.use(requestIdMiddleware);
 app.use(requestLogger);
+app.use(metricsMiddleware);
 
 app.get("/", (req: Request, res: Response) => {
   res.send("RemitLend Backend is running");
@@ -156,6 +162,8 @@ app.get(
     });
   }),
 );
+
+app.get("/metrics", requireApiKey, asyncHandler(metricsHandler));
 
 // Legacy routes (deprecated, maintained for backward compatibility)
 app.use("/api", simulationRoutes);

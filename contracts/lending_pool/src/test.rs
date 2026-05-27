@@ -653,7 +653,7 @@ fn test_get_proposed_admin_returns_none_after_accept() {
 
     let new_admin = Address::generate(&env);
     pool_client.propose_admin(&new_admin);
-    pool_client.accept_admin().unwrap();
+    pool_client.accept_admin();
 
     assert_eq!(pool_client.get_proposed_admin(), None);
     assert_eq!(pool_client.get_admin(), new_admin);

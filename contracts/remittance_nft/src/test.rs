@@ -1209,7 +1209,7 @@ fn test_get_proposed_admin_returns_none_after_accept() {
 
     let new_admin = Address::generate(&env);
     client.propose_admin(&new_admin);
-    client.accept_admin().unwrap();
+    client.accept_admin();
 
     assert_eq!(client.get_proposed_admin(), None);
     assert_eq!(client.get_admin(), new_admin);

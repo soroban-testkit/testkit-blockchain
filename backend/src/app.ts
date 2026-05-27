@@ -8,6 +8,7 @@ import compression from "compression";
 import helmet from "helmet";
 import dotenv from "dotenv";
 import { Sentry } from "./config/sentry.js";
+import { mountSwaggerDocs } from "./config/swagger.js";
 
 dotenv.config();
 import pool from "./db/connection.js";
@@ -177,6 +178,8 @@ app.use("/api/v1/indexer", indexerRoutes);
 app.use("/api/v1/admin", adminRoutes);
 app.use("/api/v1/auth", authRoutes);
 app.use("/api/v1/remittances", remittanceRoutes);
+
+mountSwaggerDocs(app);
 
 // ── Diagnostic / Test Routes ─────────────────────────────────────
 // Only exposed in test environment to verify centralized error handling.

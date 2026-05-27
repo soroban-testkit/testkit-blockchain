@@ -28,7 +28,7 @@ export const getPendingGovernance = asyncHandler(
     const threshold = Number.parseInt(process.env.GOVERNANCE_THRESHOLD ?? "0", 10) || 0;
 
     try {
-      const result = await query<GovernanceRow>(
+      const result = await query(
         `SELECT
            proposal_id,
            proposed_admin,
@@ -43,7 +43,7 @@ export const getPendingGovernance = asyncHandler(
       );
 
       if (result.rows.length > 0) {
-        const first = result.rows[0];
+        const first = result.rows[0] as GovernanceRow;
         res.json({
           currentAdmin,
           targetContract,
@@ -55,8 +55,8 @@ export const getPendingGovernance = asyncHandler(
             executableAt: first.executable_at,
             expiresAt: first.expires_at,
             signers: result.rows
-              .filter((row) => row.signer_address)
-              .map((row) => ({
+              .filter((row: GovernanceRow) => row.signer_address)
+              .map((row: GovernanceRow) => ({
                 address: row.signer_address,
                 approved: Boolean(row.approved),
               })),

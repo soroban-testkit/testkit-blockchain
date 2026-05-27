@@ -787,6 +787,31 @@ impl LoanManager {
         events::loan_rejected(&env, loan_id, reason);
     }
 
+    pub fn purge_loan(env: Env, loan_id: u32) {
+        Self::admin(&env).require_auth();
+
+        let loan_key = DataKey::Loan(loan_id);
+        let loan: Loan = env
+            .storage()
+            .persistent()
+            .get(&loan_key)
+            .expect("loan not found");
+
+        match loan.status {
+            LoanStatus::Repaid | LoanStatus::Cancelled | LoanStatus::Rejected => {}
+            _ => panic!("loan cannot be purged in current status"),
+        }
+
+        let collateral_key = DataKey::Collateral(loan_id);
+        if env.storage().persistent().has(&collateral_key) {
+            env.storage().persistent().remove(&collateral_key);
+        }
+
+        env.storage().persistent().remove(&loan_key);
+
+        events::loan_purged(&env, loan_id);
+    }
+
     pub fn set_late_fee_rate(env: Env, rate_bps: u32) {
         if rate_bps > 10_000 {
             panic!("late fee rate exceeds 100%");

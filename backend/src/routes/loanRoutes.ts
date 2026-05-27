@@ -12,6 +12,7 @@ import {
   repayLoan,
   submitTransaction,
 } from "../controllers/loanController.js";
+import { getLoanEvents } from "../controllers/indexerController.js";
 import {
   requireJwtAuth,
   requireScopes,
@@ -211,6 +212,48 @@ router.get(
   requireScopes("read:loans"),
   requireLoanBorrowerAccess,
   getLoanAmortizationSchedule,
+);
+
+/**
+ * @swagger
+ * /loans/{loanId}/events:
+ *   get:
+ *     summary: Get events for a specific loan
+ *     description: >
+ *       Returns chronological loan events for the authenticated borrower.
+ *     tags: [Loans]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: loanId
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         description: Loan ID
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           default: 50
+ *       - in: query
+ *         name: cursor
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Loan events retrieved successfully
+ *       401:
+ *         description: Missing or invalid Bearer token
+ *       404:
+ *         description: Loan not found or not accessible
+ */
+router.get(
+  "/:loanId/events",
+  requireJwtAuth,
+  requireScopes("read:loans"),
+  requireLoanBorrowerAccess,
+  getLoanEvents,
 );
 
 /**

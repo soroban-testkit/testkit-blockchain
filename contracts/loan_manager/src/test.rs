@@ -439,6 +439,41 @@ fn test_paused_blocks_new_loans_and_repayments_but_allows_collateral_release() {
 }
 
 #[test]
+fn test_pause_tracks_paused_at_ledger_and_clears_on_unpause() {
+    let env = Env::default();
+    env.mock_all_auths_allowing_non_root_auth();
+
+    let (manager, _nft_client, _pool, _token, _admin) = setup_test(&env);
+
+    assert_eq!(manager.get_paused_at_ledger(), 0);
+
+    env.ledger().set_sequence_number(123);
+    manager.pause();
+    assert!(manager.is_paused());
+    assert_eq!(manager.get_paused_at_ledger(), 123);
+
+    let events = env.events().all();
+    let contract_paused_event = events.get(events.len() - 1).unwrap();
+    let paused_at_ledger = u32::try_from_val(&env, &contract_paused_event.2).unwrap();
+    assert_eq!(paused_at_ledger, 123);
+
+    env.ledger().set_sequence_number(456);
+    manager.unpause();
+    assert!(!manager.is_paused());
+    assert_eq!(manager.get_paused_at_ledger(), 0);
+
+    let events = env.events().all();
+    let contract_unpaused_event = events.get(events.len() - 1).unwrap();
+    let unpaused_at_ledger = u32::try_from_val(&env, &contract_unpaused_event.2).unwrap();
+    assert_eq!(unpaused_at_ledger, 456);
+
+    env.ledger().set_sequence_number(789);
+    manager.pause();
+    assert!(manager.is_paused());
+    assert_eq!(manager.get_paused_at_ledger(), 789);
+}
+
+#[test]
 fn test_cancel_pending_loan_returns_collateral() {
     let env = Env::default();
     env.mock_all_auths_allowing_non_root_auth();

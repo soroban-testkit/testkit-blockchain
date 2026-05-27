@@ -66,14 +66,14 @@ pub fn min_score_updated(env: &Env, old_score: u32, new_score: u32) {
         .publish((symbol_short!("MinScore"),), (old_score, new_score));
 }
 
-pub fn paused(env: &Env) {
+pub fn paused(env: &Env, paused_at_ledger: u32) {
     let topics = (Symbol::new(env, "Paused"),);
-    env.events().publish(topics, ());
+    env.events().publish(topics, paused_at_ledger);
 }
 
-pub fn unpaused(env: &Env) {
+pub fn unpaused(env: &Env, unpaused_at_ledger: u32) {
     let topics = (Symbol::new(env, "Unpaused"),);
-    env.events().publish(topics, ());
+    env.events().publish(topics, unpaused_at_ledger);
 }
 
 // pub fn min_score_updated(env: &Env, old_score: u32, new_score: u32) {

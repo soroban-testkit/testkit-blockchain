@@ -113,6 +113,7 @@ pub enum DataKey {
     BorrowerLoanCount(Address),
     BorrowerLoans(Address),
     Paused,
+    PausedAtLedger,
     InterestRateBps,
     DefaultTermLedgers,
     Version,
@@ -2268,20 +2269,26 @@ impl LoanManager {
 
     pub fn pause(env: Env) {
         Self::admin(&env).require_auth();
+        let paused_at_ledger = env.ledger().sequence();
         env.storage().instance().set(&DataKey::Paused, &true);
+        env.storage()
+            .instance()
+            .set(&DataKey::PausedAtLedger, &paused_at_ledger);
         Self::bump_instance_ttl(&env);
-        events::paused(&env);
+        events::paused(&env, paused_at_ledger);
         env.events()
-            .publish((Symbol::new(&env, "ContractPaused"),), ());
+            .publish((Symbol::new(&env, "ContractPaused"),), paused_at_ledger);
     }
 
     pub fn unpause(env: Env) {
         Self::admin(&env).require_auth();
+        let unpaused_at_ledger = env.ledger().sequence();
         env.storage().instance().set(&DataKey::Paused, &false);
+        env.storage().instance().remove(&DataKey::PausedAtLedger);
         Self::bump_instance_ttl(&env);
-        events::unpaused(&env);
+        events::unpaused(&env, unpaused_at_ledger);
         env.events()
-            .publish((Symbol::new(&env, "ContractUnpaused"),), ());
+            .publish((Symbol::new(&env, "ContractUnpaused"),), unpaused_at_ledger);
     }
 
     pub fn is_paused(env: Env) -> bool {
@@ -2290,6 +2297,14 @@ impl LoanManager {
             .instance()
             .get(&DataKey::Paused)
             .unwrap_or(false)
+    }
+
+    pub fn get_paused_at_ledger(env: Env) -> u32 {
+        Self::bump_instance_ttl(&env);
+        env.storage()
+            .instance()
+            .get(&DataKey::PausedAtLedger)
+            .unwrap_or(0)
     }
 
     pub fn check_default(env: Env, loan_id: u32) -> Result<(), LoanError> {

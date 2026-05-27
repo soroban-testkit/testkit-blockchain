@@ -4,9 +4,11 @@ import {
   updateScore,
   getScoreBreakdown,
   getOnChainScoreHistory,
+  getRemittanceNft,
 } from "../controllers/scoreController.js";
 import { validate } from "../middleware/validation.js";
 import {
+  getRemittanceNftSchema,
   getScoreHistorySchema,
   getScoreSchema,
   updateScoreSchema,
@@ -100,6 +102,15 @@ router.get(
   requireWalletParamMatchesJwt("walletAddress"),
   validate(getScoreHistorySchema),
   getOnChainScoreHistory,
+);
+
+router.get(
+  "/:walletAddress/nft",
+  requireJwtAuth,
+  requireScopes("read:score"),
+  requireWalletParamMatchesJwt("walletAddress"),
+  validate(getRemittanceNftSchema),
+  getRemittanceNft,
 );
 
 /**

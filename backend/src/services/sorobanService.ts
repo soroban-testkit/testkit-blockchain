@@ -878,7 +878,10 @@ class SorobanService {
         .map((byte) => byte.toString(16).padStart(2, "0"))
         .join("");
     }
-    if (Array.isArray(value) && value.every((item) => typeof item === "number")) {
+    if (
+      Array.isArray(value) &&
+      value.every((item) => typeof item === "number")
+    ) {
       return value.map((byte) => byte.toString(16).padStart(2, "0")).join("");
     }
     if (value && typeof value === "object" && "toString" in value) {
@@ -923,7 +926,9 @@ class SorobanService {
       );
     }
 
-    return simulation.result?.retval ? scValToNative(simulation.result.retval) : null;
+    return simulation.result?.retval
+      ? scValToNative(simulation.result.retval)
+      : null;
   }
 
   async getRemittanceNftMetadata(userPublicKey: string): Promise<{
@@ -945,7 +950,10 @@ class SorobanService {
 
     const [defaultCountNative, cooldownNative, history] = await Promise.all([
       this.simulateRemittanceNftRead("get_default_count", userPublicKey),
-      this.simulateRemittanceNftRead("get_transfer_cooldown_remaining", userPublicKey),
+      this.simulateRemittanceNftRead(
+        "get_transfer_cooldown_remaining",
+        userPublicKey,
+      ),
       this.getOnChainScoreHistory(userPublicKey).catch(() => []),
     ]);
 

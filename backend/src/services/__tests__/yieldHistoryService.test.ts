@@ -1,8 +1,7 @@
 import { describe, it, expect, jest, beforeEach } from "@jest/globals";
 
-const mockQuery = jest.fn<
-  (sql: string, params?: unknown[]) => Promise<{ rows: unknown[] }>
->();
+const mockQuery =
+  jest.fn<(sql: string, params?: unknown[]) => Promise<{ rows: unknown[] }>>();
 
 jest.unstable_mockModule("../../db/connection.js", () => ({
   query: mockQuery,

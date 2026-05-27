@@ -18,7 +18,8 @@ jest.unstable_mockModule("../services/sorobanService.js", () => ({
   },
 }));
 
-const { getDepositorYieldHistory } = await import("../controllers/poolController.js");
+const { getDepositorYieldHistory } =
+  await import("../controllers/poolController.js");
 
 const flushAsync = async (): Promise<void> =>
   new Promise((resolve) => setImmediate(resolve));

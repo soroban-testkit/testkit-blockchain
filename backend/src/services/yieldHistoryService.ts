@@ -21,8 +21,6 @@ interface PoolEventRow {
   value: string | null;
 }
 
-interface DepositorEventRow extends PoolEventRow {}
-
 function parseNumeric(value: unknown): number {
   const n = parseFloat(String(value ?? 0));
   return Number.isFinite(n) ? n : 0;
@@ -99,8 +97,8 @@ function applyPoolEvent(
 
 function applyDepositorEvent(
   state: { shares: number; costBasis: number },
-  pool: { poolBalance: number; totalShares: number },
-  event: DepositorEventRow,
+  _pool: { poolBalance: number; totalShares: number },
+  event: PoolEventRow,
 ): void {
   const { assetAmount, shares } = parseDepositWithdrawAmounts(
     event.event_type,
@@ -172,7 +170,7 @@ export async function buildDepositorYieldHistory(
       `,
       [poolContractId, since.toISOString()],
     ),
-    query<DepositorEventRow>(
+    query<PoolEventRow>(
       `
       SELECT event_type, amount, ledger_closed_at, value
       FROM contract_events
@@ -217,7 +215,6 @@ export async function buildDepositorYieldHistory(
   const depositorState = { shares: 0, costBasis: 0 };
   let poolIdx = 0;
   let depositorIdx = 0;
-  const firstDepositAt = new Date(depositorEvents[0]!.ledger_closed_at);
 
   const points: YieldHistoryPoint[] = [];
 
@@ -234,7 +231,11 @@ export async function buildDepositorYieldHistory(
       depositorIdx < depositorEvents.length &&
       new Date(depositorEvents[depositorIdx]!.ledger_closed_at) <= bucketEnd
     ) {
-      applyDepositorEvent(depositorState, poolState, depositorEvents[depositorIdx]!);
+      applyDepositorEvent(
+        depositorState,
+        poolState,
+        depositorEvents[depositorIdx]!,
+      );
       depositorIdx += 1;
     }
 
@@ -244,7 +245,8 @@ export async function buildDepositorYieldHistory(
       poolState.totalShares,
     );
 
-    const isLastBucket = bucketEnd.getTime() === bucketDates[bucketDates.length - 1]!.getTime();
+    const isLastBucket =
+      bucketEnd.getTime() === bucketDates[bucketDates.length - 1]!.getTime();
     if (
       isLastBucket &&
       currentSharePrice !== undefined &&
@@ -256,11 +258,6 @@ export async function buildDepositorYieldHistory(
 
     const depositedValue = depositorState.costBasis;
     const netYield = Math.max(0, currentValue - depositedValue);
-
-    const daysElapsed = Math.max(
-      1,
-      (bucketEnd.getTime() - firstDepositAt.getTime()) / (1000 * 60 * 60 * 24),
-    );
 
     points.push({
       timestamp: bucketEnd.toISOString(),

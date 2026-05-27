@@ -13,9 +13,13 @@ export const getDepositorYieldHistorySchema = z.object({
     address: stellarAddressSchema,
   }),
   query: z.object({
-    days: z.coerce.number().int().refine((v) => v === 7 || v === 30 || v === 90, {
-      message: "days must be 7, 30, or 90",
-    }).optional(),
+    days: z.coerce
+      .number()
+      .int()
+      .refine((v) => v === 7 || v === 30 || v === 90, {
+        message: "days must be 7, 30, or 90",
+      })
+      .optional(),
     token: stellarAddressSchema.optional(),
   }),
 });

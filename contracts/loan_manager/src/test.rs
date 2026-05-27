@@ -2495,11 +2495,11 @@ fn test_liquidate_with_collateral_shortfall_has_no_refund() {
     assert_eq!(liquidated_loan.principal_paid, 900);
     assert_eq!(manager.get_collateral(&loan_id), 0);
     assert_eq!(manager.get_borrower_loan_count(&borrower), 0);
-    assert_eq!(token_client.balance(&pool_client), pool_balance_before + 900);
     assert_eq!(
-        token_client.balance(&liquidator),
-        liquidator_balance_before
+        token_client.balance(&pool_client),
+        pool_balance_before + 900
     );
+    assert_eq!(token_client.balance(&liquidator), liquidator_balance_before);
     assert_eq!(token_client.balance(&borrower), borrower_balance_before);
 }
 

@@ -994,6 +994,57 @@ class SorobanService {
   }
 
   /**
+   * Reads the current LP share price from the LendingPool contract.
+   * Returns the on-chain value scaled by SHARE_PRICE_SCALE (1_000_000 = 1.0).
+   */
+  async getSharePrice(tokenAddress?: string): Promise<number> {
+    const server = this.getRpcServer();
+    const token = tokenAddress ?? this.getPoolTokenAddress();
+    const poolId = this.getLendingPoolContractId();
+    const passphrase = this.getNetworkPassphrase();
+    const source = this.getScoreReadSourceKeypair();
+
+    const account = await server.getAccount(source.publicKey());
+    const tokenScVal = nativeToScVal(Address.fromString(token), {
+      type: "address",
+    });
+
+    const tx = new TransactionBuilder(account, {
+      fee: BASE_FEE,
+      networkPassphrase: passphrase,
+    })
+      .addOperation(
+        Operation.invokeContractFunction({
+          contract: poolId,
+          function: "get_share_price",
+          args: [tokenScVal],
+        }),
+      )
+      .setTimeout(30)
+      .build();
+
+    const simulation = await server.simulateTransaction(tx);
+    if ("error" in simulation) {
+      throw AppError.internal(
+        `Failed to simulate get_share_price: ${simulation.error}`,
+      );
+    }
+
+    const retval = simulation.result?.retval;
+    if (!retval) {
+      throw AppError.internal("No share price returned by lending pool");
+    }
+
+    const nativePrice = scValToNative(retval);
+    const price = Number(nativePrice);
+    if (!Number.isFinite(price)) {
+      throw AppError.internal("Invalid on-chain share price returned");
+    }
+
+    return price;
+  }
+
+  /**
    * Reads the current available liquidity from the pool token.
    * This calls the token's balance function for the lending pool contract.
    */

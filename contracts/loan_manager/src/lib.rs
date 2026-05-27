@@ -447,6 +447,27 @@ impl LoanManager {
                 .expect("collateral ratio overflow")
     }
 
+    fn current_ratio_bps(collateral_amount: i128, total_debt: i128) -> u32 {
+        if total_debt <= 0 || collateral_amount <= 0 {
+            return 0;
+        }
+
+        let ratio = collateral_amount
+            .checked_mul(Self::MAX_RATIO_BPS as i128)
+            .expect("collateral ratio overflow")
+            / total_debt;
+
+        ratio.min(u32::MAX as i128) as u32
+    }
+
+    fn token(env: &Env) -> Address {
+        Self::bump_instance_ttl(env);
+        env.storage()
+            .instance()
+            .get(&DataKey::Token)
+            .expect("not initialized")
+    }
+
     fn grace_period_ledgers(env: &Env) -> u32 {
         Self::bump_instance_ttl(env);
         env.storage()
@@ -1434,6 +1455,50 @@ impl LoanManager {
         Self::collateral_amount(&env, loan_id)
     }
 
+    /// Returns whether `loan_id` is currently eligible for liquidation.
+    /// Non-`Approved` loans always return `false`.
+    pub fn is_liquidatable(env: Env, loan_id: u32) -> Result<bool, LoanError> {
+        let loan_key = DataKey::Loan(loan_id);
+        let mut loan: Loan = env
+            .storage()
+            .persistent()
+            .get(&loan_key)
+            .ok_or(LoanError::LoanNotFound)?;
+        Self::bump_persistent_ttl(&env, &loan_key);
+
+        if loan.status != LoanStatus::Approved {
+            return Ok(false);
+        }
+
+        let (total_debt, _) = Self::current_total_debt(&env, &mut loan)?;
+        let threshold_bps = Self::liquidation_threshold_bps(&env);
+        Ok(Self::is_collateral_ratio_below_threshold(
+            loan.collateral_amount,
+            total_debt,
+            threshold_bps,
+        ))
+    }
+
+    /// Returns `(collateral, total_debt, current_ratio_bps)` for `loan_id`.
+    /// Non-`Approved` loans return `(collateral, 0, 0)` without accruing debt.
+    pub fn get_loan_health(env: Env, loan_id: u32) -> Result<(i128, i128, u32), LoanError> {
+        let loan_key = DataKey::Loan(loan_id);
+        let mut loan: Loan = env
+            .storage()
+            .persistent()
+            .get(&loan_key)
+            .ok_or(LoanError::LoanNotFound)?;
+        Self::bump_persistent_ttl(&env, &loan_key);
+
+        if loan.status != LoanStatus::Approved {
+            return Ok((loan.collateral_amount, 0, 0));
+        }
+
+        let (total_debt, _) = Self::current_total_debt(&env, &mut loan)?;
+        let ratio_bps = Self::current_ratio_bps(loan.collateral_amount, total_debt);
+        Ok((loan.collateral_amount, total_debt, ratio_bps))
+    }
+
     pub fn liquidate(env: Env, liquidator: Address, loan_id: u32) -> Result<(), LoanError> {
         use soroban_sdk::token::TokenClient;
 
@@ -2047,6 +2112,14 @@ impl LoanManager {
 
     pub fn get_nft_contract(env: Env) -> Address {
         Self::nft_contract(&env)
+    }
+
+    pub fn get_token(env: Env) -> Address {
+        Self::token(&env)
+    }
+
+    pub fn get_total_outstanding(env: Env, token: Address) -> i128 {
+        Self::total_outstanding(&env, &token)
     }
 
     pub fn get_borrower_loans(env: Env, borrower: Address) -> Vec<u32> {

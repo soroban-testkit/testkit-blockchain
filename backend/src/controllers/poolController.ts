@@ -5,6 +5,11 @@ import { AppError } from "../errors/AppError.js";
 import { ErrorCode } from "../errors/errorCodes.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { sorobanService } from "../services/sorobanService.js";
+import {
+  buildDepositorYieldHistory,
+  computeApy,
+  normalizeYieldHistoryDays,
+} from "../services/yieldHistoryService.js";
 import logger from "../utils/logger.js";
 
 const ANNUAL_APY = 0.08; // 8% annual yield paid to depositors
@@ -129,6 +134,66 @@ export const getDepositorPortfolio = asyncHandler(
         firstDepositAt,
       },
     });
+  },
+);
+
+/**
+ * GET /api/pool/depositor/:address/yield-history
+ * Returns a time series of depositor yield reconstructed from indexed pool events.
+ */
+export const getDepositorYieldHistory = asyncHandler(
+  async (req: Request, res: Response) => {
+    const { address } = req.params;
+    const days = normalizeYieldHistoryDays(
+      req.query.days ? Number(req.query.days) : undefined,
+    );
+    const token =
+      typeof req.query.token === "string" && req.query.token.length > 0
+        ? req.query.token
+        : process.env.POOL_TOKEN_ADDRESS;
+
+    if (!token) {
+      throw AppError.internal("POOL_TOKEN_ADDRESS is not configured");
+    }
+
+    let currentSharePrice: number | undefined;
+    try {
+      currentSharePrice = await sorobanService.getSharePrice(token);
+    } catch (error) {
+      logger.warn("Could not fetch on-chain share price for yield history", {
+        address,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+
+    const history = await buildDepositorYieldHistory(
+      address,
+      token,
+      days,
+      currentSharePrice,
+    );
+
+    const firstTimestamp = history[0]?.timestamp;
+    const daysElapsed = firstTimestamp
+      ? Math.max(
+          1,
+          (Date.now() - new Date(firstTimestamp).getTime()) /
+            (1000 * 60 * 60 * 24),
+        )
+      : 1;
+
+    const data = history.map((point) => ({
+      timestamp: point.timestamp,
+      depositedValue: point.depositedValue,
+      currentValue: point.currentValue,
+      netYield: point.netYield,
+      date: point.timestamp,
+      earnings: point.netYield,
+      principal: point.depositedValue,
+      apy: computeApy(point.netYield, point.depositedValue, daysElapsed),
+    }));
+
+    res.json({ success: true, data });
   },
 );
 

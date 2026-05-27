@@ -255,4 +255,88 @@ fn cancel_with_no_pending_panics() {
     let (_env, client, _, _) = setup();
     client.cancel_admin_transfer();
 }
-// }
+
+#[test]
+fn proposal_count_increments() {
+    let (env, client, _, _) = setup();
+    assert_eq!(client.get_proposal_count(), 0);
+
+    let s1 = Address::generate(&env);
+    let signers = Vec::from_slice(&env, &[s1]);
+    client.propose_admin_transfer(
+        &Address::generate(&env),
+        &signers,
+        &1,
+        &MIN_TIMELOCK_SECONDS,
+    );
+    assert_eq!(client.get_proposal_count(), 1);
+
+    client.cancel_admin_transfer();
+    assert_eq!(client.get_proposal_count(), 1);
+
+    let s2 = Address::generate(&env);
+    let signers2 = Vec::from_slice(&env, &[s2]);
+    client.propose_admin_transfer(
+        &Address::generate(&env),
+        &signers2,
+        &1,
+        &MIN_TIMELOCK_SECONDS,
+    );
+    assert_eq!(client.get_proposal_count(), 2);
+}
+
+#[test]
+fn get_signers_returns_signer_list() {
+    let (env, client, _, _) = setup();
+    let s1 = Address::generate(&env);
+    let s2 = Address::generate(&env);
+    let signers = Vec::from_slice(&env, &[s1.clone(), s2.clone()]);
+    client.propose_admin_transfer(
+        &Address::generate(&env),
+        &signers,
+        &2,
+        &MIN_TIMELOCK_SECONDS,
+    );
+    let result = client.get_signers();
+    assert_eq!(result.len(), 2);
+    assert_eq!(result.get(0), Some(s1));
+    assert_eq!(result.get(1), Some(s2));
+}
+
+#[test]
+fn get_threshold_returns_pending_threshold() {
+    let (env, client, _, _) = setup();
+    let s = Address::generate(&env);
+    let signers = Vec::from_slice(&env, &[s]);
+    client.propose_admin_transfer(
+        &Address::generate(&env),
+        &signers,
+        &1,
+        &MIN_TIMELOCK_SECONDS,
+    );
+    assert_eq!(client.get_threshold(), 1);
+}
+
+#[test]
+fn has_approved_tracks_approvals() {
+    let (env, client, _, _) = setup();
+    let s1 = Address::generate(&env);
+    let s2 = Address::generate(&env);
+    let signers = Vec::from_slice(&env, &[s1.clone(), s2.clone()]);
+    client.propose_admin_transfer(
+        &Address::generate(&env),
+        &signers,
+        &2,
+        &MIN_TIMELOCK_SECONDS,
+    );
+    assert!(!client.has_approved(&s1));
+    assert!(!client.has_approved(&s2));
+
+    client.approve_transfer(&s1);
+    assert!(client.has_approved(&s1));
+    assert!(!client.has_approved(&s2));
+
+    client.approve_transfer(&s2);
+    assert!(client.has_approved(&s1));
+    assert!(client.has_approved(&s2));
+}

@@ -1,6 +1,6 @@
 {
   "generators": {
-    "address": 5,
+    "address": 6,
     "nonce": 0
   },
   "auth": [
@@ -16,17 +16,20 @@
               "function_name": "propose_admin_transfer",
               "args": [
                 {
-                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM"
+                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMDR4"
                 },
                 {
                   "vec": [
                     {
                       "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
+                    },
+                    {
+                      "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM"
                     }
                   ]
                 },
                 {
-                  "u32": 1
+                  "u32": 2
                 },
                 {
                   "u64": 86400
@@ -42,13 +45,13 @@
   ],
   "ledger": {
     "protocol_version": 22,
-    "sequence_number": 1000,
-    "timestamp": 87500,
+    "sequence_number": 0,
+    "timestamp": 0,
     "network_id": "0000000000000000000000000000000000000000000000000000000000000000",
-    "base_reserve": 5000000,
-    "min_persistent_entry_ttl": 1000000,
-    "min_temp_entry_ttl": 1000000,
-    "max_entry_ttl": 10000000,
+    "base_reserve": 0,
+    "min_persistent_entry_ttl": 4096,
+    "min_temp_entry_ttl": 16,
+    "max_entry_ttl": 6312000,
     "ledger_entries": [
       [
         {
@@ -108,7 +111,7 @@
                                 "symbol": "executable_after"
                               },
                               "val": {
-                                "u64": 87400
+                                "u64": 86400
                               }
                             },
                             {
@@ -116,7 +119,7 @@
                                 "symbol": "proposed_admin"
                               },
                               "val": {
-                                "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM"
+                                "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMDR4"
                               }
                             },
                             {
@@ -127,6 +130,9 @@
                                 "vec": [
                                   {
                                     "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
+                                  },
+                                  {
+                                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM"
                                   }
                                 ]
                               }
@@ -136,7 +142,7 @@
                                 "symbol": "threshold"
                               },
                               "val": {
-                                "u32": 1
+                                "u32": 2
                               }
                             }
                           ]
@@ -190,7 +196,7 @@
             },
             "ext": "v0"
           },
-          10000999
+          6311999
         ]
       ],
       [

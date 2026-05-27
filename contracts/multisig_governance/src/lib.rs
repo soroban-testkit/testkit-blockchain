@@ -19,6 +19,7 @@ const MAX_SIGNERS: u32 = 20;
 const KEY_ADMIN: Symbol = symbol_short!("ADMIN");
 const KEY_PENDING: Symbol = symbol_short!("PENDING");
 const KEY_TARGET: Symbol = symbol_short!("TARGET");
+const KEY_PROPOSAL_COUNT: Symbol = symbol_short!("PCOUNT");
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -149,6 +150,15 @@ impl GovernanceContract {
         };
 
         env.storage().instance().set(&KEY_PENDING, &pending);
+
+        let count: u32 = env
+            .storage()
+            .instance()
+            .get(&KEY_PROPOSAL_COUNT)
+            .unwrap_or(0);
+        env.storage()
+            .instance()
+            .set(&KEY_PROPOSAL_COUNT, &(count + 1));
 
         env.events().publish(
             (symbol_short!("GovProp"), admin.clone()),
@@ -334,6 +344,40 @@ impl GovernanceContract {
                 }
             }
         }
+    }
+
+    pub fn get_proposal_count(env: Env) -> u32 {
+        env.storage()
+            .instance()
+            .get(&KEY_PROPOSAL_COUNT)
+            .unwrap_or(0)
+    }
+
+    pub fn get_signers(env: Env) -> Vec<Address> {
+        let pending: PendingTransfer = env
+            .storage()
+            .instance()
+            .get(&KEY_PENDING)
+            .expect("no pending transfer (4004)");
+        pending.signers
+    }
+
+    pub fn get_threshold(env: Env) -> u32 {
+        let pending: PendingTransfer = env
+            .storage()
+            .instance()
+            .get(&KEY_PENDING)
+            .expect("no pending transfer (4004)");
+        pending.threshold
+    }
+
+    pub fn has_approved(env: Env, signer: Address) -> bool {
+        let pending: PendingTransfer = env
+            .storage()
+            .instance()
+            .get(&KEY_PENDING)
+            .expect("no pending transfer (4004)");
+        pending.approvals.get(signer).unwrap_or(false)
     }
 
     // ── Private helpers ───────────────────────────────────────────────────────

@@ -99,6 +99,14 @@
                       },
                       {
                         "key": {
+                          "symbol": "PCOUNT"
+                        },
+                        "val": {
+                          "u32": 1
+                        }
+                      },
+                      {
+                        "key": {
                           "symbol": "TARGET"
                         },
                         "val": {

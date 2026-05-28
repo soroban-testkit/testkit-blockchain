@@ -189,3 +189,8 @@ pub fn max_rate_bps_updated(env: &Env, admin: Address, old_rate: u32, new_rate: 
     let topics = (Symbol::new(env, "MaxRateBpsUpdated"), admin);
     env.events().publish(topics, (old_rate, new_rate));
 }
+
+pub fn loan_purged(env: &Env, loan_id: u32) {
+    let topics = (Symbol::new(env, "LoanPurged"),);
+    env.events().publish(topics, loan_id);
+}

@@ -585,6 +585,40 @@ impl GovernanceContract {
         }
     }
 
+    pub fn get_proposal_count(env: Env) -> u32 {
+        env.storage()
+            .instance()
+            .get(&KEY_PROPOSAL_COUNT)
+            .unwrap_or(0)
+    }
+
+    pub fn get_signers(env: Env) -> Vec<Address> {
+        let pending: PendingTransfer = env
+            .storage()
+            .instance()
+            .get(&KEY_PENDING)
+            .expect("no pending transfer (4004)");
+        pending.signers
+    }
+
+    pub fn get_threshold(env: Env) -> u32 {
+        let pending: PendingTransfer = env
+            .storage()
+            .instance()
+            .get(&KEY_PENDING)
+            .expect("no pending transfer (4004)");
+        pending.threshold
+    }
+
+    pub fn has_approved(env: Env, signer: Address) -> bool {
+        let pending: PendingTransfer = env
+            .storage()
+            .instance()
+            .get(&KEY_PENDING)
+            .expect("no pending transfer (4004)");
+        pending.approvals.get(signer).unwrap_or(false)
+    }
+
     // ── Private helpers ───────────────────────────────────────────────────────
 
     fn read_admin(env: &Env) -> Address {

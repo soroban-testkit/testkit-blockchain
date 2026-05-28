@@ -60,6 +60,7 @@ pub enum LoanError {
     InvalidExtension = 25,
     InsufficientCollateral = 26,
     LoanNotLiquidatable = 27,
+    LoanNotPurgable = 28,
 }
 
 #[contracttype]
@@ -1695,6 +1696,45 @@ impl LoanManager {
         }
         events::loan_rejected(&env, loan_id, reason);
 
+        Ok(())
+    }
+
+    /// Purge a loan in a terminal state (Repaid, Cancelled, Rejected) from
+    /// on-chain storage. Admin-only. Removes the loan record and any
+    /// residual collateral entry, then emits a `LoanPurged` event.
+    pub fn purge_loan(env: Env, loan_id: u32) -> Result<(), LoanError> {
+        Self::admin(&env).require_auth();
+
+        let loan_key = DataKey::Loan(loan_id);
+        let loan: Loan = env
+            .storage()
+            .persistent()
+            .get(&loan_key)
+            .ok_or(LoanError::LoanNotFound)?;
+        Self::bump_persistent_ttl(&env, &loan_key);
+
+        match loan.status {
+            LoanStatus::Repaid | LoanStatus::Cancelled | LoanStatus::Rejected => {}
+            _ => return Err(LoanError::LoanNotPurgable),
+        }
+
+        // Return any residual collateral before deleting the record.
+        if loan.collateral_amount > 0 {
+            Self::release_collateral_internal(&env, loan_id, &loan.borrower);
+        }
+
+        env.storage().persistent().remove(&loan_key);
+        let collateral_key = DataKey::Collateral(loan_id);
+        env.storage().persistent().remove(&collateral_key);
+
+        // Cancelled and Rejected loans still hold a borrower loan count
+        // (they are never decremented by cancel_loan / reject_loan), so
+        // clean it up here.
+        if matches!(loan.status, LoanStatus::Cancelled | LoanStatus::Rejected) {
+            Self::decrement_borrower_loan_count(&env, &loan.borrower);
+        }
+
+        events::loan_purged(&env, loan_id);
         Ok(())
     }
 

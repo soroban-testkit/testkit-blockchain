@@ -292,6 +292,10 @@ app.use("/api/v1/indexer", indexerRoutes);
 app.use("/api/v1/admin", adminRoutes);
 app.use("/api/v1/auth", authRoutes);
 app.use("/api/v1/remittances", remittanceRoutes);
+app.use("/api/v1/transactions", transactionRoutes);
+app.use("/api/v1/pool", poolRoutes);
+app.use("/api/v1/notifications", notificationsRoutes);
+app.use("/api/v1/events", eventRoutes);
 app.use("/user", userRoutes);
 
 mountSwaggerDocs(app);

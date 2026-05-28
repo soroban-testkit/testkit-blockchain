@@ -41,7 +41,8 @@ function isPrivateHost(hostname: string): boolean {
   if (/^192\.168\./.test(host)) return true;
 
   // AWS / GCP metadata endpoints
-  if (host === "169.254.169.254" || host === "metadata.google.internal") return true;
+  if (host === "169.254.169.254" || host === "metadata.google.internal")
+    return true;
 
   // Catch-all for unqualified single-label hostnames (e.g. "internal", "db")
   if (!host.includes(".") && host !== "::1") return true;
@@ -554,7 +555,8 @@ export const createWebhookSubscription = async (
     if (isPrivateHost(parsedUrl.hostname)) {
       return res.status(400).json({
         success: false,
-        message: "callbackUrl must not target a private, loopback, or link-local address",
+        message:
+          "callbackUrl must not target a private, loopback, or link-local address",
       });
     }
 

@@ -3,7 +3,7 @@ use lending_pool::{LendingPool, LendingPoolClient};
 use remittance_nft::{RemittanceNFT, RemittanceNFTClient};
 use soroban_sdk::testutils::{Events as _, Ledger as _};
 use soroban_sdk::token::{Client as TokenClient, StellarAssetClient};
-use soroban_sdk::{testutils::Address as _, Address, BytesN, Env, FromVal, String, TryFromVal};
+use soroban_sdk::{testutils::Address as _, Address, BytesN, Env, FromVal, String};
 
 fn setup_test<'a>(
     env: &Env,
@@ -3255,7 +3255,6 @@ fn test_get_total_outstanding_tracks_approve_and_repay() {
 
     assert_eq!(manager.get_total_outstanding(&token_id), 0);
 
-    let history_hash = soroban_sdk::BytesN::from_array(&env, &[0u8; 32]);
     let history_hash = soroban_sdk::BytesN::from_array(&env, &[0u8; 32]);
     nft_client.mint(
         &borrower,

@@ -75,6 +75,8 @@ interface ContractEvent extends IndexedLoanEvent {
    * Only populated for LoanApprv events.
    */
   adminAddress?: string;
+  /** Borrower refund amount decoded from a LoanLiquidated event value tuple (index 2). */
+  borrowerRefund?: string;
   ledger: number;
   ledgerClosedAt: Date;
   txHash: string;
@@ -649,6 +651,7 @@ export class EventIndexer {
     let amount: string | undefined;
     let interestRateBps: number | undefined;
     let termLedgers: number | undefined;
+    let borrowerRefund: string | undefined;
 
     if (type === "LoanRequested") {
       // (type, loan_id, borrower), amount
@@ -890,6 +893,7 @@ export class EventIndexer {
       loanId = this.decodeLoanId(event.topic[1]);
       address = this.decodeAddress(event.topic[2]);
       amount = this.decodeTupleFirstNumericValue(event.value);
+      borrowerRefund = this.decodeTupleThirdNumericValue(event.value);
     }
 
     // Decode admin address for LoanApprv events (topic[1] = approving admin)
@@ -917,6 +921,7 @@ export class EventIndexer {
       ...(termLedgers !== undefined ? { termLedgers } : {}),
       ...(address !== undefined ? { address } : {}),
       ...(adminAddress !== undefined ? { adminAddress } : {}),
+      ...(borrowerRefund !== undefined ? { borrowerRefund } : {}),
     };
   }
 
@@ -977,6 +982,18 @@ export class EventIndexer {
           ? `Collateral for loan #${event.loanId} has been seized due to default.`
           : "Collateral has been seized due to a loan default.";
         break;
+      case "LoanLiquidated": {
+        type = "loan_liquidated";
+        title = "Loan Liquidated";
+        const refundPart =
+          event.borrowerRefund && BigInt(event.borrowerRefund) > 0n
+            ? `A refund of ${event.borrowerRefund} has been returned to you.`
+            : "No refund is owed.";
+        message = event.loanId
+          ? `Loan #${event.loanId} has been liquidated. Your debt has been cleared. ${refundPart}`
+          : `Your loan has been liquidated. Your debt has been cleared. ${refundPart}`;
+        break;
+      }
       default:
         return;
     }
@@ -1038,6 +1055,18 @@ export class EventIndexer {
     const second = native[1];
     if (typeof second === "bigint" || typeof second === "number") {
       return second.toString();
+    }
+    return undefined;
+  }
+
+  private decodeTupleThirdNumericValue(value: xdr.ScVal): string | undefined {
+    const native = scValToNative(value);
+    if (!Array.isArray(native) || native.length < 3) {
+      return undefined;
+    }
+    const third = native[2];
+    if (typeof third === "bigint" || typeof third === "number") {
+      return third.toString();
     }
     return undefined;
   }

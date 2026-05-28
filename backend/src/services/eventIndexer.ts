@@ -67,6 +67,12 @@ interface ContractEvent extends IndexedLoanEvent {
   amount?: string;
   loanId?: number;
   address?: string;
+  /**
+   * Admin address captured from the LoanApprv event topic[1].
+   * Used to record the approving admin in audit_logs (actor field).
+   * Only populated for LoanApprv events.
+   */
+  adminAddress?: string;
   ledger: number;
   ledgerClosedAt: Date;
   txHash: string;
@@ -537,6 +543,35 @@ export class EventIndexer {
             );
           }
 
+          /**
+           * LoanApprv audit row — records which admin approved a loan.
+           *
+           * audit_logs shape:
+           *   actor     — admin Stellar address (topic[1] of the LoanApprv event)
+           *   action    — 'loan_approved'
+           *   target    — 'loan:<loanId>'
+           *   payload   — { eventId, loanId, borrower, txHash }
+           *   ip_address — null (on-chain action, no HTTP request IP)
+           */
+          if (event.eventType === "LoanApprv") {
+            await client.query(
+              `INSERT INTO audit_logs (actor, action, target, payload, ip_address)
+               VALUES ($1, $2, $3, $4::jsonb, $5)`,
+              [
+                event.adminAddress ?? "SYSTEM",
+                "loan_approved",
+                `loan:${event.loanId ?? "unknown"}`,
+                JSON.stringify({
+                  eventId: event.eventId,
+                  loanId: event.loanId ?? null,
+                  borrower: event.address ?? null,
+                  txHash: event.txHash,
+                }),
+                null,
+              ],
+            );
+          }
+
           // Aggregate score deltas per borrower; a single bulk upsert at
           // the end of the transaction avoids N+1 score updates.
           if (event.eventType === "LoanRepaid") {
@@ -832,17 +867,29 @@ export class EventIndexer {
       }
     } else if (type === "LoanApprv") {
       // (type, admin), (loan_id, borrower)
+      // topic[1] = admin address who approved the loan
       const data = scValToNative(event.value);
       if (Array.isArray(data) && data.length >= 2) {
         loanId = Number(data[0]);
-        address = data[1].toString();
+        address = data[1].toString(); // borrower
       }
+      // adminAddress is decoded separately and attached below
     } else if (type === "LoanLiquidated") {
       // (type, loan_id, borrower, liquidator), (debt_repaid, liquidator_bonus, borrower_refund)
       if (!event.topic[1] || !event.topic[2]) return null;
       loanId = this.decodeLoanId(event.topic[1]);
       address = this.decodeAddress(event.topic[2]);
       amount = this.decodeTupleFirstNumericValue(event.value);
+    }
+
+    // Decode admin address for LoanApprv events (topic[1] = approving admin)
+    let adminAddress: string | undefined;
+    if (type === "LoanApprv" && event.topic[1]) {
+      try {
+        adminAddress = this.decodeAddress(event.topic[1]);
+      } catch {
+        // Admin address decode failed; audit row will fall back to "SYSTEM"
+      }
     }
 
     return {
@@ -859,6 +906,7 @@ export class EventIndexer {
       ...(interestRateBps !== undefined ? { interestRateBps } : {}),
       ...(termLedgers !== undefined ? { termLedgers } : {}),
       ...(address !== undefined ? { address } : {}),
+      ...(adminAddress !== undefined ? { adminAddress } : {}),
     };
   }
 

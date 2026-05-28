@@ -158,14 +158,44 @@ fn test_authorized_minter() {
 
     // Admin should be authorized by default
     assert!(client.is_authorized_minter(&admin));
+    let initial_minters = client.get_authorized_minters();
+    assert_eq!(initial_minters.len(), 1);
+    assert_eq!(initial_minters.get(0).unwrap(), admin);
 
     // Authorize a contract
     client.authorize_minter(&authorized_contract);
     assert!(client.is_authorized_minter(&authorized_contract));
+    let after_authorize = client.get_authorized_minters();
+    assert_eq!(after_authorize.len(), 2);
 
     // Revoke authorization
     client.revoke_minter(&authorized_contract);
     assert!(!client.is_authorized_minter(&authorized_contract));
+    let after_revoke = client.get_authorized_minters();
+    assert_eq!(after_revoke.len(), 1);
+    assert_eq!(after_revoke.get(0).unwrap(), admin);
+}
+
+#[test]
+fn test_authorized_minter_limit_enforced() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let admin = Address::generate(&env);
+
+    let contract_id = env.register(RemittanceNFT, ());
+    let client = RemittanceNFTClient::new(&env, &contract_id);
+    client.initialize(&admin);
+
+    // Admin is already in the list, so only 31 more can be added.
+    for _ in 0..(RemittanceNFT::MAX_AUTHORIZED_MINTERS - 1) {
+        let minter = Address::generate(&env);
+        client.authorize_minter(&minter);
+    }
+
+    let overflow_minter = Address::generate(&env);
+    let result = client.try_authorize_minter(&overflow_minter);
+    assert_eq!(result, Err(Ok(NftError::MinterLimitReached)));
 }
 
 #[test]
@@ -1165,6 +1195,53 @@ fn test_set_admin_updates_admin_immediately() {
     client.initialize(&admin);
     client.set_admin(&new_admin);
 
+    assert_eq!(client.get_admin(), new_admin);
+}
+
+#[test]
+fn test_get_proposed_admin_returns_none_when_no_proposal() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let admin = Address::generate(&env);
+    let contract_id = env.register(RemittanceNFT, ());
+    let client = RemittanceNFTClient::new(&env, &contract_id);
+    client.initialize(&admin);
+
+    assert_eq!(client.get_proposed_admin(), None);
+}
+
+#[test]
+fn test_get_proposed_admin_returns_proposed_admin() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let admin = Address::generate(&env);
+    let contract_id = env.register(RemittanceNFT, ());
+    let client = RemittanceNFTClient::new(&env, &contract_id);
+    client.initialize(&admin);
+
+    let new_admin = Address::generate(&env);
+    client.propose_admin(&new_admin);
+
+    assert_eq!(client.get_proposed_admin(), Some(new_admin));
+}
+
+#[test]
+fn test_get_proposed_admin_returns_none_after_accept() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let admin = Address::generate(&env);
+    let contract_id = env.register(RemittanceNFT, ());
+    let client = RemittanceNFTClient::new(&env, &contract_id);
+    client.initialize(&admin);
+
+    let new_admin = Address::generate(&env);
+    client.propose_admin(&new_admin);
+    client.accept_admin();
+
+    assert_eq!(client.get_proposed_admin(), None);
     assert_eq!(client.get_admin(), new_admin);
 }
 

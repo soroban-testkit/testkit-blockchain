@@ -73,10 +73,11 @@ export const liquidateLoanSchema = z.object({
  * `limit`   – page size (default 50, max 100)
  * `cursor`  – opaque cursor (loan_id string from previous response)
  */
-const isoDateString = z.string().refine(
-  (val) => !Number.isNaN(Date.parse(val)),
-  { message: "Must be a valid ISO-8601 date string" },
-);
+const isoDateString = z
+  .string()
+  .refine((val) => !Number.isNaN(Date.parse(val)), {
+    message: "Must be a valid ISO-8601 date string",
+  });
 
 export const borrowerLoansQuerySchema = z.object({
   status: z

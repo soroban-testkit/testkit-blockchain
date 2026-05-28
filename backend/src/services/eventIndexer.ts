@@ -853,7 +853,10 @@ export class EventIndexer {
       address = this.decodeTupleSecondAddress(event.value);
     } else if (type === "PoolPaused" || type === "PoolUnpaused") {
       // (type)
-    } else if (type === "CollateralDeposited" || type === "CollateralReleased") {
+    } else if (
+      type === "CollateralDeposited" ||
+      type === "CollateralReleased"
+    ) {
       // (type, borrower, loan_id), amount/()
       if (event.topic[1]) {
         address = this.decodeAddress(event.topic[1]);

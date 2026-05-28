@@ -1133,7 +1133,9 @@ class SorobanService {
 
     const retval = simulation.result?.retval;
     if (!retval) {
-      throw AppError.internal("No withdrawal cooldown returned by lending pool");
+      throw AppError.internal(
+        "No withdrawal cooldown returned by lending pool",
+      );
     }
 
     const nativeCooldown = scValToNative(retval);

@@ -120,7 +120,7 @@ describe("cacheKeys helpers", () => {
   describe("cache warm → write → recompute flow", () => {
     it("next get returns null after invalidateOnRepay flushes the key", async () => {
       // Simulate a warmed cache for borrower loans
-      let cache: Record<string, unknown> = {
+      const cache: Record<string, unknown> = {
         [CacheKeys.borrowerLoans(BORROWER)]: { loans: [] },
       };
 
@@ -132,9 +132,7 @@ describe("cacheKeys helpers", () => {
       });
 
       // Confirm warm
-      expect(
-        await mockGet(CacheKeys.borrowerLoans(BORROWER)),
-      ).not.toBeNull();
+      expect(await mockGet(CacheKeys.borrowerLoans(BORROWER))).not.toBeNull();
 
       // Trigger write invalidation
       await invalidateOnRepay(BORROWER, LOAN_ID);

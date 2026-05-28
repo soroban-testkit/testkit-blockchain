@@ -180,10 +180,7 @@ app.get(
       10,
     );
 
-    const withTimeout = <T>(
-      promise: Promise<T>,
-      fallback: T,
-    ): Promise<T> =>
+    const withTimeout = <T>(promise: Promise<T>, fallback: T): Promise<T> =>
       Promise.race([
         promise,
         new Promise<T>((resolve) =>
@@ -226,8 +223,7 @@ app.get(
         ),
       ]);
 
-    const db =
-      dbResult.status === "fulfilled" ? dbResult.value.status : "down";
+    const db = dbResult.status === "fulfilled" ? dbResult.value.status : "down";
     const redis =
       redisResult.status === "fulfilled" ? redisResult.value.status : "down";
     const rpcData =
@@ -252,8 +248,7 @@ app.get(
           ? ("degraded" as const)
           : ("ok" as const);
 
-    const anyDown =
-      db === "down" || redis === "down" || stellarRpc === "down";
+    const anyDown = db === "down" || redis === "down" || stellarRpc === "down";
     const overallStatus = anyDown
       ? "down"
       : indexerStatus === "degraded"

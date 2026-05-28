@@ -1,4 +1,11 @@
-import { jest, describe, it, expect, beforeEach, afterAll } from "@jest/globals";
+import {
+  jest,
+  describe,
+  it,
+  expect,
+  beforeEach,
+  afterAll,
+} from "@jest/globals";
 import request from "supertest";
 import { Keypair } from "@stellar/stellar-sdk";
 import { generateJwtToken } from "../services/authService.js";

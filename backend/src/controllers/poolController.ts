@@ -33,8 +33,9 @@ function safeFloat(value: unknown, fallback = 0): number {
  */
 export const getPoolStats = asyncHandler(
   async (_req: Request, res: Response) => {
-    const [depositResult, loanResult, withdrawalCooldownLedgers] = await Promise.all([
-      query(`
+    const [depositResult, loanResult, withdrawalCooldownLedgers] =
+      await Promise.all([
+        query(`
       SELECT
         COALESCE(SUM(CASE WHEN event_type = 'Deposit' THEN CAST(amount AS NUMERIC) ELSE 0 END), 0)
           - COALESCE(SUM(CASE WHEN event_type = 'Withdraw' THEN CAST(amount AS NUMERIC) ELSE 0 END), 0)
@@ -42,7 +43,7 @@ export const getPoolStats = asyncHandler(
       FROM contract_events
       WHERE event_type IN ('Deposit', 'Withdraw')
     `),
-      query(`
+        query(`
       SELECT
         COALESCE(COUNT(DISTINCT loan_id) FILTER (
           WHERE event_type = 'LoanApproved'
@@ -53,8 +54,8 @@ export const getPoolStats = asyncHandler(
       FROM contract_events
       WHERE event_type IN ('LoanApproved', 'LoanRepaid')
     `),
-      sorobanService.getWithdrawalCooldownLedgers().catch(() => 0),
-    ]);
+        sorobanService.getWithdrawalCooldownLedgers().catch(() => 0),
+      ]);
 
     const totalDeposits = safeFloat(depositResult.rows[0]?.total_deposits);
     const totalOutstanding = safeFloat(loanResult.rows[0]?.total_outstanding);

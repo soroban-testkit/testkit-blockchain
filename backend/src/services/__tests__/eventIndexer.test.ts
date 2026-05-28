@@ -125,12 +125,20 @@ function makeRawLoanApprvEvent(id = "apprv-001"): Record<string, unknown> {
     topic: [
       makeSym("LoanApprv"),
       // admin address — _val makes scValToNative return a string
-      { _val: "GADMIN123", sym: () => { throw new Error("not a sym"); }, toXDR: () => "xdr:admin" },
+      {
+        _val: "GADMIN123",
+        sym: () => {
+          throw new Error("not a sym");
+        },
+        toXDR: () => "xdr:admin",
+      },
     ],
     value: {
       // scValToNative returns [42, "GBORROWER123"] for arrays
       _val: [42, "GBORROWER123"],
-      sym: () => { throw new Error("not a sym"); },
+      sym: () => {
+        throw new Error("not a sym");
+      },
       toXDR: () => "xdr:apprv-val",
     },
     ledger: 200,
@@ -444,20 +452,24 @@ describe("EventIndexer – transaction atomicity via ingestRawEvents", () => {
     const auditInsertCalls: unknown[][] = [];
 
     const mockClient: MockClient = {
-      query: jest.fn<any>().mockImplementation(async (sql: string, params: unknown[]) => {
-        if (sql.includes("INSERT INTO loan_events")) {
-          return { rowCount: 1, rows: [{ event_id: "apprv-001" }] };
-        }
-        if (sql.includes("INSERT INTO audit_logs")) {
-          auditInsertCalls.push(params);
-          return { rowCount: 1, rows: [] };
-        }
-        return { rowCount: 0, rows: [] };
-      }),
+      query: jest
+        .fn<any>()
+        .mockImplementation(async (sql: string, params: unknown[]) => {
+          if (sql.includes("INSERT INTO loan_events")) {
+            return { rowCount: 1, rows: [{ event_id: "apprv-001" }] };
+          }
+          if (sql.includes("INSERT INTO audit_logs")) {
+            auditInsertCalls.push(params);
+            return { rowCount: 1, rows: [] };
+          }
+          return { rowCount: 0, rows: [] };
+        }),
     };
     stubWithTransaction(mockClient);
 
-    const result = await makeIndexer().ingestRawEvents([makeRawLoanApprvEvent()]);
+    const result = await makeIndexer().ingestRawEvents([
+      makeRawLoanApprvEvent(),
+    ]);
 
     // Event must be counted as inserted
     expect(result.insertedCount).toBe(1);
@@ -465,7 +477,12 @@ describe("EventIndexer – transaction atomicity via ingestRawEvents", () => {
     // Exactly one audit_logs INSERT must have been made
     expect(auditInsertCalls).toHaveLength(1);
 
-    const [actor, action, target, payload] = auditInsertCalls[0] as [string, string, string, string];
+    const [actor, action, target, payload] = auditInsertCalls[0] as [
+      string,
+      string,
+      string,
+      string,
+    ];
 
     // actor = admin address from topic[1]
     expect(actor).toBe("GADMIN123");

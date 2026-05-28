@@ -1995,7 +1995,8 @@ impl LoanManager {
     }
 
     pub fn set_min_score(env: Env, min_score: u32) {
-        Self::admin(&env).require_auth();
+        let admin = Self::admin(&env);
+        admin.require_auth();
 
         let old_score: u32 = env
             .storage()

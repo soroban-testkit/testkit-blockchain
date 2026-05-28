@@ -49,12 +49,12 @@ describe("GET /health/deep", () => {
   describe("all healthy", () => {
     beforeEach(() => {
       // RPC returns ledger 1050; indexer is at 1000 → lag = 50 (below default threshold of 100)
-      mockHealthCheck.mockResolvedValue({ connected: true, latestLedger: 1050 });
+      mockHealthCheck.mockResolvedValue({
+        connected: true,
+        latestLedger: 1050,
+      });
       mockDbQuery.mockImplementation(async (sql: unknown) => {
-        if (
-          typeof sql === "string" &&
-          sql.includes("indexer_state")
-        ) {
+        if (typeof sql === "string" && sql.includes("indexer_state")) {
           return { rows: [{ last_indexed_ledger: 1000 }], rowCount: 1 };
         }
         return { rows: [{ "?column?": 1 }], rowCount: 1 };
@@ -98,12 +98,12 @@ describe("GET /health/deep", () => {
     beforeEach(() => {
       process.env.INDEXER_HEALTH_LAG_LIMIT = "30";
       // RPC is at 1100; indexer at 1000 → lag = 100 which exceeds 30
-      mockHealthCheck.mockResolvedValue({ connected: true, latestLedger: 1100 });
+      mockHealthCheck.mockResolvedValue({
+        connected: true,
+        latestLedger: 1100,
+      });
       mockDbQuery.mockImplementation(async (sql: unknown) => {
-        if (
-          typeof sql === "string" &&
-          sql.includes("indexer_state")
-        ) {
+        if (typeof sql === "string" && sql.includes("indexer_state")) {
           return { rows: [{ last_indexed_ledger: 1000 }], rowCount: 1 };
         }
         return { rows: [{ "?column?": 1 }], rowCount: 1 };
@@ -130,10 +130,7 @@ describe("GET /health/deep", () => {
     beforeEach(() => {
       mockHealthCheck.mockResolvedValue({ connected: false });
       mockDbQuery.mockImplementation(async (sql: unknown) => {
-        if (
-          typeof sql === "string" &&
-          sql.includes("indexer_state")
-        ) {
+        if (typeof sql === "string" && sql.includes("indexer_state")) {
           return { rows: [{ last_indexed_ledger: 1000 }], rowCount: 1 };
         }
         return { rows: [{ "?column?": 1 }], rowCount: 1 };

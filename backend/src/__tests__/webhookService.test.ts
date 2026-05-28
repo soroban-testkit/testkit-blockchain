@@ -213,7 +213,10 @@ describe("WebhookService", () => {
   describe("HMAC signature", () => {
     it("sets X-RemitLend-Signature with sha256= prefix for a known body+secret", async () => {
       const secret = "test-secret-key";
-      const knownBody = JSON.stringify({ eventId: "evt-known", eventType: "LoanApproved" });
+      const knownBody = JSON.stringify({
+        eventId: "evt-known",
+        eventType: "LoanApproved",
+      });
 
       const crypto = await import("node:crypto");
       const expectedHex = crypto
@@ -223,11 +226,13 @@ describe("WebhookService", () => {
       const expectedHeader = `sha256=${expectedHex}`;
 
       // Directly inspect the header value by spying on fetch
-      const fetchMock: any = jest.fn(async (_url: string, opts: RequestInit) => {
-        const hdrs = opts.headers as Record<string, string>;
-        expect(hdrs["x-remitlend-signature"]).toBe(expectedHeader);
-        return { ok: true, status: 200 };
-      });
+      const fetchMock: any = jest.fn(
+        async (_url: string, opts: RequestInit) => {
+          const hdrs = opts.headers as Record<string, string>;
+          expect(hdrs["x-remitlend-signature"]).toBe(expectedHeader);
+          return { ok: true, status: 200 };
+        },
+      );
       global.fetch = fetchMock as typeof fetch;
 
       mockQuery
@@ -301,7 +306,9 @@ describe("WebhookService", () => {
 
       mockQuery
         .mockResolvedValueOnce({
-          rows: [{ id: 1, callback_url: "https://nosecret.example", secret: null }],
+          rows: [
+            { id: 1, callback_url: "https://nosecret.example", secret: null },
+          ],
         })
         .mockResolvedValueOnce({ rows: [], rowCount: 1 });
 

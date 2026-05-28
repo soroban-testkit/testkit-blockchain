@@ -49,9 +49,7 @@ export async function invalidateOnRepay(
  * Invalidate all cache keys that become stale after a new loan request.
  * Call this after the DB transaction commits inside requestLoan.
  */
-export async function invalidateOnLoanRequest(
-  borrower: string,
-): Promise<void> {
+export async function invalidateOnLoanRequest(borrower: string): Promise<void> {
   await Promise.all([
     cacheService.delete(CacheKeys.poolStats()),
     cacheService.delete(CacheKeys.borrowerLoans(borrower)),

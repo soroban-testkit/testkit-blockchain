@@ -11,6 +11,7 @@ export type NotificationType =
   | "repayment_due"
   | "repayment_confirmed"
   | "loan_defaulted"
+  | "loan_liquidated"
   | "score_changed";
 
 export type NotificationStatus = "unread" | "read" | "archived";
@@ -84,6 +85,10 @@ function buildEmailTemplate(
       loan_defaulted: {
         subject: "Loan default notice — RemitLend",
         html: `<h2>Loan Defaulted</h2><p>${message}</p><p>Contact support immediately if you believe this is an error.</p>`,
+      },
+      loan_liquidated: {
+        subject: "Your loan has been liquidated — RemitLend",
+        html: `<h2>Loan Liquidated</h2><p>${message}</p><p>Contact support if you have questions about the outcome.</p>`,
       },
       score_changed: {
         subject: "Your credit score has changed — RemitLend",
@@ -305,9 +310,11 @@ class NotificationService {
         await sendEmail(user.email, message, type);
       }
 
-      // Trigger SMS for critical events: repayment_due and loan_defaulted
+      // Trigger SMS for critical events: repayment_due, loan_defaulted, and loan_liquidated
       const smsEnabledForType =
-        type === "repayment_due" || type === "loan_defaulted";
+        type === "repayment_due" ||
+        type === "loan_defaulted" ||
+        type === "loan_liquidated";
 
       if (user.sms_enabled && user.phone && smsEnabledForType) {
         await sendSMS(user.phone, message);

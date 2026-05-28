@@ -148,6 +148,58 @@ function makeRawLoanApprvEvent(id = "apprv-001"): Record<string, unknown> {
   };
 }
 
+/**
+ * Build a raw Soroban event that parses as LoanLiquidated.
+ * topic[0] = "LoanLiquidated", topic[1] = loan_id=7, topic[2] = borrower="GBORROWER456", topic[3] = liquidator
+ * value    = [debt_repaid=5000, liquidator_bonus=500, borrower_refund=200]
+ */
+function makeRawLoanLiquidatedEvent(id = "liq-001"): Record<string, unknown> {
+  const makeSym = (name: string) => ({
+    sym: () => ({ toString: () => name }),
+    toXDR: (_enc: string) => `xdr:${name}`,
+  });
+
+  return {
+    id,
+    pagingToken: id,
+    topic: [
+      makeSym("LoanLiquidated"),
+      {
+        _val: 7,
+        sym: () => {
+          throw new Error("not a sym");
+        },
+        toXDR: () => "xdr:loanid",
+      },
+      {
+        _val: "GBORROWER456",
+        sym: () => {
+          throw new Error("not a sym");
+        },
+        toXDR: () => "xdr:borrower",
+      },
+      {
+        _val: "GLIQUIDATOR789",
+        sym: () => {
+          throw new Error("not a sym");
+        },
+        toXDR: () => "xdr:liquidator",
+      },
+    ],
+    value: {
+      _val: [5000n, 500n, 200n],
+      sym: () => {
+        throw new Error("not a sym");
+      },
+      toXDR: () => "xdr:liq-val",
+    },
+    ledger: 300,
+    ledgerClosedAt: new Date().toISOString(),
+    txHash: "txhash-liq-001",
+    contractId: { toString: () => "CONTRACT001" },
+  };
+}
+
 /** Run the withTransaction callback immediately using the provided mock client. */
 function stubWithTransaction(mockClient: MockClient): void {
   mockWithTransaction.mockImplementation(async (fn: TxCallback) =>
@@ -522,5 +574,36 @@ describe("EventIndexer – transaction atomicity via ingestRawEvents", () => {
         String(sql).includes("INSERT INTO audit_logs"),
       ),
     ).toBe(true);
+  });
+
+  it("LoanLiquidated: creates a loan_liquidated notification for the borrower with refund info", async () => {
+    const mockClient: MockClient = {
+      query: jest.fn<any>().mockResolvedValue({
+        rowCount: 1,
+        rows: [{ event_id: "liq-001" }],
+      }),
+    };
+    stubWithTransaction(mockClient);
+
+    await makeIndexer().ingestRawEvents([
+      makeRawLoanLiquidatedEvent("liq-001"),
+    ]);
+
+    expect(mockNotificationCreate).toHaveBeenCalledTimes(1);
+
+    const call = mockNotificationCreate.mock.calls[0]![0] as {
+      userId: string;
+      type: string;
+      title: string;
+      message: string;
+      loanId: number;
+    };
+
+    expect(call.userId).toBe("GBORROWER456");
+    expect(call.type).toBe("loan_liquidated");
+    expect(call.title).toBe("Loan Liquidated");
+    expect(call.loanId).toBe(7);
+    expect(call.message).toContain("Loan #7");
+    expect(call.message).toContain("200");
   });
 });

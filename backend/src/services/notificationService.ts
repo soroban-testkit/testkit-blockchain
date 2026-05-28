@@ -40,6 +40,7 @@ export interface NotificationPreferences {
   smsEnabled: boolean;
   phone: string | null;
   perTypeOverrides: Record<string, boolean>;
+  digestFrequency?: "off" | "daily" | "weekly";
 }
 
 // ─── SSE subscriber registry ──────────────────────────────────────────────────
@@ -52,8 +53,8 @@ const sseClients = new Map<string, Set<SseClient>>();
 // Initialize Twilio client if credentials are provided
 const twilioClient =
   process.env.TWILIO_ACCOUNT_SID &&
-  process.env.TWILIO_AUTH_TOKEN &&
-  process.env.TWILIO_PHONE_NUMBER
+    process.env.TWILIO_AUTH_TOKEN &&
+    process.env.TWILIO_PHONE_NUMBER
     ? twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN)
     : null;
 
@@ -67,28 +68,28 @@ function buildEmailTemplate(
   message: string,
 ): { subject: string; html: string } {
   const templates: Record<NotificationType, { subject: string; html: string }> =
-    {
-      loan_approved: {
-        subject: "Your loan has been approved — RemitLend",
-        html: `<h2>Loan Approved</h2><p>${message}</p><p>Log in to view your loan details and repayment schedule.</p>`,
-      },
-      repayment_due: {
-        subject: "Repayment reminder — RemitLend",
-        html: `<h2>Repayment Due Soon</h2><p>${message}</p><p>Please ensure funds are available to avoid a default.</p>`,
-      },
-      repayment_confirmed: {
-        subject: "Repayment confirmed — RemitLend",
-        html: `<h2>Repayment Confirmed</h2><p>${message}</p><p>Thank you for your payment.</p>`,
-      },
-      loan_defaulted: {
-        subject: "Loan default notice — RemitLend",
-        html: `<h2>Loan Defaulted</h2><p>${message}</p><p>Contact support immediately if you believe this is an error.</p>`,
-      },
-      score_changed: {
-        subject: "Your credit score has changed — RemitLend",
-        html: `<h2>Credit Score Update</h2><p>${message}</p><p>Log in to see your updated score and history.</p>`,
-      },
-    };
+  {
+    loan_approved: {
+      subject: "Your loan has been approved — RemitLend",
+      html: `<h2>Loan Approved</h2><p>${message}</p><p>Log in to view your loan details and repayment schedule.</p>`,
+    },
+    repayment_due: {
+      subject: "Repayment reminder — RemitLend",
+      html: `<h2>Repayment Due Soon</h2><p>${message}</p><p>Please ensure funds are available to avoid a default.</p>`,
+    },
+    repayment_confirmed: {
+      subject: "Repayment confirmed — RemitLend",
+      html: `<h2>Repayment Confirmed</h2><p>${message}</p><p>Thank you for your payment.</p>`,
+    },
+    loan_defaulted: {
+      subject: "Loan default notice — RemitLend",
+      html: `<h2>Loan Defaulted</h2><p>${message}</p><p>Contact support immediately if you believe this is an error.</p>`,
+    },
+    score_changed: {
+      subject: "Your credit score has changed — RemitLend",
+      html: `<h2>Credit Score Update</h2><p>${message}</p><p>Log in to see your updated score and history.</p>`,
+    },
+  };
 
   return templates[type];
 }
@@ -238,6 +239,43 @@ class NotificationService {
   }
 
   /**
+   * Batches repayment_due notifications per user based on digest frequency.
+   * Returns grouped notifications by user and digest frequency.
+   */
+  async batchRepaymentNotificationsForDigest(
+    notifications: Array<{ userId: string; message: string; loanId?: number }>,
+  ): Promise<Map<string, Array<{ userId: string; message: string; loanId?: number }>>> {
+    const grouped = new Map<string, Array<{ userId: string; message: string; loanId?: number }>>();
+
+    for (const notif of notifications) {
+      const prefResult = await query(
+        `SELECT digest_frequency FROM user_notification_preferences WHERE user_id = $1`,
+        [notif.userId],
+      );
+
+      const digestFrequency = prefResult.rows[0]?.digest_frequency ?? "off";
+
+      if (digestFrequency === "off") {
+        // Send immediately
+        const key = `${notif.userId}:immediate`;
+        if (!grouped.has(key)) {
+          grouped.set(key, []);
+        }
+        grouped.get(key)!.push(notif);
+      } else {
+        // Batch for daily or weekly digest
+        const key = `${notif.userId}:${digestFrequency}`;
+        if (!grouped.has(key)) {
+          grouped.set(key, []);
+        }
+        grouped.get(key)!.push(notif);
+      }
+    }
+
+    return grouped;
+  }
+
+  /**
    * Sends external notifications (Email/SMS) based on user preferences.
    * SMS is triggered for repayment_due and loan_defaulted events.
    */
@@ -276,18 +314,59 @@ class NotificationService {
 
   /**
    * Returns the most recent notifications for a user (newest first).
+   * Supports filtering by type, status, and date range.
    */
   async getNotificationsForUser(
     userId: string,
     limit = 50,
+    type?: string,
+    status?: string,
+    from?: string,
+    to?: string,
   ): Promise<Notification[]> {
+    let whereClause = "user_id = $1";
+    const params: (string | number)[] = [userId];
+    let paramIndex = 2;
+
+    if (type) {
+      whereClause += ` AND type = $${paramIndex}`;
+      params.push(type);
+      paramIndex++;
+    }
+
+    if (status) {
+      whereClause += ` AND status = $${paramIndex}`;
+      params.push(status);
+      paramIndex++;
+    }
+
+    if (from) {
+      const fromDate = new Date(from);
+      if (Number.isNaN(fromDate.getTime())) {
+        throw new Error("Invalid 'from' date format");
+      }
+      whereClause += ` AND created_at >= $${paramIndex}`;
+      params.push(fromDate.toISOString());
+      paramIndex++;
+    }
+
+    if (to) {
+      const toDate = new Date(to);
+      if (Number.isNaN(toDate.getTime())) {
+        throw new Error("Invalid 'to' date format");
+      }
+      whereClause += ` AND created_at <= $${paramIndex}`;
+      params.push(toDate.toISOString());
+      paramIndex++;
+    }
+
     const result = await query(
       `SELECT id, user_id, type, title, message, loan_id, read, status, created_at
-       FROM notifications
-       WHERE user_id = $1
-       ORDER BY created_at DESC
-       LIMIT $2`,
-      [userId, limit],
+         FROM notifications
+         WHERE ${whereClause}
+         ORDER BY created_at DESC
+         LIMIT $${paramIndex}`,
+      [...params, limit],
     );
     return result.rows.map(this.mapRow);
   }

@@ -164,13 +164,33 @@ function makeRawLoanLiquidatedEvent(id = "liq-001"): Record<string, unknown> {
     pagingToken: id,
     topic: [
       makeSym("LoanLiquidated"),
-      { _val: 7, sym: () => { throw new Error("not a sym"); }, toXDR: () => "xdr:loanid" },
-      { _val: "GBORROWER456", sym: () => { throw new Error("not a sym"); }, toXDR: () => "xdr:borrower" },
-      { _val: "GLIQUIDATOR789", sym: () => { throw new Error("not a sym"); }, toXDR: () => "xdr:liquidator" },
+      {
+        _val: 7,
+        sym: () => {
+          throw new Error("not a sym");
+        },
+        toXDR: () => "xdr:loanid",
+      },
+      {
+        _val: "GBORROWER456",
+        sym: () => {
+          throw new Error("not a sym");
+        },
+        toXDR: () => "xdr:borrower",
+      },
+      {
+        _val: "GLIQUIDATOR789",
+        sym: () => {
+          throw new Error("not a sym");
+        },
+        toXDR: () => "xdr:liquidator",
+      },
     ],
     value: {
       _val: [5000n, 500n, 200n],
-      sym: () => { throw new Error("not a sym"); },
+      sym: () => {
+        throw new Error("not a sym");
+      },
       toXDR: () => "xdr:liq-val",
     },
     ledger: 300,
@@ -565,7 +585,9 @@ describe("EventIndexer – transaction atomicity via ingestRawEvents", () => {
     };
     stubWithTransaction(mockClient);
 
-    await makeIndexer().ingestRawEvents([makeRawLoanLiquidatedEvent("liq-001")]);
+    await makeIndexer().ingestRawEvents([
+      makeRawLoanLiquidatedEvent("liq-001"),
+    ]);
 
     expect(mockNotificationCreate).toHaveBeenCalledTimes(1);
 

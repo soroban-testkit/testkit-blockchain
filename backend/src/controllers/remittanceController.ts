@@ -186,6 +186,7 @@ export const submitRemittanceTransaction = asyncHandler(
         type: "repayment_confirmed",
         title: "Remittance Sent",
         message: `Your remittance of ${remittance.amount} ${remittance.fromCurrency} was submitted successfully. Transaction: ${stellarResult.txHash}`,
+        actionUrl: `/remittances/${remittance.id}`,
       });
 
       res.json({

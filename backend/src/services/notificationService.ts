@@ -23,6 +23,7 @@ export interface Notification {
   title: string;
   message: string;
   loanId?: number | undefined;
+  actionUrl?: string | null;
   read: boolean;
   status: NotificationStatus;
   createdAt: Date;
@@ -34,6 +35,7 @@ interface CreateNotificationParams {
   title: string;
   message: string;
   loanId?: number | undefined;
+  actionUrl?: string | undefined | null;
 }
 
 export interface NotificationPreferences {
@@ -225,13 +227,16 @@ class NotificationService {
   async createNotification(
     params: CreateNotificationParams,
   ): Promise<Notification> {
-    const { userId, type, title, message, loanId } = params;
+    const { userId, type, title, message, loanId, actionUrl } = params;
+
+    const resolvedActionUrl =
+      actionUrl ?? (loanId != null ? `/loans/${loanId}` : null);
 
     const result = await query(
-      `INSERT INTO notifications (user_id, type, title, message, loan_id, status)
-       VALUES ($1, $2, $3, $4, $5, 'unread')
-       RETURNING id, user_id, type, title, message, loan_id, read, status, created_at`,
-      [userId, type, title, message, loanId ?? null],
+      `INSERT INTO notifications (user_id, type, title, message, loan_id, action_url, status)
+       VALUES ($1, $2, $3, $4, $5, $6, 'unread')
+       RETURNING id, user_id, type, title, message, loan_id, action_url, read, status, created_at`,
+      [userId, type, title, message, loanId ?? null, resolvedActionUrl],
     );
 
     const notification = this.mapRow(result.rows[0]);
@@ -373,7 +378,7 @@ class NotificationService {
     }
 
     const result = await query(
-      `SELECT id, user_id, type, title, message, loan_id, read, status, created_at
+      `SELECT id, user_id, type, title, message, loan_id, action_url, read, status, created_at
          FROM notifications
          WHERE ${whereClause}
          ORDER BY created_at DESC
@@ -464,11 +469,12 @@ class NotificationService {
 
       for (const row of adminResult.rows) {
         const adminId = row.public_key as string;
+        const actionUrl = loanId != null ? `/loans/${loanId}` : null;
         const result = await query(
-          `INSERT INTO notifications (user_id, type, title, message, loan_id, status)
-           VALUES ($1, 'loan_defaulted', $2, $3, $4, 'unread')
-           RETURNING id, user_id, type, title, message, loan_id, read, status, created_at`,
-          [adminId, title, message, loanId ?? null],
+          `INSERT INTO notifications (user_id, type, title, message, loan_id, action_url, status)
+           VALUES ($1, 'loan_defaulted', $2, $3, $4, $5, 'unread')
+           RETURNING id, user_id, type, title, message, loan_id, action_url, read, status, created_at`,
+          [adminId, title, message, loanId ?? null, actionUrl],
         );
         const notification = this.mapRow(result.rows[0]);
         this.broadcast(adminId, notification);
@@ -599,12 +605,15 @@ class NotificationService {
 
   private mapRow(row: Record<string, unknown>): Notification {
     const loanId = row.loan_id != null ? (row.loan_id as number) : undefined;
+    const actionUrl =
+      row.action_url != null ? (row.action_url as string) : undefined;
     const base = {
       id: row.id as number,
       userId: row.user_id as string,
       type: row.type as NotificationType,
       title: row.title as string,
       message: row.message as string,
+      actionUrl,
       read: row.read as boolean,
       status:
         (row.status as NotificationStatus) ?? (row.read ? "read" : "unread"),

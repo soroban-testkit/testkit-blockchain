@@ -114,6 +114,7 @@ pub enum DataKey {
     BorrowerLoanCount(Address),
     BorrowerLoans(Address),
     Paused,
+    PausedAtLedger,
     InterestRateBps,
     DefaultTermLedgers,
     Version,
@@ -445,6 +446,27 @@ impl LoanManager {
             < total_debt
                 .checked_mul(threshold_bps as i128)
                 .expect("collateral ratio overflow")
+    }
+
+    fn current_ratio_bps(collateral_amount: i128, total_debt: i128) -> u32 {
+        if total_debt <= 0 || collateral_amount <= 0 {
+            return 0;
+        }
+
+        let ratio = collateral_amount
+            .checked_mul(Self::MAX_RATIO_BPS as i128)
+            .expect("collateral ratio overflow")
+            / total_debt;
+
+        ratio.min(u32::MAX as i128) as u32
+    }
+
+    fn token(env: &Env) -> Address {
+        Self::bump_instance_ttl(env);
+        env.storage()
+            .instance()
+            .get(&DataKey::Token)
+            .expect("not initialized")
     }
 
     fn grace_period_ledgers(env: &Env) -> u32 {
@@ -1066,9 +1088,7 @@ impl LoanManager {
             .set(&borrower_loans_key, &borrower_loans);
         Self::bump_instance_ttl(&env);
 
-        events::loan_requested(&env, borrower.clone(), amount);
-        env.events()
-            .publish((symbol_short!("LoanReq"), borrower), loan_counter);
+        events::loan_requested(&env, loan_counter, borrower.clone(), amount);
         Ok(loan_counter)
     }
 
@@ -1402,10 +1422,7 @@ impl LoanManager {
         env.storage().persistent().set(&loan_key, &loan);
         Self::bump_persistent_ttl(&env, &loan_key);
 
-        env.events().publish(
-            (symbol_short!("ColDep"), loan_id, loan.borrower),
-            updated_collateral,
-        );
+        events::collateral_deposited(&env, loan.borrower.clone(), loan_id, updated_collateral);
 
         Ok(())
     }
@@ -1424,14 +1441,57 @@ impl LoanManager {
         }
 
         Self::release_collateral_internal(&env, loan_id, &loan.borrower);
-        env.events()
-            .publish((symbol_short!("ColRel"), loan_id, loan.borrower), ());
+        events::collateral_released(&env, loan.borrower, loan_id);
 
         Ok(())
     }
 
     pub fn get_collateral(env: Env, loan_id: u32) -> i128 {
         Self::collateral_amount(&env, loan_id)
+    }
+
+    /// Returns whether `loan_id` is currently eligible for liquidation.
+    /// Non-`Approved` loans always return `false`.
+    pub fn is_liquidatable(env: Env, loan_id: u32) -> Result<bool, LoanError> {
+        let loan_key = DataKey::Loan(loan_id);
+        let mut loan: Loan = env
+            .storage()
+            .persistent()
+            .get(&loan_key)
+            .ok_or(LoanError::LoanNotFound)?;
+        Self::bump_persistent_ttl(&env, &loan_key);
+
+        if loan.status != LoanStatus::Approved {
+            return Ok(false);
+        }
+
+        let (total_debt, _) = Self::current_total_debt(&env, &mut loan)?;
+        let threshold_bps = Self::liquidation_threshold_bps(&env);
+        Ok(Self::is_collateral_ratio_below_threshold(
+            loan.collateral_amount,
+            total_debt,
+            threshold_bps,
+        ))
+    }
+
+    /// Returns `(collateral, total_debt, current_ratio_bps)` for `loan_id`.
+    /// Non-`Approved` loans return `(collateral, 0, 0)` without accruing debt.
+    pub fn get_loan_health(env: Env, loan_id: u32) -> Result<(i128, i128, u32), LoanError> {
+        let loan_key = DataKey::Loan(loan_id);
+        let mut loan: Loan = env
+            .storage()
+            .persistent()
+            .get(&loan_key)
+            .ok_or(LoanError::LoanNotFound)?;
+        Self::bump_persistent_ttl(&env, &loan_key);
+
+        if loan.status != LoanStatus::Approved {
+            return Ok((loan.collateral_amount, 0, 0));
+        }
+
+        let (total_debt, _) = Self::current_total_debt(&env, &mut loan)?;
+        let ratio_bps = Self::current_ratio_bps(loan.collateral_amount, total_debt);
+        Ok((loan.collateral_amount, total_debt, ratio_bps))
     }
 
     pub fn liquidate(env: Env, liquidator: Address, loan_id: u32) -> Result<(), LoanError> {
@@ -1984,7 +2044,7 @@ impl LoanManager {
             .unwrap_or(500);
         env.storage().instance().set(&DataKey::MinScore, &min_score);
         Self::bump_instance_ttl(&env);
-        events::min_score_updated(&env, old_score, min_score);
+        events::min_score_updated(&env, admin, old_score, min_score);
     }
 
     pub fn set_max_loan_amount(env: Env, amount: i128) -> Result<(), LoanError> {
@@ -2086,6 +2146,14 @@ impl LoanManager {
 
     pub fn get_nft_contract(env: Env) -> Address {
         Self::nft_contract(&env)
+    }
+
+    pub fn get_token(env: Env) -> Address {
+        Self::token(&env)
+    }
+
+    pub fn get_total_outstanding(env: Env, token: Address) -> i128 {
+        Self::total_outstanding(&env, &token)
     }
 
     pub fn get_borrower_loans(env: Env, borrower: Address) -> Vec<u32> {
@@ -2308,20 +2376,26 @@ impl LoanManager {
 
     pub fn pause(env: Env) {
         Self::admin(&env).require_auth();
+        let paused_at_ledger = env.ledger().sequence();
         env.storage().instance().set(&DataKey::Paused, &true);
+        env.storage()
+            .instance()
+            .set(&DataKey::PausedAtLedger, &paused_at_ledger);
         Self::bump_instance_ttl(&env);
-        events::paused(&env);
+        events::paused(&env, paused_at_ledger);
         env.events()
-            .publish((Symbol::new(&env, "ContractPaused"),), ());
+            .publish((Symbol::new(&env, "ContractPaused"),), paused_at_ledger);
     }
 
     pub fn unpause(env: Env) {
         Self::admin(&env).require_auth();
+        let unpaused_at_ledger = env.ledger().sequence();
         env.storage().instance().set(&DataKey::Paused, &false);
+        env.storage().instance().remove(&DataKey::PausedAtLedger);
         Self::bump_instance_ttl(&env);
-        events::unpaused(&env);
+        events::unpaused(&env, unpaused_at_ledger);
         env.events()
-            .publish((Symbol::new(&env, "ContractUnpaused"),), ());
+            .publish((Symbol::new(&env, "ContractUnpaused"),), unpaused_at_ledger);
     }
 
     pub fn is_paused(env: Env) -> bool {
@@ -2330,6 +2404,14 @@ impl LoanManager {
             .instance()
             .get(&DataKey::Paused)
             .unwrap_or(false)
+    }
+
+    pub fn get_paused_at_ledger(env: Env) -> u32 {
+        Self::bump_instance_ttl(&env);
+        env.storage()
+            .instance()
+            .get(&DataKey::PausedAtLedger)
+            .unwrap_or(0)
     }
 
     pub fn check_default(env: Env, loan_id: u32) -> Result<(), LoanError> {

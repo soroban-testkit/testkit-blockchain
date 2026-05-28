@@ -50,6 +50,8 @@ pub enum DataKey {
     TotalDeposits(Address),
     /// token → number of active depositors
     DepositorCount(Address),
+    /// token → cumulative yield explicitly distributed to the pool
+    TotalYieldDistributed(Address),
     ProposedAdmin,
     Version,
 }
@@ -61,6 +63,7 @@ pub struct PoolStats {
     pub total_shares: i128,
     pub pool_token_balance: i128,
     pub depositor_count: u32,
+    pub total_yield_distributed: i128,
     /// Fraction of tracked principal currently out on loan, in basis points.
     /// Only positive when active loans have reduced pool_balance below
     /// total_deposits.
@@ -149,6 +152,14 @@ impl LendingPool {
         env.storage()
             .instance()
             .get(&DataKey::DepositorCount(token.clone()))
+            .unwrap_or(0)
+    }
+
+    fn total_yield_distributed(env: &Env, token: &Address) -> i128 {
+        Self::bump_instance_ttl(env);
+        env.storage()
+            .instance()
+            .get(&DataKey::TotalYieldDistributed(token.clone()))
             .unwrap_or(0)
     }
 
@@ -389,6 +400,14 @@ impl LendingPool {
         Self::total_shares(&env, &token)
     }
 
+    pub fn get_depositor_count(env: Env, token: Address) -> u32 {
+        Self::read_depositor_count(&env, &token)
+    }
+
+    pub fn get_total_yield_distributed(env: Env, token: Address) -> i128 {
+        Self::total_yield_distributed(&env, &token)
+    }
+
     pub fn get_withdrawal_cooldown(env: Env) -> u32 {
         Self::withdrawal_cooldown(&env)
     }
@@ -596,6 +615,7 @@ impl LendingPool {
             total_shares,
             pool_token_balance,
             depositor_count: Self::read_depositor_count(&env, &token),
+            total_yield_distributed: Self::total_yield_distributed(&env, &token),
             utilization_bps,
         }
     }

@@ -1,6 +1,7 @@
 import { query } from "../db/connection.js";
 import { setAbsoluteUserScoresBulk } from "./scoresService.js";
 import { sorobanService } from "./sorobanService.js";
+import { recordScoreReconciliationRun } from "../middleware/metrics.js";
 import logger from "../utils/logger.js";
 
 interface ActiveBorrowerScoreRow {
@@ -228,6 +229,7 @@ class ScoreReconciliationService {
       divergenceCount: result.divergenceCount,
       correctedCount: result.correctedCount,
     });
+    recordScoreReconciliationRun();
 
     return result;
   }

@@ -1,4 +1,4 @@
-use crate::{LendingPool, LendingPoolClient};
+use crate::{events, LendingPool, LendingPoolClient};
 use soroban_sdk::testutils::{Address as _, Events as _, Ledger as _};
 use soroban_sdk::token::Client as TokenClient;
 use soroban_sdk::token::StellarAssetClient;
@@ -349,6 +349,35 @@ fn test_share_price_increases_when_interest_arrives() {
     // Provider still holds 1000 shares; pool now has 1100 tokens.
     assert_eq!(pool_client.get_shares(&provider, &token_id), 1_000);
     assert_eq!(pool_client.get_deposit(&provider, &token_id), 1_100);
+}
+
+#[test]
+fn test_yield_distributed_event_updates_total_yield_distributed() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let admin = Address::generate(&env);
+    let (token_id, _stellar_asset_client, _token_client) = create_token_contract(&env, &admin);
+    let pool_id = env.register(LendingPool, ());
+    let pool_client = LendingPoolClient::new(&env, &pool_id);
+    pool_client.initialize(&admin);
+
+    assert_eq!(pool_client.get_total_yield_distributed(&token_id), 0);
+
+    env.as_contract(&pool_id, || {
+        events::yield_distributed(&env, token_id.clone(), 100);
+    });
+    env.as_contract(&pool_id, || {
+        events::yield_distributed(&env, token_id.clone(), 50);
+    });
+
+    assert_eq!(pool_client.get_total_yield_distributed(&token_id), 150);
+    assert_eq!(
+        pool_client
+            .get_pool_stats(&token_id)
+            .total_yield_distributed,
+        150
+    );
 }
 
 #[test]
@@ -836,7 +865,10 @@ fn test_pool_stats() {
     assert_eq!(stats.total_deposits, 0);
     assert_eq!(stats.total_shares, 0);
     assert_eq!(stats.depositor_count, 0);
+    assert_eq!(stats.total_yield_distributed, 0);
     assert_eq!(stats.utilization_bps, 0);
+    assert_eq!(pool_client.get_depositor_count(&token_id), 0);
+    assert_eq!(pool_client.get_total_yield_distributed(&token_id), 0);
 
     // After first deposit.
     pool_client.deposit(&provider1, &token_id, &2000);
@@ -844,7 +876,9 @@ fn test_pool_stats() {
     assert_eq!(stats.total_deposits, 2000);
     assert_eq!(stats.total_shares, 2000);
     assert_eq!(stats.depositor_count, 1);
+    assert_eq!(stats.total_yield_distributed, 0);
     assert_eq!(stats.utilization_bps, 0);
+    assert_eq!(pool_client.get_depositor_count(&token_id), 1);
 
     // After second deposit.
     pool_client.deposit(&provider2, &token_id, &2000);
@@ -852,6 +886,8 @@ fn test_pool_stats() {
     assert_eq!(stats.total_deposits, 4000);
     assert_eq!(stats.total_shares, 4000);
     assert_eq!(stats.depositor_count, 2);
+    assert_eq!(stats.total_yield_distributed, 0);
+    assert_eq!(pool_client.get_depositor_count(&token_id), 2);
 
     // Simulate a loan (1000 tokens leave pool).
     let token_client = TokenClient::new(&env, &token_id);
@@ -859,6 +895,7 @@ fn test_pool_stats() {
     let stats = pool_client.get_pool_stats(&token_id);
     assert_eq!(stats.total_deposits, 4000);
     assert_eq!(stats.pool_token_balance, 3000);
+    assert_eq!(stats.total_yield_distributed, 0);
     assert_eq!(stats.utilization_bps, 2500); // 1000 / 4000 = 25 %
 
     // Return borrowed tokens before withdrawals so providers get full value.
@@ -870,6 +907,8 @@ fn test_pool_stats() {
     assert_eq!(stats.total_deposits, 2000);
     assert_eq!(stats.total_shares, 2000);
     assert_eq!(stats.depositor_count, 1);
+    assert_eq!(stats.total_yield_distributed, 0);
+    assert_eq!(pool_client.get_depositor_count(&token_id), 1);
 
     // provider2 redeems 2000 shares → 2000 assets.
     pool_client.withdraw(&provider2, &token_id, &2000);
@@ -877,6 +916,9 @@ fn test_pool_stats() {
     assert_eq!(stats.total_deposits, 0);
     assert_eq!(stats.total_shares, 0);
     assert_eq!(stats.depositor_count, 0);
+    assert_eq!(stats.total_yield_distributed, 0);
+    assert_eq!(pool_client.get_depositor_count(&token_id), 0);
+    assert_eq!(pool_client.get_total_yield_distributed(&token_id), 0);
 }
 
 // ── Additional coverage tests ─────────────────────────────────────────────────

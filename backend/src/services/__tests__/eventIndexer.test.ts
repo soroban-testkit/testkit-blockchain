@@ -249,6 +249,7 @@ beforeAll(async () => {
       "LoanRepaid",
       "LoanDefaulted",
       "CollateralLiquidated",
+      "LoanLiquidated",
       "Deposit",
       "Withdraw",
       "YieldDistributed",

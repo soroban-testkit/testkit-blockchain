@@ -8,6 +8,7 @@ import {
 } from "@stellar/stellar-sdk";
 import { getStellarNetworkPassphrase } from "../config/stellar.js";
 import { query } from "../db/connection.js";
+import { withTransaction } from "../db/transaction.js";
 import { AppError } from "../errors/AppError.js";
 import logger from "../utils/logger.js";
 
@@ -41,8 +42,38 @@ export interface Remittance {
 function isValidStellarAddress(address: string): boolean {
   if (!address || typeof address !== "string") return false;
   if (address.length !== 56 || !address.startsWith("G")) return false;
-  return /^G[A-Z2-7]{54}$/.test(address);
+  return /^G[A-Z2-7]{55}$/.test(address);
 }
+
+const normalizeCurrency = (currency: string): string =>
+  currency.trim().toUpperCase();
+
+const getCurrencyAsset = (currency: string): Asset => {
+  const normalized = normalizeCurrency(currency);
+
+  if (normalized === "XLM") {
+    return Asset.native();
+  }
+
+  const tokenIssuers: Record<string, string | undefined> = {
+    USDC: process.env.STELLAR_USDC_ISSUER,
+    EURC: process.env.STELLAR_EURC_ISSUER,
+    PHP: process.env.STELLAR_PHP_ISSUER,
+  };
+
+  const issuer = tokenIssuers[normalized];
+  if (!issuer) {
+    throw AppError.badRequest(`Unsupported currency: ${currency}`);
+  }
+
+  if (!isValidStellarAddress(issuer)) {
+    throw AppError.badRequest(
+      `Unsupported currency: ${currency} (issuer is not configured correctly)`,
+    );
+  }
+
+  return new Asset(normalized, issuer);
+};
 
 export const remittanceService = {
   /**
@@ -54,20 +85,26 @@ export const remittanceService = {
     const id = crypto.randomUUID();
     const now = new Date().toISOString();
 
+    // Validate before opening a DB transaction — avoids holding a connection
+    // while doing synchronous checks.
+    if (!isValidStellarAddress(payload.recipientAddress)) {
+      throw AppError.badRequest(
+        "Invalid Stellar recipient address (must be 56 chars, start with G)",
+      );
+    }
+
+    if (!isValidStellarAddress(payload.senderAddress)) {
+      throw AppError.badRequest(
+        "Invalid Stellar sender address (must be 56 chars, start with G)",
+      );
+    }
+
+    const paymentAsset = getCurrencyAsset(payload.fromCurrency);
+    const normalizedFromCurrency = normalizeCurrency(payload.fromCurrency);
+    const normalizedToCurrency = normalizeCurrency(payload.toCurrency);
+
     try {
       const networkPassphrase = getStellarNetworkPassphrase();
-
-      if (!isValidStellarAddress(payload.recipientAddress)) {
-        throw AppError.badRequest(
-          "Invalid Stellar recipient address (must be 56 chars, start with G)",
-        );
-      }
-
-      if (!isValidStellarAddress(payload.senderAddress)) {
-        throw AppError.badRequest(
-          "Invalid Stellar sender address (must be 56 chars, start with G)",
-        );
-      }
 
       const sourceAccount = new Account(payload.senderAddress, "0");
 
@@ -78,7 +115,7 @@ export const remittanceService = {
         .addOperation(
           Operation.payment({
             destination: payload.recipientAddress,
-            asset: Asset.native(),
+            asset: paymentAsset,
             amount: payload.amount.toString(),
           }),
         )
@@ -87,46 +124,50 @@ export const remittanceService = {
 
       const xdr = transaction.toXDR();
 
-      const result = await query(
-        `INSERT INTO remittances 
-         (id, sender_id, recipient_address, amount, from_currency, to_currency, memo, status, xdr, created_at, updated_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-         RETURNING *`,
-        [
-          id,
-          payload.senderAddress,
-          payload.recipientAddress,
-          payload.amount,
-          payload.fromCurrency,
-          payload.toCurrency,
-          payload.memo || null,
-          "pending",
-          xdr,
-          now,
-          now,
-        ],
-      );
+      // Wrap all DB writes in a transaction so a partial failure cannot leave
+      // the database in an inconsistent half-written state.
+      return await withTransaction(async (client) => {
+        const result = await client.query(
+          `INSERT INTO remittances
+           (id, sender_id, recipient_address, amount, from_currency, to_currency, memo, status, xdr, created_at, updated_at)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+           RETURNING *`,
+          [
+            id,
+            payload.senderAddress,
+            payload.recipientAddress,
+            payload.amount,
+            normalizedFromCurrency,
+            normalizedToCurrency,
+            payload.memo || null,
+            "pending",
+            xdr,
+            now,
+            now,
+          ],
+        );
 
-      if (!result.rows[0]) {
-        throw AppError.internal("Failed to create remittance record");
-      }
+        if (!result.rows[0]) {
+          throw AppError.internal("Failed to create remittance record");
+        }
 
-      const record = result.rows[0];
+        const record = result.rows[0];
 
-      return {
-        id: record.id,
-        senderId: record.sender_id,
-        recipientAddress: record.recipient_address,
-        amount: parseFloat(record.amount),
-        fromCurrency: record.from_currency,
-        toCurrency: record.to_currency,
-        memo: record.memo,
-        status: record.status,
-        transactionHash: record.transaction_hash,
-        xdr: record.xdr,
-        createdAt: record.created_at.toISOString(),
-        updatedAt: record.updated_at.toISOString(),
-      };
+        return {
+          id: record.id,
+          senderId: record.sender_id,
+          recipientAddress: record.recipient_address,
+          amount: parseFloat(record.amount),
+          fromCurrency: record.from_currency,
+          toCurrency: record.to_currency,
+          memo: record.memo,
+          status: record.status,
+          transactionHash: record.transaction_hash,
+          xdr: record.xdr,
+          createdAt: record.created_at.toISOString(),
+          updatedAt: record.updated_at.toISOString(),
+        };
+      });
     } catch (error) {
       logger.error("Error creating remittance:", error);
 
@@ -141,6 +182,9 @@ export const remittanceService = {
     limit: number = 20,
     cursor: string | null = null,
     status?: string,
+    from?: string,
+    to?: string,
+    q?: string,
   ): Promise<{
     remittances: Remittance[];
     total: number;
@@ -149,10 +193,39 @@ export const remittanceService = {
     try {
       let whereClause = "sender_id = $1";
       const params: (string | number)[] = [userId];
+      let paramIndex = 2;
 
-      if (status && status !== "all") {
-        whereClause += " AND status = $2";
+      if (status) {
+        whereClause += ` AND status = $${paramIndex}`;
         params.push(status);
+        paramIndex++;
+      }
+
+      if (from) {
+        const fromDate = new Date(from);
+        if (Number.isNaN(fromDate.getTime())) {
+          throw AppError.badRequest("Invalid 'from' date format");
+        }
+        whereClause += ` AND created_at >= $${paramIndex}`;
+        params.push(fromDate.toISOString());
+        paramIndex++;
+      }
+
+      if (to) {
+        const toDate = new Date(to);
+        if (Number.isNaN(toDate.getTime())) {
+          throw AppError.badRequest("Invalid 'to' date format");
+        }
+        whereClause += ` AND created_at <= $${paramIndex}`;
+        params.push(toDate.toISOString());
+        paramIndex++;
+      }
+
+      if (q) {
+        const searchTerm = `%${q}%`;
+        whereClause += ` AND (recipient_address ILIKE $${paramIndex} OR memo ILIKE $${paramIndex + 1})`;
+        params.push(searchTerm, searchTerm);
+        paramIndex += 2;
       }
 
       const cursorValue = cursor ? new Date(cursor) : null;
@@ -161,15 +234,16 @@ export const remittanceService = {
       }
 
       if (cursorValue) {
-        whereClause += ` AND created_at < $${params.length + 1}`;
+        whereClause += ` AND created_at < $${paramIndex}`;
         params.push(cursorValue.toISOString());
+        paramIndex++;
       }
 
       const result = await query(
         `SELECT * FROM remittances 
          WHERE ${whereClause}
          ORDER BY created_at DESC, id DESC
-         LIMIT $${params.length + 1}`,
+         LIMIT $${paramIndex}`,
         [...params, limit + 1],
       );
 

@@ -15,6 +15,7 @@ import {
 } from "../config/stellar.js";
 
 import { cacheService } from "./cacheService.js";
+import { jobMetricsService } from "./jobMetricsService.js";
 
 /**
  * Mirrors `LoanManager::DEFAULT_TERM_LEDGERS` in `contracts/loan_manager/src/lib.rs`.
@@ -60,19 +61,20 @@ function chunk<T>(items: T[], size: number): T[][] {
   return out;
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => {
-    setTimeout(resolve, ms);
-  });
-}
-
-async function mapConcurrent<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+async function mapConcurrent<T, R>(
+  items: T[],
+  limit: number,
+  fn: (item: T) => Promise<R>,
+): Promise<R[]> {
   const results: R[] = new Array(items.length);
   let currentIndex = 0;
   const worker = async () => {
     while (currentIndex < items.length) {
       const index = currentIndex++;
-      results[index] = await fn(items[index]!);
+      const item = items[index];
+      if (item !== undefined) {
+        results[index] = await fn(item);
+      }
     }
   };
   const workers = [];
@@ -160,7 +162,7 @@ export class DefaultChecker {
       `
       WITH approved AS (
         SELECT loan_id, MAX(ledger) AS approved_ledger
-        FROM loan_events
+        FROM contract_events
         WHERE event_type = 'LoanApproved'
           AND loan_id IS NOT NULL
         GROUP BY loan_id
@@ -173,7 +175,7 @@ export class DefaultChecker {
         FROM approved a
         WHERE NOT EXISTS (
           SELECT 1
-          FROM loan_events e
+          FROM contract_events e
           WHERE e.loan_id = a.loan_id
             AND e.event_type IN ('LoanRepaid', 'LoanDefaulted')
         )
@@ -201,7 +203,7 @@ export class DefaultChecker {
       `
       WITH approved AS (
         SELECT loan_id, MAX(ledger) AS approved_ledger
-        FROM loan_events
+        FROM contract_events
         WHERE event_type = 'LoanApproved'
           AND loan_id IS NOT NULL
         GROUP BY loan_id
@@ -213,7 +215,7 @@ export class DefaultChecker {
         FROM approved a
         WHERE NOT EXISTS (
           SELECT 1
-          FROM loan_events e
+          FROM contract_events e
           WHERE e.loan_id = a.loan_id
             AND e.event_type IN ('LoanRepaid', 'LoanDefaulted')
         )
@@ -352,18 +354,17 @@ export class DefaultChecker {
       timeoutHandle.unref?.();
     });
 
-    const submissionPromise: Promise<DefaultCheckBatchResult> = this.submitCheckDefaults(
-      server,
-      signer,
-      passphrase,
-      loanIds,
-    ).catch((error) => {
-      const message = error instanceof Error ? error.message : String(error);
-      return {
-        loanIds,
-        error: `default check batch failed: ${message}`,
-      } satisfies DefaultCheckBatchResult;
-    });
+    const submissionPromise: Promise<DefaultCheckBatchResult> =
+      this.submitCheckDefaults(server, signer, passphrase, loanIds).catch(
+        (error) => {
+          const message =
+            error instanceof Error ? error.message : String(error);
+          return {
+            loanIds,
+            error: `default check batch failed: ${message}`,
+          } satisfies DefaultCheckBatchResult;
+        },
+      );
 
     const result = await Promise.race([submissionPromise, timeoutPromise]);
 
@@ -388,7 +389,11 @@ export class DefaultChecker {
   private async acquireLock(): Promise<boolean> {
     try {
       const lockValue = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
-      const acquired = await cacheService.setNotExists(LOCK_KEY, lockValue, LOCK_TTL_SECONDS);
+      const acquired = await cacheService.setNotExists(
+        LOCK_KEY,
+        lockValue,
+        LOCK_TTL_SECONDS,
+      );
       return acquired;
     } catch (error) {
       logger.error("Failed to acquire default checker lock", { error });
@@ -408,39 +413,22 @@ export class DefaultChecker {
   }
 
   /**
-   * Processes a single batch of loans for default checking.
-   */
-  private async processBatch(
-    server: rpc.Server,
-    signer: Keypair,
-    passphrase: string,
-    batch: number[],
-    runId: string,
-  ): Promise<DefaultCheckBatchResult> {
-    const result = await this.submitCheckDefaults(server, signer, passphrase, batch);
-
-    logger.info("default_check.batch", {
-      runId,
-      loanIds: result.loanIds,
-      txHash: result.txHash,
-      submitStatus: result.submitStatus,
-      txStatus: result.txStatus,
-      error: result.error,
-    });
-
-    return result;
-  }
-
-  /**
    * Runs default checks for either:
    * - explicit `loanIds` (validated + de-duped), or
    * - all overdue loans discovered from `loan_events` (bounded by env limits).
    */
-  async checkOverdueLoans(loanIds?: number[]): Promise<DefaultCheckRunResult | null> {
+  async checkOverdueLoans(
+    loanIds?: number[],
+  ): Promise<DefaultCheckRunResult | null> {
+    const startTime = Date.now();
+    const jobName = "defaultChecker";
+
     // Try to acquire distributed lock to prevent overlapping runs
     const lockAcquired = await this.acquireLock();
     if (!lockAcquired) {
-      logger.warn("Default checker run skipped - another instance is already running");
+      logger.warn(
+        "Default checker run skipped - another instance is already running",
+      );
       return null;
     }
 
@@ -448,90 +436,113 @@ export class DefaultChecker {
       const runId = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
       const { signer, server, passphrase } = this.assertConfigured();
 
-    const latest = await server.getLatestLedger();
-    const currentLedger = latest.sequence;
+      const latest = await server.getLatestLedger();
+      const currentLedger = latest.sequence;
 
-    const stats = await this.fetchOverdueStats(currentLedger);
+      const stats = await this.fetchOverdueStats(currentLedger);
 
-    const explicitIds = loanIds
-      ? Array.from(
-          new Set(loanIds.filter((id) => Number.isInteger(id) && id > 0)),
-        )
-      : undefined;
+      const explicitIds = loanIds
+        ? Array.from(
+            new Set(loanIds.filter((id) => Number.isInteger(id) && id > 0)),
+          )
+        : undefined;
 
-    const targetIds =
-      explicitIds && explicitIds.length > 0
-        ? explicitIds
-        : await this.fetchOverdueLoanIds(currentLedger);
+      const targetIds =
+        explicitIds && explicitIds.length > 0
+          ? explicitIds
+          : await this.fetchOverdueLoanIds(currentLedger);
 
-    logger.info("default_check.run.start", {
-      runId,
-      currentLedger,
-      termLedgers: this.termLedgers,
-      batchSize: this.batchSize,
-      batchTimeoutMs: this.batchTimeoutMs,
-      maxLoansPerRun: this.maxLoansPerRun,
-      overdueCount: stats.overdueCount,
-      oldestDueLedger: stats.oldestDueLedger,
-      ledgersPastOldestDue: stats.ledgersPastOldestDue,
-      explicitLoanCount: explicitIds?.length ?? 0,
-      targetLoanCount: targetIds.length,
-    });
-
-    const allChunks = chunk(targetIds, this.batchSize).filter(b => b.length > 0);
-    const batchResults = await mapConcurrent(allChunks, this.concurrency, async (batch) => {
-      const result = await this.submitCheckDefaultsWithTimeout(
-        server,
-        signer,
-        passphrase,
-        batch,
-      );
-
-      logger.info("default_check.batch", {
+      logger.info("default_check.run.start", {
         runId,
-        loanIds: result.loanIds,
-        txHash: result.txHash,
-        submitStatus: result.submitStatus,
-        txStatus: result.txStatus,
-        error: result.error,
-        timedOut: result.timedOut,
+        currentLedger,
+        termLedgers: this.termLedgers,
+        batchSize: this.batchSize,
+        batchTimeoutMs: this.batchTimeoutMs,
+        maxLoansPerRun: this.maxLoansPerRun,
+        overdueCount: stats.overdueCount,
+        oldestDueLedger: stats.oldestDueLedger,
+        ledgersPastOldestDue: stats.ledgersPastOldestDue,
+        explicitLoanCount: explicitIds?.length ?? 0,
+        targetLoanCount: targetIds.length,
       });
 
-      return result;
-    });
+      const allChunks = chunk(targetIds, this.batchSize).filter(
+        (b) => b.length > 0,
+      );
+      const batchResults = await mapConcurrent(
+        allChunks,
+        this.concurrency,
+        async (batch) => {
+          const result = await this.submitCheckDefaultsWithTimeout(
+            server,
+            signer,
+            passphrase,
+            batch,
+          );
 
-    const loansChecked = targetIds.length;
-    const successfulSubmissions = batchResults.filter((b) => !b.error && b.txHash).length;
-    const failedSubmissions = batchResults.filter((b) => b.error || !b.txHash).length;
+          logger.info("default_check.batch", {
+            runId,
+            loanIds: result.loanIds,
+            txHash: result.txHash,
+            submitStatus: result.submitStatus,
+            txStatus: result.txStatus,
+            error: result.error,
+            timedOut: result.timedOut,
+          });
 
-    logger.info("default_check.run.complete", {
-      runId,
-      batches: batchResults.length,
-      loansChecked,
-      successfulSubmissions,
-      failedSubmissions,
-      currentLedger,
-      overdueCount: stats.overdueCount,
-      oldestDueLedger: stats.oldestDueLedger,
-      ledgersPastOldestDue: stats.ledgersPastOldestDue,
-    });
+          return result;
+        },
+      );
 
-    return {
-      runId,
-      currentLedger,
-      termLedgers: this.termLedgers,
-      overdueCount: stats.overdueCount,
-      loansChecked,
-      successfulSubmissions,
-      failedSubmissions,
-      ...(stats.oldestDueLedger !== undefined
-        ? { oldestDueLedger: stats.oldestDueLedger }
-        : {}),
-      ...(stats.ledgersPastOldestDue !== undefined
-        ? { ledgersPastOldestDue: stats.ledgersPastOldestDue }
-        : {}),
-      batches: batchResults,
-    };
+      const loansChecked = targetIds.length;
+      const successfulSubmissions = batchResults.filter(
+        (b) => !b.error && b.txHash,
+      ).length;
+      const failedSubmissions = batchResults.filter(
+        (b) => b.error || !b.txHash,
+      ).length;
+
+      logger.info("default_check.run.complete", {
+        runId,
+        batches: batchResults.length,
+        loansChecked,
+        successfulSubmissions,
+        failedSubmissions,
+        currentLedger,
+        overdueCount: stats.overdueCount,
+        oldestDueLedger: stats.oldestDueLedger,
+        ledgersPastOldestDue: stats.ledgersPastOldestDue,
+      });
+
+      // Record success metrics
+      const durationMs = Date.now() - startTime;
+      jobMetricsService.recordSuccess(jobName, durationMs);
+
+      return {
+        runId,
+        currentLedger,
+        termLedgers: this.termLedgers,
+        overdueCount: stats.overdueCount,
+        loansChecked,
+        successfulSubmissions,
+        failedSubmissions,
+        ...(stats.oldestDueLedger !== undefined
+          ? { oldestDueLedger: stats.oldestDueLedger }
+          : {}),
+        ...(stats.ledgersPastOldestDue !== undefined
+          ? { ledgersPastOldestDue: stats.ledgersPastOldestDue }
+          : {}),
+        batches: batchResults,
+      };
+    } catch (error) {
+      // Record failure metrics
+      const durationMs = Date.now() - startTime;
+      jobMetricsService.recordFailure(
+        jobName,
+        error as Error | string,
+        durationMs,
+      );
+      throw error;
     } finally {
       // Always release the lock, even if the run failed
       await this.releaseLock();

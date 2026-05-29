@@ -1,52 +1,82 @@
+import path from "node:path";
+import type { Express, NextFunction, Request, Response } from "express";
+import { Router } from "express";
 import swaggerJSDoc from "swagger-jsdoc";
-import path from "path";
-import { fileURLToPath } from "url";
-import { dirname } from "path";
+import swaggerUi from "swagger-ui-express";
 import { swaggerSchemas } from "./swaggerSchemas.js";
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
+export function isSwaggerEnabled(): boolean {
+  return (
+    process.env.NODE_ENV !== "production" ||
+    process.env.ENABLE_SWAGGER?.toLowerCase() === "true"
+  );
+}
 
-const swaggerDefinition = {
-  openapi: "3.0.0",
-  info: {
-    title: "RemitLend API",
-    version: "1.0.0",
-    description: "API documentation for RemitLend backend",
-  },
-  servers: [
-    {
-      url: "http://localhost:3001/api",
-      description: "Development server",
-    },
-  ],
-  components: {
-    securitySchemes: {
-      ApiKeyAuth: {
-        type: "apiKey",
-        in: "header",
-        name: "x-api-key",
-        description:
-          "Internal API key (`INTERNAL_API_KEY`) for score workers, webhooks, and admin operations",
-      },
-      BearerAuth: {
-        type: "http",
-        scheme: "bearer",
-        bearerFormat: "JWT",
-        description:
-          "JWT issued by POST /api/auth/login after POST /api/auth/challenge + signed message; use on GET /api/auth/verify and protected routes. Payload includes Stellar `publicKey`.",
-      },
-    },
-    schemas: swaggerSchemas,
-  },
-};
+const cwd = process.cwd();
 
-const options: swaggerJSDoc.Options = {
-  swaggerDefinition,
+export const swaggerSpec = swaggerJSDoc({
+  definition: {
+    openapi: "3.0.0",
+    info: {
+      title: "RemitLend API",
+      version: "1.0.0",
+      description:
+        "Backend API for RemitLend lending, scoring, remittance, and indexer flows.",
+    },
+    servers: [
+      {
+        url: "/api",
+        description: "Legacy API base path",
+      },
+      {
+        url: "/api/v1",
+        description: "Versioned API base path",
+      },
+    ],
+    components: {
+      securitySchemes: {
+        ApiKeyAuth: {
+          type: "apiKey",
+          in: "header",
+          name: "x-api-key",
+        },
+        BearerAuth: {
+          type: "http",
+          scheme: "bearer",
+          bearerFormat: "JWT",
+        },
+      },
+      schemas: swaggerSchemas,
+    },
+  },
   apis: [
-    path.resolve(__dirname, "../routes/*.ts"),
-    path.resolve(__dirname, "../routes/*.js"),
+    path.join(cwd, "src/routes/**/*.{ts,js}"),
+    path.join(cwd, "src/controllers/**/*.{ts,js}"),
+    path.join(cwd, "dist/src/routes/**/*.js"),
+    path.join(cwd, "dist/src/controllers/**/*.js"),
   ],
-};
+});
 
-export const swaggerSpec = swaggerJSDoc(options);
+export function mountSwaggerDocs(app: Express): void {
+  const docsRouter = Router();
+  docsRouter.use(...swaggerUi.serve);
+  docsRouter.get("/", swaggerUi.setup(swaggerSpec));
+
+  app.use("/docs", (req: Request, res: Response, next: NextFunction) => {
+    if (!isSwaggerEnabled()) {
+      next();
+      return;
+    }
+
+    docsRouter(req, res, next);
+  });
+
+  app.get("/docs.json", (req: Request, res: Response, next: NextFunction) => {
+    if (!isSwaggerEnabled()) {
+      next();
+      return;
+    }
+
+    res.json(swaggerSpec);
+  });
+}

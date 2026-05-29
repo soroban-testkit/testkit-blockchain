@@ -87,7 +87,9 @@ Create a `.env` file in the backend directory:
 PORT=3001
 
 # CORS Configuration
-CORS_ALLOWED_ORIGINS=http://localhost:3000
+FRONTEND_URL=http://localhost:3000
+# Optional backward-compatible fallback for multiple allowed origins during migration
+# CORS_ALLOWED_ORIGINS=http://localhost:3000,http://localhost:3001
 
 # Stellar Configuration
 STELLAR_NETWORK=testnet
@@ -234,9 +236,11 @@ Simulate remittance history for testing purposes.
 
 ## API Documentation
 
-Interactive API documentation is available via Swagger UI when the server is running:
+Interactive API documentation is available via Swagger UI when the server is running outside production, or in production when `ENABLE_SWAGGER=true` is set:
 
-**URL**: [http://localhost:3001/api-docs](http://localhost:3001/api-docs)
+**URL**: [http://localhost:3001/docs](http://localhost:3001/docs)
+
+The raw OpenAPI document is available at [http://localhost:3001/docs.json](http://localhost:3001/docs.json) under the same environment gate.
 
 The Swagger documentation provides:
 

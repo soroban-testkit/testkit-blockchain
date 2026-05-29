@@ -13,15 +13,33 @@ export const startIndexer = (): void => {
     return;
   }
 
-  const contractId = process.env.LOAN_MANAGER_CONTRACT_ID;
+  const contractEnvMap: Record<string, string | undefined> = {
+    LOAN_MANAGER_CONTRACT_ID: process.env.LOAN_MANAGER_CONTRACT_ID,
+    LENDING_POOL_CONTRACT_ID: process.env.LENDING_POOL_CONTRACT_ID,
+    REMITTANCE_NFT_CONTRACT_ID: process.env.REMITTANCE_NFT_CONTRACT_ID,
+    MULTISIG_GOVERNANCE_CONTRACT_ID:
+      process.env.MULTISIG_GOVERNANCE_CONTRACT_ID,
+  };
+
+  for (const [envVar, value] of Object.entries(contractEnvMap)) {
+    if (!value || value.trim().length === 0) {
+      logger.warn(
+        `${envVar} is not set — events for that contract will not be indexed`,
+      );
+    }
+  }
+
+  const contractIds = Object.values(contractEnvMap).filter((id): id is string =>
+    Boolean(id && id.trim().length > 0),
+  );
   const pollIntervalMs = parseInt(
     process.env.INDEXER_POLL_INTERVAL_MS || "30000",
   );
   const batchSize = parseInt(process.env.INDEXER_BATCH_SIZE || "100");
 
-  if (!contractId) {
+  if (contractIds.length === 0) {
     logger.warn(
-      "LOAN_MANAGER_CONTRACT_ID not set, indexer will not start. Set this environment variable to enable event indexing.",
+      "No contract IDs set for indexer. Set LOAN_MANAGER_CONTRACT_ID, LENDING_POOL_CONTRACT_ID, REMITTANCE_NFT_CONTRACT_ID, or MULTISIG_GOVERNANCE_CONTRACT_ID.",
     );
     return;
   }
@@ -30,7 +48,7 @@ export const startIndexer = (): void => {
 
   indexerInstance = new EventIndexer({
     rpcUrl,
-    contractId,
+    contractConfigs: contractIds.map((contractId) => ({ contractId })),
     pollIntervalMs,
     batchSize,
   });
@@ -41,7 +59,7 @@ export const startIndexer = (): void => {
 
   logger.info("Event indexer initialized", {
     rpcUrl,
-    contractId,
+    contractIds,
     pollIntervalMs,
     batchSize,
   });
@@ -50,9 +68,9 @@ export const startIndexer = (): void => {
 /**
  * Stop the event indexer
  */
-export const stopIndexer = (): void => {
+export const stopIndexer = async (): Promise<void> => {
   if (indexerInstance) {
-    indexerInstance.stop();
+    await indexerInstance.stop();
     indexerInstance = null;
     logger.info("Event indexer stopped");
   }

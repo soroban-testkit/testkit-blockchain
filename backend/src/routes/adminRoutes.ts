@@ -37,6 +37,16 @@ import {
 
 import auditLog from '../middleware/auditLog';
 
+import {
+  listAuditLogs,
+} from '../controllers/adminController';
+
+router.get(
+  '/audit-logs',
+  authenticateJWT,
+  requireRoles('admin'),
+  listAuditLogs,
+);
 const router = express.Router();
 
 router.post(

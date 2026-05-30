@@ -24,7 +24,7 @@ describe("Notification Cleanup Strategy", () => {
     it("should delete notifications older than the retention threshold", async () => {
       const retentionDays = 90;
 
-      mockedQuery.mockResolvedValue({ rowCount: 2 } as any);
+      mockedQuery.mockResolvedValue({ rowCount: 2 });
 
       const deletedCount =
         await notificationService.deleteOldNotifications(retentionDays);
@@ -37,7 +37,7 @@ describe("Notification Cleanup Strategy", () => {
     });
 
     it("should return 0 if no notifications are deleted", async () => {
-      mockedQuery.mockResolvedValue({ rowCount: 0 } as any);
+      mockedQuery.mockResolvedValue({ rowCount: 0 });
 
       const deletedCount = await notificationService.deleteOldNotifications(90);
 
@@ -57,7 +57,7 @@ describe("Notification Cleanup Strategy", () => {
     it("should delete read and archived notifications older than the retention threshold", async () => {
       const retentionDays = 30;
 
-      mockedQuery.mockResolvedValue({ rowCount: 5 } as any);
+      mockedQuery.mockResolvedValue({ rowCount: 5 });
 
       const deletedCount =
         await notificationService.deleteReadAndArchived(retentionDays);
@@ -70,7 +70,7 @@ describe("Notification Cleanup Strategy", () => {
     });
 
     it("should return 0 if no read/archived notifications are deleted", async () => {
-      mockedQuery.mockResolvedValue({ rowCount: 0 } as any);
+      mockedQuery.mockResolvedValue({ rowCount: 0 });
 
       const deletedCount = await notificationService.deleteReadAndArchived(30);
 
@@ -88,7 +88,7 @@ describe("Notification Cleanup Strategy", () => {
 
   describe("archiveNotifications", () => {
     it("should set status to archived and read to true for the given ids", async () => {
-      mockedQuery.mockResolvedValue({ rowCount: 2 } as any);
+      mockedQuery.mockResolvedValue({ rowCount: 2 });
 
       await notificationService.archiveNotifications("user-1", [1, 2]);
 
@@ -107,7 +107,7 @@ describe("Notification Cleanup Strategy", () => {
 
   describe("getUnreadCount", () => {
     it("should count notifications with status unread", async () => {
-      mockedQuery.mockResolvedValue({ rows: [{ count: "3" }] } as any);
+      mockedQuery.mockResolvedValue({ rows: [{ count: "3" }] });
 
       const count = await notificationService.getUnreadCount("user-1");
 
@@ -119,7 +119,7 @@ describe("Notification Cleanup Strategy", () => {
     });
 
     it("should return 0 when there are no unread notifications", async () => {
-      mockedQuery.mockResolvedValue({ rows: [{ count: "0" }] } as any);
+      mockedQuery.mockResolvedValue({ rows: [{ count: "0" }] });
 
       const count = await notificationService.getUnreadCount("user-1");
 

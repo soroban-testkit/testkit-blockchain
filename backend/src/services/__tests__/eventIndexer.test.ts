@@ -211,21 +211,20 @@ function stubWithTransaction(mockClient: MockClient): void {
 // Module setup
 // --------------------------------------------------------------------------
 
-let EventIndexer: any;
+let EventIndexer: new (...args: unknown[]) => unknown;
 
 beforeAll(async () => {
-  mockWithTransaction = jest.fn<any>(); // eslint-disable-line @typescript-eslint/no-explicit-any
-  mockUpdateUserScoresBulk = jest.fn<any>().mockResolvedValue(undefined); // eslint-disable-line @typescript-eslint/no-explicit-any
+  mockWithTransaction = jest.fn();
+  mockUpdateUserScoresBulk = jest.fn().mockResolvedValue(undefined);
   mockSorobanGetScoreConfig = jest
-    .fn<any>() // eslint-disable-line @typescript-eslint/no-explicit-any
+    .fn()
     .mockReturnValue({ repaymentDelta: 10, defaultPenalty: 20 });
-  mockWebhookDispatch = jest.fn<any>().mockResolvedValue(undefined); // eslint-disable-line @typescript-eslint/no-explicit-any
-  mockEventStreamBroadcast = jest.fn<any>(); // eslint-disable-line @typescript-eslint/no-explicit-any
-  mockNotificationCreate = jest.fn<any>().mockResolvedValue(undefined); // eslint-disable-line @typescript-eslint/no-explicit-any
+  mockWebhookDispatch = jest.fn().mockResolvedValue(undefined);
+  mockEventStreamBroadcast = jest.fn();
+  mockNotificationCreate = jest.fn().mockResolvedValue(undefined);
 
   jest.unstable_mockModule("../../db/connection.js", () => ({
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    query: jest.fn<any>().mockResolvedValue({ rows: [], rowCount: 0 }),
+    query: jest.fn().mockResolvedValue({ rows: [], rowCount: 0 }),
     getClient: jest.fn(),
     withTransaction: mockWithTransaction,
     TRANSIENT_ERROR_CODES: new Set(["08006", "57P01", "40001"]),
@@ -318,14 +317,12 @@ beforeAll(async () => {
   jest.unstable_mockModule("@stellar/stellar-sdk", () => ({
     rpc: {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      Server: jest.fn<any>().mockImplementation(() => ({
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        getEvents: jest.fn<any>().mockResolvedValue({ events: [] }),
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        getLatestLedger: jest.fn<any>().mockResolvedValue({ sequence: 0 }),
+      Server: jest.fn().mockImplementation(() => ({
+        getEvents: jest.fn().mockResolvedValue({ events: [] }),
+        getLatestLedger: jest.fn().mockResolvedValue({ sequence: 0 }),
       })),
     },
-    scValToNative: jest.fn((val: any) => {
+    scValToNative: jest.fn((val: Record<string, unknown>) => {
       if (val?._val !== undefined) return val._val;
       return val?.sym?.()?.toString?.() ?? "";
     }),
@@ -337,7 +334,8 @@ beforeAll(async () => {
   }));
 
   const mod = await import("../eventIndexer.js");
-  EventIndexer = (mod as any).EventIndexer;
+  EventIndexer = (mod as unknown as { EventIndexer: typeof EventIndexer })
+    .EventIndexer;
 });
 
 beforeEach(() => {
@@ -368,7 +366,7 @@ function makeIndexer() {
 describe("EventIndexer – transaction atomicity via ingestRawEvents", () => {
   it("happy path: event insert succeeds and score update is called with the pinned client", async () => {
     const mockClient: MockClient = {
-      query: jest.fn<any>().mockResolvedValue({
+      query: jest.fn().mockResolvedValue({
         rowCount: 1,
         rows: [{ event_id: "event-001" }],
       }),
@@ -398,7 +396,7 @@ describe("EventIndexer – transaction atomicity via ingestRawEvents", () => {
 
   it("score update failure propagates — the whole operation throws", async () => {
     const mockClient: MockClient = {
-      query: jest.fn<any>().mockResolvedValue({
+      query: jest.fn().mockResolvedValue({
         rowCount: 1,
         rows: [{ event_id: "event-rollback" }],
       }),
@@ -425,7 +423,7 @@ describe("EventIndexer – transaction atomicity via ingestRawEvents", () => {
       code: "23505",
     });
     const mockClient: MockClient = {
-      query: jest.fn<any>().mockRejectedValueOnce(insertError), // eslint-disable-line @typescript-eslint/no-explicit-any
+      query: jest.fn().mockRejectedValueOnce(insertError),
     };
     mockWithTransaction.mockImplementation(async (fn: TxCallback) => {
       try {
@@ -445,7 +443,7 @@ describe("EventIndexer – transaction atomicity via ingestRawEvents", () => {
 
   it("duplicate event (ON CONFLICT DO NOTHING) → rowCount=0 → no score update", async () => {
     const mockClient: MockClient = {
-      query: jest.fn<any>().mockResolvedValue({ rowCount: 0, rows: [] }),
+      query: jest.fn().mockResolvedValue({ rowCount: 0, rows: [] }),
     };
     stubWithTransaction(mockClient);
 
@@ -487,7 +485,7 @@ describe("EventIndexer – transaction atomicity via ingestRawEvents", () => {
       .query as jest.Mock;
 
     const mockClient: MockClient = {
-      query: jest.fn<any>().mockResolvedValue({ rowCount: 0, rows: [] }),
+      query: jest.fn().mockResolvedValue({ rowCount: 0, rows: [] }),
     };
     stubWithTransaction(mockClient);
 
@@ -506,7 +504,7 @@ describe("EventIndexer – transaction atomicity via ingestRawEvents", () => {
 
     const mockClient: MockClient = {
       query: jest
-        .fn<any>()
+        .fn()
         .mockImplementation(async (sql: string, params: unknown[]) => {
           if (sql.includes("INSERT INTO loan_events")) {
             return { rowCount: 1, rows: [{ event_id: "apprv-001" }] };
@@ -553,7 +551,7 @@ describe("EventIndexer – transaction atomicity via ingestRawEvents", () => {
 
   it("persists admin config events into audit_logs", async () => {
     const mockClient: MockClient = {
-      query: jest.fn<any>().mockImplementation(async (sql: string) => {
+      query: jest.fn().mockImplementation(async (sql: string) => {
         if (sql.includes("INSERT INTO loan_events")) {
           return { rowCount: 1, rows: [{ event_id: "admin-evt-001" }] };
         }
@@ -579,7 +577,7 @@ describe("EventIndexer – transaction atomicity via ingestRawEvents", () => {
 
   it("LoanLiquidated: creates a loan_liquidated notification for the borrower with refund info", async () => {
     const mockClient: MockClient = {
-      query: jest.fn<any>().mockResolvedValue({
+      query: jest.fn().mockResolvedValue({
         rowCount: 1,
         rows: [{ event_id: "liq-001" }],
       }),

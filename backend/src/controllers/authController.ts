@@ -6,7 +6,7 @@
 import type { Request, Response, NextFunction } from "express";
 import { asyncHandler } from "../utils/asyncHandler.js";
 export const registerTestUser = asyncHandler(
-  async (req: Request, res: Response, next: NextFunction) => {
+  async (req: Request, res: Response, _next: NextFunction) => {
     const { email, password } = req.body;
     if (!email || !password) {
       res

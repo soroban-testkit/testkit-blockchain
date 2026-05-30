@@ -34,7 +34,7 @@ describe("WebhookService", () => {
   });
 
   it("persists retry state when the initial delivery fails", async () => {
-    const fetchMock: any = jest.fn(async () => ({
+    const fetchMock: jest.Mock = jest.fn(async () => ({
       ok: false,
       status: 503,
     }));
@@ -101,7 +101,7 @@ describe("WebhookService", () => {
   it("truncates oversized webhook payloads before delivery", async () => {
     process.env.WEBHOOK_MAX_PAYLOAD_BYTES = "200";
 
-    const fetchMock: any = jest.fn(async () => ({
+    const fetchMock: jest.Mock = jest.fn(async () => ({
       ok: true,
       status: 200,
     }));
@@ -161,7 +161,7 @@ describe("WebhookService", () => {
   it("logs when a webhook payload approaches the configured size limit", async () => {
     process.env.WEBHOOK_MAX_PAYLOAD_BYTES = "512";
 
-    const fetchMock: any = jest.fn(async () => ({
+    const fetchMock: jest.Mock = jest.fn(async () => ({
       ok: true,
       status: 200,
     }));
@@ -226,7 +226,7 @@ describe("WebhookService", () => {
       const expectedHeader = `sha256=${expectedHex}`;
 
       // Directly inspect the header value by spying on fetch
-      const fetchMock: any = jest.fn(
+      const fetchMock: jest.Mock = jest.fn(
         async (_url: string, opts: RequestInit) => {
           const hdrs = opts.headers as Record<string, string>;
           expect(hdrs["x-remitlend-signature"]).toBe(expectedHeader);
@@ -260,7 +260,10 @@ describe("WebhookService", () => {
 
     it("header value starts with 'sha256=' and matches HMAC-SHA256 of the request body", async () => {
       const secret = "another-secret";
-      const fetchMock: any = jest.fn(async () => ({ ok: true, status: 200 }));
+      const fetchMock: jest.Mock = jest.fn(async () => ({
+        ok: true,
+        status: 200,
+      }));
       global.fetch = fetchMock as typeof fetch;
 
       mockQuery
@@ -301,7 +304,10 @@ describe("WebhookService", () => {
     });
 
     it("omits X-RemitLend-Signature when no secret is configured", async () => {
-      const fetchMock: any = jest.fn(async () => ({ ok: true, status: 200 }));
+      const fetchMock: jest.Mock = jest.fn(async () => ({
+        ok: true,
+        status: 200,
+      }));
       global.fetch = fetchMock as typeof fetch;
 
       mockQuery
@@ -334,7 +340,7 @@ describe("WebhookService", () => {
 
   describe("Retry logic", () => {
     it("retries delivery on 5xx response", async () => {
-      const fetchMock: any = jest.fn(async () => ({
+      const fetchMock: jest.Mock = jest.fn(async () => ({
         ok: false,
         status: 503,
       }));
@@ -377,7 +383,7 @@ describe("WebhookService", () => {
     });
 
     it("does not retry delivery on 4xx response", async () => {
-      const fetchMock: any = jest.fn(async () => ({
+      const fetchMock: jest.Mock = jest.fn(async () => ({
         ok: false,
         status: 400,
       }));
@@ -423,7 +429,7 @@ describe("WebhookService", () => {
 
   describe("Subscription filtering", () => {
     it("sends event to all matching subscriptions", async () => {
-      const fetchMock: any = jest.fn(async () => ({
+      const fetchMock: jest.Mock = jest.fn(async () => ({
         ok: true,
         status: 200,
       }));
@@ -462,7 +468,7 @@ describe("WebhookService", () => {
     });
 
     it("skips inactive subscriptions", async () => {
-      const fetchMock: any = jest.fn(async () => ({
+      const fetchMock: jest.Mock = jest.fn(async () => ({
         ok: true,
         status: 200,
       }));
@@ -495,7 +501,7 @@ describe("WebhookService", () => {
     });
 
     it("applies event type filter correctly", async () => {
-      const fetchMock: any = jest.fn(async () => ({
+      const fetchMock: jest.Mock = jest.fn(async () => ({
         ok: true,
         status: 200,
       }));

@@ -7,9 +7,17 @@ import {
   beforeAll,
 } from "@jest/globals";
 
-let rateLimitService: any;
-let SCORE_UPDATE_RATE_LIMIT: any;
-let mockCacheService: jest.Mocked<any>;
+let rateLimitService: {
+  checkRateLimit: jest.Mock;
+  resetRateLimit: jest.Mock;
+  getRateLimitStatus: jest.Mock;
+};
+let SCORE_UPDATE_RATE_LIMIT: { maxRequests: number; windowSeconds: number };
+let mockCacheService: jest.Mocked<{
+  get: jest.Mock;
+  set: jest.Mock;
+  delete: jest.Mock;
+}>;
 
 beforeAll(async () => {
   // Mock the cache service BEFORE importing the module under test

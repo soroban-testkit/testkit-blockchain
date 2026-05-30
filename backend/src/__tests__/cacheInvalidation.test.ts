@@ -9,7 +9,7 @@ import { jest, describe, it, expect, beforeEach } from "@jest/globals";
 
 const mockDelete = jest.fn<() => Promise<void>>().mockResolvedValue(undefined);
 const mockSet = jest.fn<() => Promise<void>>().mockResolvedValue(undefined);
-const mockGet = jest.fn<() => Promise<any>>().mockResolvedValue(null);
+const mockGet = jest.fn<() => Promise<null>>().mockResolvedValue(null);
 
 jest.unstable_mockModule("../services/cacheService.js", () => ({
   cacheService: {

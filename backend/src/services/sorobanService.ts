@@ -991,7 +991,7 @@ class SorobanService {
 
       return await Promise.race([
         ledgerPromise,
-        timeoutPromise as Promise<any>,
+        timeoutPromise as Promise<never>,
       ]);
     } catch (error) {
       return {

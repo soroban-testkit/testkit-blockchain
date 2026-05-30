@@ -1,9 +1,6 @@
 import type { Request, Response, NextFunction } from "express";
 import { query } from "../db/connection.js";
-import {
-  withTransaction,
-  withStellarAndDbTransaction,
-} from "../db/transaction.js";
+import { withStellarAndDbTransaction } from "../db/transaction.js";
 import { AppError } from "../errors/AppError.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { getLoanConfig } from "../config/loanConfig.js";
@@ -28,7 +25,7 @@ import {
  * Creates a loan directly for test setup.
  */
 export const createTestLoan = asyncHandler(
-  async (req: Request, res: Response, next: NextFunction) => {
+  async (req: Request, res: Response, _next: NextFunction) => {
     const { amount, term } = req.body;
     const borrower = req.user?.publicKey || "test-borrower";
 
@@ -92,7 +89,7 @@ export const markLoanDefaulted = asyncHandler(
  * Allows a borrower to contest a defaulted loan, moving it to disputed status and logging the dispute.
  */
 export const contestDefault = asyncHandler(
-  async (req: Request, res: Response, next: NextFunction) => {
+  async (req: Request, res: Response, _next: NextFunction) => {
     const loanId = req.params.loanId as string;
     const { reason } = req.body as { reason: string };
     const borrower = req.user?.publicKey;
@@ -275,7 +272,7 @@ export const previewLoanAmortizationSchedule = asyncHandler(
 export const getBorrowerLoans = asyncHandler(
   async (req: Request, res: Response) => {
     const { borrower } = req.params;
-    const { limit, cursor, sort, status, dateRange, amountRange } =
+    const { limit, cursor, status, dateRange, amountRange } =
       parseCursorQueryParams(req);
 
     // `from` and `to` are validated by the Zod middleware; merge into dateRange
@@ -380,32 +377,38 @@ export const getBorrowerLoans = asyncHandler(
     const hasNext = result.rows.length > limit;
     const trimmedRows = hasNext ? result.rows.slice(0, limit) : result.rows;
 
-    const loans: BorrowerLoan[] = trimmedRows.map((row: any) => {
-      const isPending = row.status === "pending_indexing";
-      return {
-        loanId: Number(row.loan_id),
-        principal: Number.parseFloat(row.principal || "0"),
-        accruedInterest: isPending
-          ? null
-          : Number.parseFloat(row.accrued_interest || "0"),
-        totalRepaid: Number.parseFloat(row.total_repaid || "0"),
-        totalOwed: isPending ? null : Number.parseFloat(row.total_owed || "0"),
-        nextPaymentDeadline: new Date(row.next_payment_deadline).toISOString(),
-        status: row.status as
-          | "active"
-          | "repaid"
-          | "defaulted"
-          | "pending_indexing",
-        borrower: row.address,
-        approvedAt: row.approved_at
-          ? new Date(row.approved_at).toISOString()
-          : null,
-        latestEventType:
-          typeof row.latest_event_type === "string"
-            ? row.latest_event_type
-            : undefined,
-      };
-    });
+    const loans: BorrowerLoan[] = trimmedRows.map(
+      (row: Record<string, unknown>) => {
+        const isPending = row.status === "pending_indexing";
+        return {
+          loanId: Number(row.loan_id),
+          principal: Number.parseFloat(row.principal || "0"),
+          accruedInterest: isPending
+            ? null
+            : Number.parseFloat(row.accrued_interest || "0"),
+          totalRepaid: Number.parseFloat(row.total_repaid || "0"),
+          totalOwed: isPending
+            ? null
+            : Number.parseFloat(row.total_owed || "0"),
+          nextPaymentDeadline: new Date(
+            row.next_payment_deadline,
+          ).toISOString(),
+          status: row.status as
+            | "active"
+            | "repaid"
+            | "defaulted"
+            | "pending_indexing",
+          borrower: row.address,
+          approvedAt: row.approved_at
+            ? new Date(row.approved_at).toISOString()
+            : null,
+          latestEventType:
+            typeof row.latest_event_type === "string"
+              ? row.latest_event_type
+              : undefined,
+        };
+      },
+    );
 
     const lastLoan = loans.length > 0 ? loans[loans.length - 1] : undefined;
     const nextCursor = hasNext && lastLoan ? String(lastLoan.loanId) : null;
@@ -473,10 +476,10 @@ export const getLoanDetails = asyncHandler(
     const events = eventsResult.rows;
     const currentLedger = await getLatestLedger();
     const requestEvent = events.find(
-      (event: any) => event.event_type === "LoanRequested",
+      (event: Record<string, unknown>) => event.event_type === "LoanRequested",
     );
     const approvalEvents = events.filter(
-      (event: any) => event.event_type === "LoanApproved",
+      (event: Record<string, unknown>) => event.event_type === "LoanApproved",
     );
     if (approvalEvents.length > 1) {
       logger.warn("Duplicate LoanApproved events detected for loan", {
@@ -489,12 +492,13 @@ export const getLoanDetails = asyncHandler(
         ? approvalEvents[approvalEvents.length - 1]
         : undefined;
     const repaymentEvents = events.filter(
-      (event: any) => event.event_type === "LoanRepaid",
+      (event: Record<string, unknown>) => event.event_type === "LoanRepaid",
     );
 
     const principal = Number.parseFloat(requestEvent?.amount || "0");
     const totalRepaid = repaymentEvents.reduce(
-      (sum: number, event: any) => sum + Number.parseFloat(event.amount || "0"),
+      (sum: number, event: Record<string, unknown>) =>
+        sum + Number.parseFloat((event.amount as string) || "0"),
       0,
     );
 
@@ -529,7 +533,7 @@ export const getLoanDetails = asyncHandler(
     }
 
     const isDefaulted = events.some(
-      (event: any) => event.event_type === "LoanDefaulted",
+      (event: Record<string, unknown>) => event.event_type === "LoanDefaulted",
     );
 
     const isPending = approvedLedger <= 0 || currentLedger < approvedLedger;
@@ -559,7 +563,7 @@ export const getLoanDetails = asyncHandler(
               : "repaid",
         requestedAt: requestEvent?.ledger_closed_at,
         approvedAt: approvalEvent?.ledger_closed_at,
-        events: events.map((event: any) => ({
+        events: events.map((event: Record<string, unknown>) => ({
           type: event.event_type,
           amount: event.amount,
           timestamp: event.ledger_closed_at,
@@ -593,10 +597,10 @@ export const getLoanAmortizationSchedule = asyncHandler(
 
     const events = eventsResult.rows;
     const requestEvent = events.find(
-      (event: any) => event.event_type === "LoanRequested",
+      (event: Record<string, unknown>) => event.event_type === "LoanRequested",
     );
     const approvalEvents = events.filter(
-      (event: any) => event.event_type === "LoanApproved",
+      (event: Record<string, unknown>) => event.event_type === "LoanApproved",
     );
     const approvalEvent =
       approvalEvents.length > 0

@@ -5,7 +5,7 @@ jest.mock("../utils/logger.js");
 
 describe("Environment Variable Validation", () => {
   const originalEnv = process.env;
-  let mockExit: any;
+  let mockExit: jest.SpyInstance;
 
   beforeAll(() => {
     mockExit = jest

@@ -64,8 +64,11 @@ const withRetry = async <T>(
 ): Promise<T> => {
   try {
     return await operation();
-  } catch (error: any) {
-    if (retries > 0 && TRANSIENT_ERROR_CODES.has(error.code)) {
+  } catch (error) {
+    if (
+      retries > 0 &&
+      TRANSIENT_ERROR_CODES.has((error as { code: string }).code)
+    ) {
       logger.warn(
         `Transient db error (${error.code}). Retrying in ${delay}ms... (${retries} retries left)`,
       );
@@ -103,7 +106,7 @@ export async function withTransaction<T>(
       const result = await fn(client);
       await client.query("COMMIT");
       return result;
-    } catch (error: any) {
+    } catch (error) {
       try {
         await client.query("ROLLBACK");
       } catch (rollbackError) {

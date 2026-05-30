@@ -7,7 +7,9 @@ import request from "supertest";
  */
 
 const mockDbQuery = jest
-  .fn<() => Promise<any>>()
+  .fn<
+    () => Promise<{ rows: { last_indexed_ledger: number }[]; rowCount: number }>
+  >()
   .mockResolvedValue({ rows: [{ last_indexed_ledger: 1000 }], rowCount: 1 });
 
 jest.unstable_mockModule("../db/connection.js", () => ({
@@ -20,16 +22,18 @@ jest.unstable_mockModule("../db/connection.js", () => ({
 jest.unstable_mockModule("../services/cacheService.js", () => ({
   cacheService: {
     ping: jest.fn<() => Promise<string>>().mockResolvedValue("ok"),
-    get: jest.fn<() => Promise<any>>().mockResolvedValue(null),
+    get: jest.fn<() => Promise<null>>().mockResolvedValue(null),
     set: jest.fn<() => Promise<void>>().mockResolvedValue(undefined),
     delete: jest.fn<() => Promise<void>>().mockResolvedValue(undefined),
   },
 }));
 
-const mockHealthCheck = jest.fn<() => Promise<any>>().mockResolvedValue({
-  connected: true,
-  latestLedger: 1050,
-});
+const mockHealthCheck = jest
+  .fn<() => Promise<{ connected: boolean; latestLedger?: number }>>()
+  .mockResolvedValue({
+    connected: true,
+    latestLedger: 1050,
+  });
 
 jest.unstable_mockModule("../services/sorobanService.js", () => ({
   sorobanService: {

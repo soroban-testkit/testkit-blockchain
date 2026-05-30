@@ -60,29 +60,38 @@ describe("remittanceService.createRemittance", () => {
   it("builds token transfer XDR for configured USDC remittances", async () => {
     process.env.STELLAR_USDC_ISSUER = USDC_ISSUER;
 
-    mockWithTransaction.mockImplementation(async (callback: any) => {
-      const now = new Date();
-      return callback({
-        query: async (_sql: string, params: any[]) => ({
-          rows: [
-            {
-              id: "remit-1",
-              sender_id: SENDER,
-              recipient_address: RECIPIENT,
-              amount: "25",
-              from_currency: "USDC",
-              to_currency: "USDC",
-              memo: "test",
-              status: "pending",
-              transaction_hash: null,
-              xdr: params[8],
-              created_at: now,
-              updated_at: now,
-            },
-          ],
-        }),
-      });
-    });
+    mockWithTransaction.mockImplementation(
+      async (
+        callback: (client: {
+          query: (
+            sql: string,
+            params: unknown[],
+          ) => Promise<{ rows: unknown[] }>;
+        }) => Promise<unknown>,
+      ) => {
+        const now = new Date();
+        return callback({
+          query: async (_sql: string, _params: unknown[]) => ({
+            rows: [
+              {
+                id: "remit-1",
+                sender_id: SENDER,
+                recipient_address: RECIPIENT,
+                amount: "25",
+                from_currency: "USDC",
+                to_currency: "USDC",
+                memo: "test",
+                status: "pending",
+                transaction_hash: null,
+                xdr: params[8],
+                created_at: now,
+                updated_at: now,
+              },
+            ],
+          }),
+        });
+      },
+    );
 
     const remittance = await remittanceService.createRemittance({
       recipientAddress: RECIPIENT,

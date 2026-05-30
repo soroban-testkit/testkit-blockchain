@@ -1,9 +1,8 @@
 import { describe, it, expect, jest, beforeEach } from "@jest/globals";
 
 type QueryResult = { rows: Record<string, unknown>[]; rowCount: number };
-const mockQuery = jest.fn<
-  (sql: string, params?: unknown[]) => Promise<QueryResult>
->();
+const mockQuery =
+  jest.fn<(sql: string, params?: unknown[]) => Promise<QueryResult>>();
 
 jest.unstable_mockModule("../../db/connection.js", () => ({
   query: mockQuery,
@@ -45,7 +44,14 @@ describe("notificationService", () => {
       });
 
       mockQuery.mockResolvedValueOnce({
-        rows: [{ email: null, phone: null, email_enabled: false, sms_enabled: false }],
+        rows: [
+          {
+            email: null,
+            phone: null,
+            email_enabled: false,
+            sms_enabled: false,
+          },
+        ],
         rowCount: 1,
       });
 
@@ -82,7 +88,14 @@ describe("notificationService", () => {
       });
 
       mockQuery.mockResolvedValueOnce({
-        rows: [{ email: null, phone: null, email_enabled: false, sms_enabled: false }],
+        rows: [
+          {
+            email: null,
+            phone: null,
+            email_enabled: false,
+            sms_enabled: false,
+          },
+        ],
         rowCount: 1,
       });
 
@@ -117,7 +130,14 @@ describe("notificationService", () => {
       });
 
       mockQuery.mockResolvedValueOnce({
-        rows: [{ email: null, phone: null, email_enabled: false, sms_enabled: false }],
+        rows: [
+          {
+            email: null,
+            phone: null,
+            email_enabled: false,
+            sms_enabled: false,
+          },
+        ],
         rowCount: 1,
       });
 

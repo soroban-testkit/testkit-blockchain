@@ -4,7 +4,7 @@ import request from "supertest";
 
 process.env.JWT_SECRET = "user-profile-test-secret";
 
-const queryMock = jest.fn<() => Promise<any>>();
+const queryMock = jest.fn<() => Promise<{ rows: unknown[] }>>();
 
 jest.unstable_mockModule("../db/connection.js", () => ({
   default: {

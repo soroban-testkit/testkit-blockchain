@@ -753,7 +753,7 @@ describe("EventIndexer", () => {
     process.env.QUARANTINE_ALERT_THRESHOLD = "2";
 
     mockQuery.mockImplementation(
-      async (sql: string, params: unknown[] = []) => {
+      async (sql: string, _params: unknown[] = []) => {
         if (sql.includes("INSERT INTO quarantine_events")) {
           return { rows: [], rowCount: 1 };
         }

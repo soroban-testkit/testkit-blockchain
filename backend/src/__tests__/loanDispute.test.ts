@@ -5,9 +5,10 @@ process.env.INTERNAL_API_KEY = "test-api-key";
 process.env.NODE_ENV = "test";
 
 import { jest } from "@jest/globals";
+import type { Express } from "express";
 
 // ESM-compatible mocking
-const mockQuery: any = jest.fn();
+const mockQuery = jest.fn();
 jest.unstable_mockModule("../db/connection.js", () => ({
   query: mockQuery,
   default: { query: mockQuery, connect: jest.fn(), end: jest.fn() },
@@ -20,7 +21,7 @@ jest.unstable_mockModule("../db/transaction.js", () => ({
 
 let request: typeof import("supertest");
 let jwt: typeof import("jsonwebtoken");
-let app: any;
+let app: Express.Application;
 // Dynamic imports after mocks
 beforeAll(async () => {
   ({ default: request } = await import("supertest"));
@@ -47,12 +48,12 @@ function mintToken(publicKey = TEST_PUBLIC_KEY) {
 
 /** Shorthand for a resolved pg QueryResult with rows */
 function dbRows(rows: object[], command = "SELECT") {
-  return { rows, rowCount: rows.length, command, oid: 0, fields: [] } as any;
+  return { rows, rowCount: rows.length, command, oid: 0, fields: [] };
 }
 
 /** Shorthand for a resolved pg QueryResult with no rows */
 function dbOk(command = "INSERT") {
-  return { rows: [], rowCount: 1, command, oid: 0, fields: [] } as any;
+  return { rows: [], rowCount: 1, command, oid: 0, fields: [] };
 }
 
 // ─── Test state ───────────────────────────────────────────────────────────────

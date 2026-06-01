@@ -76,7 +76,10 @@ export const buildCancelLoanTx = async (
 
       return res.json({
         success: true,
-        transaction: { unsignedTxXdr: "test-xdr-cancel", networkPassphrase: "TEST" },
+        transaction: {
+          unsignedTxXdr: "test-xdr-cancel",
+          networkPassphrase: "TEST",
+        },
       });
     }
 
@@ -121,10 +124,16 @@ export const buildRejectLoanTx = async (
 
     // In test mode, accept synthetic `test-*` users and return a fake
     // transaction after validating `reason` to avoid DB/external calls.
-    if (process.env.NODE_ENV === "test" && req.user?.publicKey?.startsWith("test")) {
+    if (
+      process.env.NODE_ENV === "test" &&
+      req.user?.publicKey?.startsWith("test")
+    ) {
       return res.json({
         success: true,
-        transaction: { unsignedTxXdr: "test-xdr-reject", networkPassphrase: "TEST" },
+        transaction: {
+          unsignedTxXdr: "test-xdr-reject",
+          networkPassphrase: "TEST",
+        },
       });
     }
 

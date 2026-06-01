@@ -626,9 +626,7 @@ class NotificationService {
     const actionUrl: string | undefined =
       row.action_url != null ? (row.action_url as string) : undefined;
 
-    // Build base without `actionUrl` so that when `actionUrl` is undefined
-    // the property is omitted entirely (tests expect `undefined` rather than `null`).
-    const base: Omit<Notification, "loanId" | "actionUrl"> & Partial<Pick<Notification, "actionUrl">> = {
+    const base: Partial<Notification> = {
       id: row.id as number,
       userId: row.user_id as string,
       type: row.type as NotificationType,
@@ -641,10 +639,14 @@ class NotificationService {
     };
 
     if (actionUrl !== undefined) {
-      (base as Notification).actionUrl = actionUrl;
+      base.actionUrl = actionUrl;
     }
 
-    return loanId !== undefined ? { ...(base as Notification), loanId } : (base as Notification);
+    if (loanId !== undefined) {
+      base.loanId = loanId;
+    }
+
+    return base as Notification;
   }
 }
 

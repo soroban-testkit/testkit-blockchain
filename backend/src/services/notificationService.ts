@@ -625,19 +625,26 @@ class NotificationService {
     const loanId = row.loan_id != null ? (row.loan_id as number) : undefined;
     const actionUrl: string | undefined =
       row.action_url != null ? (row.action_url as string) : undefined;
-    const base = {
+
+    // Build base without `actionUrl` so that when `actionUrl` is undefined
+    // the property is omitted entirely (tests expect `undefined` rather than `null`).
+    const base: Omit<Notification, "loanId" | "actionUrl"> & Partial<Pick<Notification, "actionUrl">> = {
       id: row.id as number,
       userId: row.user_id as string,
       type: row.type as NotificationType,
       title: row.title as string,
       message: row.message as string,
-      actionUrl,
       read: row.read as boolean,
       status:
         (row.status as NotificationStatus) ?? (row.read ? "read" : "unread"),
       createdAt: new Date(row.created_at as string),
     };
-    return loanId !== undefined ? { ...base, loanId } : base;
+
+    if (actionUrl !== undefined) {
+      (base as Notification).actionUrl = actionUrl;
+    }
+
+    return loanId !== undefined ? { ...(base as Notification), loanId } : (base as Notification);
   }
 }
 

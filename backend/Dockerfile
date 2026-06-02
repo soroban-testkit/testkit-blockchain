@@ -18,10 +18,15 @@ FROM node:22-alpine AS production
 
 WORKDIR /app
 
-# Install only production dependencies. Drop the lockfile afterwards: it is a
-# build-time artifact, not needed at runtime, and if left in the image the
-# container scanner reads it and reports devDependency advisories (e.g. a
-# critical in handlebars) for packages that are never actually installed here.
+# Build-time metadata injected by the CI pipeline via --build-arg.
+# These are baked into the image so GET /version works without any
+# runtime environment variable configuration.
+ARG GIT_SHA=""
+ARG BUILD_TIME=""
+ENV GIT_SHA=$GIT_SHA \
+    BUILD_TIME=$BUILD_TIME
+
+# Install only production dependencies
 COPY package*.json ./
 RUN npm ci --omit=dev && rm -f package-lock.json
 

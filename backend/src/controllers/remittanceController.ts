@@ -19,13 +19,14 @@ export const createRemittance = asyncHandler(
       req.body;
 
     // Get sender address from JWT (added by auth middleware)
-    const senderAddress = (req as any).walletAddress;
+    const senderAddress = (req as unknown as { walletAddress: string })
+      .walletAddress;
 
     if (!senderAddress) {
       throw AppError.unauthorized("Wallet address not found in request");
     }
 
-    logger.info("Creating remittance", {
+    logger.withContext().info("Creating remittance", {
       sender: senderAddress,
       recipient: recipientAddress,
       amount,
@@ -54,10 +55,12 @@ export const createRemittance = asyncHandler(
  * GET /api/remittances - Get user's remittances
  *
  * Returns paginated list of remittances for the authenticated user
+ * Supports filtering by status, date range, and search by recipient/reference
  */
 export const getRemittances = asyncHandler(
   async (req: Request, res: Response) => {
-    const senderAddress = (req as any).walletAddress as string;
+    const senderAddress = (req as unknown as { walletAddress: string })
+      .walletAddress as string;
 
     if (!senderAddress) {
       throw AppError.unauthorized("Wallet address not found in request");
@@ -65,12 +68,18 @@ export const getRemittances = asyncHandler(
 
     const { limit, cursor } = parseCursorQueryParams(req);
     const status = req.query.status as string | undefined;
+    const from = req.query.from as string | undefined;
+    const to = req.query.to as string | undefined;
+    const q = req.query.q as string | undefined;
 
     const result = await remittanceService.getRemittances(
       senderAddress,
       limit,
       cursor,
       status,
+      from,
+      to,
+      q,
     );
 
     res.json({
@@ -94,7 +103,8 @@ export const getRemittances = asyncHandler(
 export const getRemittance = asyncHandler(
   async (req: Request, res: Response) => {
     const { id } = req.params as { id: string };
-    const senderAddress = (req as any).walletAddress as string;
+    const senderAddress = (req as unknown as { walletAddress: string })
+      .walletAddress as string;
 
     if (!senderAddress) {
       throw AppError.unauthorized("Wallet address not found in request");
@@ -127,7 +137,8 @@ export const submitRemittanceTransaction = asyncHandler(
   async (req: Request, res: Response) => {
     const { id } = req.params as { id: string };
     const { signedXdr } = req.body as { signedXdr: string };
-    const senderAddress = (req as any).walletAddress as string;
+    const senderAddress = (req as unknown as { walletAddress: string })
+      .walletAddress as string;
 
     if (!senderAddress) {
       throw AppError.unauthorized("Wallet address not found in request");
@@ -141,7 +152,9 @@ export const submitRemittanceTransaction = asyncHandler(
       throw AppError.badRequest("Remittance ID is required");
     }
 
-    logger.info("Submitting remittance transaction", { remittanceId: id });
+    logger
+      .withContext()
+      .info("Submitting remittance transaction", { remittanceId: id });
 
     try {
       const remittance = await remittanceService.getRemittance(id);
@@ -167,7 +180,7 @@ export const submitRemittanceTransaction = asyncHandler(
         stellarResult.txHash,
       );
 
-      logger.info("Remittance transaction confirmed", {
+      logger.withContext().info("Remittance transaction confirmed", {
         remittanceId: id,
         txHash: stellarResult.txHash,
         status: stellarResult.status,
@@ -179,6 +192,7 @@ export const submitRemittanceTransaction = asyncHandler(
         type: "repayment_confirmed",
         title: "Remittance Sent",
         message: `Your remittance of ${remittance.amount} ${remittance.fromCurrency} was submitted successfully. Transaction: ${stellarResult.txHash}`,
+        actionUrl: `/remittances/${remittance.id}`,
       });
 
       res.json({
@@ -191,7 +205,9 @@ export const submitRemittanceTransaction = asyncHandler(
         },
       });
     } catch (error) {
-      logger.error("Error submitting remittance transaction:", error);
+      logger
+        .withContext()
+        .error("Error submitting remittance transaction:", error);
 
       if (id) {
         await remittanceService.updateRemittanceStatus(

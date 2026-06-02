@@ -1,14 +1,12 @@
 import type { Request, Response, NextFunction } from "express";
 import { query } from "../db/connection.js";
-import {
-  withTransaction,
-  withStellarAndDbTransaction,
-} from "../db/transaction.js";
+import { withStellarAndDbTransaction } from "../db/transaction.js";
 import { AppError } from "../errors/AppError.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { getLoanConfig } from "../config/loanConfig.js";
 import { ErrorCode } from "../errors/errorCodes.js";
 import { sorobanService } from "../services/sorobanService.js";
+import { rejectLoanSchema } from "../schemas/loanSchemas.js";
 import {
   createCursorPaginatedResponse,
   parseCursorQueryParams,
@@ -16,6 +14,10 @@ import {
 import logger from "../utils/logger.js";
 import { cacheService } from "../services/cacheService.js";
 import { notificationService } from "../services/notificationService.js";
+import {
+  invalidateOnRepay,
+  invalidateOnLoanRequest,
+} from "../utils/cacheKeys.js";
 
 // ─── Test/Dev Only ────────────────────────────────────────────────────────────
 
@@ -24,7 +26,7 @@ import { notificationService } from "../services/notificationService.js";
  * Creates a loan directly for test setup.
  */
 export const createTestLoan = asyncHandler(
-  async (req: Request, res: Response, next: NextFunction) => {
+  async (req: Request, res: Response, _next: NextFunction) => {
     const { amount, term } = req.body;
     const borrower = req.user?.publicKey || "test-borrower";
 
@@ -54,6 +56,84 @@ export const createTestLoan = asyncHandler(
   },
 );
 
+export const buildCancelLoanTx = async (
+  req: Request,
+  res: Response,
+  next: NextFunction,
+) => {
+  try {
+    const { loanId } = req.params;
+
+    const borrower = (req as any).user?.publicKey as string;
+
+    const result = await query("SELECT * FROM loans WHERE id = $1", [loanId]);
+    const loan = result.rows[0] as Record<string, unknown> | undefined;
+
+    if (!loan) {
+      return res.status(404).json({
+        message: "Loan not found",
+      });
+    }
+
+    if (!["PENDING", "OPEN"].includes(loan.status as string)) {
+      return res.status(400).json({
+        message: "Loan cannot be cancelled",
+      });
+    }
+
+    const transaction = await sorobanService.buildCancelLoanTx(
+      borrower,
+      loanId as string,
+    );
+
+    return res.json({
+      success: true,
+      transaction,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const buildRejectLoanTx = async (
+  req: Request,
+  res: Response,
+  next: NextFunction,
+) => {
+  try {
+    const { loanId } = req.params;
+
+    const { reason } = rejectLoanSchema.parse(req.body);
+
+    const result = await query("SELECT * FROM loans WHERE id = $1", [loanId]);
+    const loan = result.rows[0] as Record<string, unknown> | undefined;
+
+    if (!loan) {
+      return res.status(404).json({
+        message: "Loan not found",
+      });
+    }
+
+    if (loan.status !== "PENDING") {
+      return res.status(400).json({
+        message: "Loan cannot be rejected",
+      });
+    }
+
+    const transaction = await sorobanService.buildRejectLoanTx(
+      req.user!.publicKey,
+      loanId as string,
+      reason,
+    );
+
+    return res.json({
+      success: true,
+      transaction,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
 /**
  * POST /api/loans/:loanId/mark-defaulted (TEST/DEV ONLY)
  * Helper endpoint to mark a loan as defaulted for test setup.
@@ -88,7 +168,7 @@ export const markLoanDefaulted = asyncHandler(
  * Allows a borrower to contest a defaulted loan, moving it to disputed status and logging the dispute.
  */
 export const contestDefault = asyncHandler(
-  async (req: Request, res: Response, next: NextFunction) => {
+  async (req: Request, res: Response, _next: NextFunction) => {
     const loanId = req.params.loanId as string;
     const { reason } = req.body as { reason: string };
     const borrower = req.user?.publicKey;
@@ -122,7 +202,9 @@ export const contestDefault = asyncHandler(
       [loanId, borrower],
     );
 
-    logger.info("Loan default contested", { loanId, borrower, reason });
+    logger
+      .withContext()
+      .info("Loan default contested", { loanId, borrower, reason });
 
     // Notify admins via email, SSE, and optional webhook
     await notificationService.notifyAdmins({
@@ -271,8 +353,21 @@ export const previewLoanAmortizationSchedule = asyncHandler(
 export const getBorrowerLoans = asyncHandler(
   async (req: Request, res: Response) => {
     const { borrower } = req.params;
-    const { limit, cursor, sort, status, dateRange, amountRange } =
+    const { limit, cursor, status, dateRange, amountRange } =
       parseCursorQueryParams(req);
+
+    // `from` and `to` are validated by the Zod middleware; merge into dateRange
+    const fromParam =
+      typeof req.query.from === "string" ? new Date(req.query.from) : null;
+    const toParam =
+      typeof req.query.to === "string" ? new Date(req.query.to) : null;
+    const effectiveDateRange =
+      fromParam !== null || toParam !== null
+        ? {
+            start: fromParam ?? new Date(0),
+            end: toParam ?? new Date(),
+          }
+        : dateRange;
 
     const currentLedger = await getLatestLedger();
 
@@ -347,8 +442,8 @@ export const getBorrowerLoans = asyncHandler(
       status && status !== "all" ? status : null,
       amountRange?.min ?? null,
       amountRange?.max ?? null,
-      dateRange?.start ?? null,
-      dateRange?.end ?? null,
+      effectiveDateRange?.start ?? null,
+      effectiveDateRange?.end ?? null,
       cursorValue,
       limit + 1,
     ];
@@ -363,32 +458,37 @@ export const getBorrowerLoans = asyncHandler(
     const hasNext = result.rows.length > limit;
     const trimmedRows = hasNext ? result.rows.slice(0, limit) : result.rows;
 
-    const loans: BorrowerLoan[] = trimmedRows.map((row: any) => {
-      const isPending = row.status === "pending_indexing";
-      return {
-        loanId: Number(row.loan_id),
-        principal: Number.parseFloat(row.principal || "0"),
-        accruedInterest: isPending
-          ? null
-          : Number.parseFloat(row.accrued_interest || "0"),
-        totalRepaid: Number.parseFloat(row.total_repaid || "0"),
-        totalOwed: isPending ? null : Number.parseFloat(row.total_owed || "0"),
-        nextPaymentDeadline: new Date(row.next_payment_deadline).toISOString(),
-        status: row.status as
-          | "active"
-          | "repaid"
-          | "defaulted"
-          | "pending_indexing",
-        borrower: row.address,
-        approvedAt: row.approved_at
-          ? new Date(row.approved_at).toISOString()
-          : null,
-        latestEventType:
-          typeof row.latest_event_type === "string"
-            ? row.latest_event_type
-            : undefined,
-      };
-    });
+    const loans: BorrowerLoan[] = trimmedRows.map(
+      (row: Record<string, unknown>) => {
+        const isPending = row.status === "pending_indexing";
+        return {
+          loanId: Number(row.loan_id),
+          principal: Number.parseFloat((row.principal as string) || "0"),
+          accruedInterest: isPending
+            ? null
+            : Number.parseFloat((row.accrued_interest as string) || "0"),
+          totalRepaid: Number.parseFloat((row.total_repaid as string) || "0"),
+          totalOwed: isPending
+            ? null
+            : Number.parseFloat((row.total_owed as string) || "0"),
+          nextPaymentDeadline: new Date(
+            row.next_payment_deadline as string,
+          ).toISOString(),
+          status: row.status as
+            | "active"
+            | "repaid"
+            | "defaulted"
+            | "pending_indexing",
+          borrower: row.address as string,
+          approvedAt: row.approved_at
+            ? new Date(row.approved_at as string).toISOString()
+            : null,
+          ...(typeof row.latest_event_type === "string"
+            ? { latestEventType: row.latest_event_type as string }
+            : {}),
+        };
+      },
+    );
 
     const lastLoan = loans.length > 0 ? loans[loans.length - 1] : undefined;
     const nextCursor = hasNext && lastLoan ? String(lastLoan.loanId) : null;
@@ -456,28 +556,31 @@ export const getLoanDetails = asyncHandler(
     const events = eventsResult.rows;
     const currentLedger = await getLatestLedger();
     const requestEvent = events.find(
-      (event: any) => event.event_type === "LoanRequested",
+      (event: Record<string, unknown>) => event.event_type === "LoanRequested",
     );
     const approvalEvents = events.filter(
-      (event: any) => event.event_type === "LoanApproved",
+      (event: Record<string, unknown>) => event.event_type === "LoanApproved",
     );
     if (approvalEvents.length > 1) {
-      logger.warn("Duplicate LoanApproved events detected for loan", {
-        loanId,
-        duplicateCount: approvalEvents.length,
-      });
+      logger
+        .withContext()
+        .warn("Duplicate LoanApproved events detected for loan", {
+          loanId,
+          duplicateCount: approvalEvents.length,
+        });
     }
     const approvalEvent =
       approvalEvents.length > 0
         ? approvalEvents[approvalEvents.length - 1]
         : undefined;
     const repaymentEvents = events.filter(
-      (event: any) => event.event_type === "LoanRepaid",
+      (event: Record<string, unknown>) => event.event_type === "LoanRepaid",
     );
 
     const principal = Number.parseFloat(requestEvent?.amount || "0");
     const totalRepaid = repaymentEvents.reduce(
-      (sum: number, event: any) => sum + Number.parseFloat(event.amount || "0"),
+      (sum: number, event: Record<string, unknown>) =>
+        sum + Number.parseFloat((event.amount as string) || "0"),
       0,
     );
 
@@ -512,7 +615,7 @@ export const getLoanDetails = asyncHandler(
     }
 
     const isDefaulted = events.some(
-      (event: any) => event.event_type === "LoanDefaulted",
+      (event: Record<string, unknown>) => event.event_type === "LoanDefaulted",
     );
 
     const isPending = approvedLedger <= 0 || currentLedger < approvedLedger;
@@ -542,7 +645,7 @@ export const getLoanDetails = asyncHandler(
               : "repaid",
         requestedAt: requestEvent?.ledger_closed_at,
         approvedAt: approvalEvent?.ledger_closed_at,
-        events: events.map((event: any) => ({
+        events: events.map((event: Record<string, unknown>) => ({
           type: event.event_type,
           amount: event.amount,
           timestamp: event.ledger_closed_at,
@@ -576,10 +679,10 @@ export const getLoanAmortizationSchedule = asyncHandler(
 
     const events = eventsResult.rows;
     const requestEvent = events.find(
-      (event: any) => event.event_type === "LoanRequested",
+      (event: Record<string, unknown>) => event.event_type === "LoanRequested",
     );
     const approvalEvents = events.filter(
-      (event: any) => event.event_type === "LoanApproved",
+      (event: Record<string, unknown>) => event.event_type === "LoanApproved",
     );
     const approvalEvent =
       approvalEvents.length > 0
@@ -665,7 +768,7 @@ export const requestLoan = asyncHandler(async (req: Request, res: Response) => {
   }>(cacheKey);
 
   if (cachedTx) {
-    logger.info("Returning cached unsigned loan request tx", {
+    logger.withContext().info("Returning cached unsigned loan request tx", {
       borrower: borrowerPublicKey,
       amount,
     });
@@ -685,7 +788,10 @@ export const requestLoan = asyncHandler(async (req: Request, res: Response) => {
   // Cache for 60 seconds to prevent sequence number collisions from rapid requests
   await cacheService.set(cacheKey, result, 60);
 
-  logger.info("Loan request transaction built", {
+  // Invalidate stale read-cache keys now that a loan request has been built
+  await invalidateOnLoanRequest(borrowerPublicKey);
+
+  logger.withContext().info("Loan request transaction built", {
     borrower: borrowerPublicKey,
     amount,
   });
@@ -732,7 +838,7 @@ export const repayLoan = asyncHandler(async (req: Request, res: Response) => {
   }>(cacheKey);
 
   if (cachedTx) {
-    logger.info("Returning cached unsigned repay tx", {
+    logger.withContext().info("Returning cached unsigned repay tx", {
       borrower: borrowerPublicKey,
       loanId: loanIdNum,
       amount,
@@ -755,7 +861,10 @@ export const repayLoan = asyncHandler(async (req: Request, res: Response) => {
   // Cache for 60 seconds
   await cacheService.set(cacheKey, result, 60);
 
-  logger.info("Repay transaction built", {
+  // Invalidate stale read-cache keys now that a repayment has been initiated
+  await invalidateOnRepay(borrowerPublicKey, loanIdNum);
+
+  logger.withContext().info("Repay transaction built", {
     borrower: borrowerPublicKey,
     loanId: loanIdNum,
     amount,
@@ -804,11 +913,13 @@ export const depositCollateral = asyncHandler(
     }>(cacheKey);
 
     if (cachedTx) {
-      logger.info("Returning cached unsigned deposit_collateral tx", {
-        borrower: borrowerPublicKey,
-        loanId: loanIdNum,
-        amount,
-      });
+      logger
+        .withContext()
+        .info("Returning cached unsigned deposit_collateral tx", {
+          borrower: borrowerPublicKey,
+          loanId: loanIdNum,
+          amount,
+        });
       res.json({
         success: true,
         loanId: loanIdNum,
@@ -826,7 +937,7 @@ export const depositCollateral = asyncHandler(
 
     await cacheService.set(cacheKey, result, 60);
 
-    logger.info("Deposit collateral transaction built", {
+    logger.withContext().info("Deposit collateral transaction built", {
       borrower: borrowerPublicKey,
       loanId: loanIdNum,
       amount,
@@ -874,10 +985,12 @@ export const releaseCollateral = asyncHandler(
     }>(cacheKey);
 
     if (cachedTx) {
-      logger.info("Returning cached unsigned release_collateral tx", {
-        borrower: borrowerPublicKey,
-        loanId: loanIdNum,
-      });
+      logger
+        .withContext()
+        .info("Returning cached unsigned release_collateral tx", {
+          borrower: borrowerPublicKey,
+          loanId: loanIdNum,
+        });
       res.json({
         success: true,
         loanId: loanIdNum,
@@ -894,7 +1007,7 @@ export const releaseCollateral = asyncHandler(
 
     await cacheService.set(cacheKey, result, 60);
 
-    logger.info("Release collateral transaction built", {
+    logger.withContext().info("Release collateral transaction built", {
       borrower: borrowerPublicKey,
       loanId: loanIdNum,
     });
@@ -943,7 +1056,7 @@ export const refinanceLoan = asyncHandler(
     }>(cacheKey);
 
     if (cachedTx) {
-      logger.info("Returning cached unsigned refinance tx", {
+      logger.withContext().info("Returning cached unsigned refinance tx", {
         borrower: borrowerPublicKey,
         loanId: loanIdNum,
         newAmount,
@@ -967,7 +1080,7 @@ export const refinanceLoan = asyncHandler(
 
     await cacheService.set(cacheKey, result, 60);
 
-    logger.info("Refinance loan transaction built", {
+    logger.withContext().info("Refinance loan transaction built", {
       borrower: borrowerPublicKey,
       loanId: loanIdNum,
       newAmount,
@@ -1016,7 +1129,7 @@ export const extendLoan = asyncHandler(async (req: Request, res: Response) => {
   }>(cacheKey);
 
   if (cachedTx) {
-    logger.info("Returning cached unsigned extend tx", {
+    logger.withContext().info("Returning cached unsigned extend tx", {
       borrower: borrowerPublicKey,
       loanId: loanIdNum,
       extraLedgers,
@@ -1038,7 +1151,7 @@ export const extendLoan = asyncHandler(async (req: Request, res: Response) => {
 
   await cacheService.set(cacheKey, result, 60);
 
-  logger.info("Extend loan transaction built", {
+  logger.withContext().info("Extend loan transaction built", {
     borrower: borrowerPublicKey,
     loanId: loanIdNum,
     extraLedgers,
@@ -1085,7 +1198,7 @@ export const buildLiquidateLoan = asyncHandler(
     }>(cacheKey);
 
     if (cachedTx) {
-      logger.info("Returning cached unsigned liquidate tx", {
+      logger.withContext().info("Returning cached unsigned liquidate tx", {
         liquidator: liquidatorPublicKey,
         loanId: loanIdNum,
       });
@@ -1105,7 +1218,7 @@ export const buildLiquidateLoan = asyncHandler(
 
     await cacheService.set(cacheKey, result, 60);
 
-    logger.info("Liquidate loan transaction built", {
+    logger.withContext().info("Liquidate loan transaction built", {
       liquidator: liquidatorPublicKey,
       loanId: loanIdNum,
     });
@@ -1142,24 +1255,20 @@ export const submitTransaction = asyncHandler(
         return await sorobanService.submitSignedTx(signedTxXdr);
       },
       // Database operations (currently none, but structured for future use)
-      async (stellarResult, client) => {
-        // Log the transaction submission for audit and reconciliation
+      async (stellarResult: unknown, client) => {
+        const sr = stellarResult as { txHash: string; status: string };
         await client.query(
           `INSERT INTO transaction_submissions (tx_hash, status, submitted_at, submitted_by)
            VALUES ($1, $2, NOW(), $3)
            ON CONFLICT (tx_hash) DO UPDATE SET
              status = EXCLUDED.status,
              submitted_at = EXCLUDED.submitted_at`,
-          [
-            stellarResult.txHash,
-            stellarResult.status,
-            req.user?.publicKey || null,
-          ],
+          [sr.txHash, sr.status, req.user?.publicKey || null],
         );
 
-        logger.info("Transaction submission recorded", {
-          txHash: stellarResult.txHash,
-          status: stellarResult.status,
+        logger.withContext().info("Transaction submission recorded", {
+          txHash: sr.txHash,
+          status: sr.status,
           submittedBy: req.user?.publicKey,
         });
 
@@ -1167,18 +1276,22 @@ export const submitTransaction = asyncHandler(
       },
     );
 
-    logger.info("Transaction submitted successfully", {
-      txHash: result.stellarResult.txHash,
-      status: result.stellarResult.status,
+    const sr = result.stellarResult as {
+      txHash: string;
+      status: string;
+      resultXdr?: string;
+    };
+
+    logger.withContext().info("Transaction submitted successfully", {
+      txHash: sr.txHash,
+      status: sr.status,
     });
 
     res.json({
       success: true,
-      txHash: result.stellarResult.txHash,
-      status: result.stellarResult.status,
-      ...(result.stellarResult.resultXdr
-        ? { resultXdr: result.stellarResult.resultXdr }
-        : {}),
+      txHash: sr.txHash,
+      status: sr.status,
+      ...(sr.resultXdr ? { resultXdr: sr.resultXdr } : {}),
     });
   },
 );

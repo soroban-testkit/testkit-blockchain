@@ -19,6 +19,7 @@ import {
 import { sorobanService } from "./sorobanService.js";
 import { updateUserScoresBulk } from "./scoresService.js";
 import { AppError } from "../errors/AppError.js";
+import { recordIndexerLedgers } from "../middleware/metrics.js";
 
 const EVENT_TYPE_ALIASES: Record<string, WebhookEventType> = {
   Mint: "NFTMinted",
@@ -33,6 +34,8 @@ const EVENT_TYPE_ALIASES: Record<string, WebhookEventType> = {
   GovCncl: "ProposalCancelled",
   GovEmerg: "ProposalCancelled",
   GovExp: "ProposalCancelled",
+  ColDep: "CollateralDeposited",
+  ColRel: "CollateralReleased",
 };
 
 const ADMIN_CONFIG_EVENT_TYPES: ReadonlySet<WebhookEventType> = new Set([
@@ -66,6 +69,14 @@ interface ContractEvent extends IndexedLoanEvent {
   amount?: string;
   loanId?: number;
   address?: string;
+  /**
+   * Admin address captured from the LoanApprv event topic[1].
+   * Used to record the approving admin in audit_logs (actor field).
+   * Only populated for LoanApprv events.
+   */
+  adminAddress?: string;
+  /** Borrower refund amount decoded from a LoanLiquidated event value tuple (index 2). */
+  borrowerRefund?: string;
   ledger: number;
   ledgerClosedAt: Date;
   txHash: string;
@@ -162,7 +173,9 @@ export class EventIndexer {
 
   async start(): Promise<void> {
     if (this.running) {
-      logger.warn("Indexer start requested while already running");
+      logger
+        .withContext()
+        .warn("Indexer start requested while already running");
       return;
     }
 
@@ -183,7 +196,9 @@ export class EventIndexer {
       try {
         await this.activePollPromise;
       } catch (error) {
-        logger.warn("Indexer stop awaited a failing poll iteration", { error });
+        logger
+          .withContext()
+          .warn("Indexer stop awaited a failing poll iteration", { error });
       } finally {
         this.activePollPromise = null;
       }
@@ -239,7 +254,7 @@ export class EventIndexer {
         this.activePollPromise = pollPromise;
         await pollPromise;
       } catch (error) {
-        logger.error("Indexer poll iteration failed", { error });
+        logger.withContext().error("Indexer poll iteration failed", { error });
       } finally {
         if (this.activePollPromise === pollPromise) {
           this.activePollPromise = null;
@@ -256,6 +271,7 @@ export class EventIndexer {
     const latestLedger = await this.getLatestLedgerSequence();
 
     if (latestLedger <= lastIndexedLedger) {
+      recordIndexerLedgers(lastIndexedLedger, latestLedger);
       return;
     }
 
@@ -264,6 +280,7 @@ export class EventIndexer {
 
     const result = await this.processChunk(fromLedger, toLedger);
     await this.updateLastIndexedLedger(result.lastProcessedLedger);
+    recordIndexerLedgers(result.lastProcessedLedger, latestLedger);
   }
 
   private async getLatestLedgerSequence(): Promise<number> {
@@ -280,7 +297,9 @@ export class EventIndexer {
 
       return Number.isFinite(sequence) && sequence > 0 ? sequence : 0;
     } catch (error) {
-      logger.warn("Failed to fetch latest ledger sequence", { error });
+      logger
+        .withContext()
+        .warn("Failed to fetch latest ledger sequence", { error });
       return 0;
     }
   }
@@ -337,7 +356,7 @@ export class EventIndexer {
 
     return runWithRequestContext(correlationId, async () => {
       if (endLedger < startLedger) {
-        logger.warn("Skipping invalid ledger range", {
+        logger.withContext().warn("Skipping invalid ledger range", {
           startLedger,
           endLedger,
         });
@@ -367,7 +386,7 @@ export class EventIndexer {
           startLedger,
         );
 
-        logger.info("Indexer processed chunk", {
+        logger.withContext().info("Indexer processed chunk", {
           startLedger,
           endLedger,
           fetchedEvents: events.length,
@@ -380,7 +399,7 @@ export class EventIndexer {
           insertedEvents: storeResult.insertedCount,
         };
       } catch (error) {
-        logger.error("Error processing event chunk", {
+        logger.withContext().error("Error processing event chunk", {
           startLedger,
           endLedger,
           error,
@@ -448,7 +467,7 @@ export class EventIndexer {
           parsedEvents.push(parsed);
         }
       } catch (error) {
-        logger.warn("Failed to parse event", {
+        logger.withContext().warn("Failed to parse event", {
           eventId: event.id,
           error,
         });
@@ -534,6 +553,35 @@ export class EventIndexer {
             );
           }
 
+          /**
+           * LoanApprv audit row — records which admin approved a loan.
+           *
+           * audit_logs shape:
+           *   actor     — admin Stellar address (topic[1] of the LoanApprv event)
+           *   action    — 'loan_approved'
+           *   target    — 'loan:<loanId>'
+           *   payload   — { eventId, loanId, borrower, txHash }
+           *   ip_address — null (on-chain action, no HTTP request IP)
+           */
+          if (event.eventType === "LoanApprv") {
+            await client.query(
+              `INSERT INTO audit_logs (actor, action, target, payload, ip_address)
+               VALUES ($1, $2, $3, $4::jsonb, $5)`,
+              [
+                event.adminAddress ?? "SYSTEM",
+                "loan_approved",
+                `loan:${event.loanId ?? "unknown"}`,
+                JSON.stringify({
+                  eventId: event.eventId,
+                  loanId: event.loanId ?? null,
+                  borrower: event.address ?? null,
+                  txHash: event.txHash,
+                }),
+                null,
+              ],
+            );
+          }
+
           // Aggregate score deltas per borrower; a single bulk upsert at
           // the end of the transaction avoids N+1 score updates.
           if (event.eventType === "LoanRepaid") {
@@ -570,7 +618,7 @@ export class EventIndexer {
 
     for (const event of insertedEvents) {
       webhookService.dispatch(event).catch((error) => {
-        logger.error("Webhook dispatch failed", {
+        logger.withContext().error("Webhook dispatch failed", {
           eventId: event.eventId,
           error,
         });
@@ -588,7 +636,7 @@ export class EventIndexer {
       });
 
       this.triggerNotification(event).catch((error) => {
-        logger.error("Notification trigger failed", {
+        logger.withContext().error("Notification trigger failed", {
           eventId: event.eventId,
           error,
         });
@@ -609,11 +657,14 @@ export class EventIndexer {
     let amount: string | undefined;
     let interestRateBps: number | undefined;
     let termLedgers: number | undefined;
+    let borrowerRefund: string | undefined;
 
     if (type === "LoanRequested") {
-      // (type, borrower), amount
-      if (!event.topic[1]) return null;
-      address = this.decodeAddress(event.topic[1]);
+      // (type, loan_id, borrower), amount
+      if (!event.topic[1] || !event.topic[2]) return null;
+      loanId = this.decodeLoanId(event.topic[1]);
+      if (loanId === undefined) return null;
+      address = this.decodeAddress(event.topic[2]);
       amount = this.decodeAmount(event.value);
     } else if (type === "LoanApproved") {
       // (type, loan_id, borrower), [interest_rate_bps, term_ledgers]
@@ -744,7 +795,10 @@ export class EventIndexer {
         amount = data[1].toString();
       }
     } else if (type === "MinScoreUpdated") {
-      // (type), [old_score, new_score]
+      // (type, admin), [old_score, new_score]
+      if (event.topic[1]) {
+        address = this.decodeAddress(event.topic[1]);
+      }
       amount = this.decodeTupleSecondNumericValue(event.value);
     } else if (type === "InterestRateUpdated") {
       // (type), [old_rate, new_rate]
@@ -808,15 +862,18 @@ export class EventIndexer {
       address = this.decodeTupleSecondAddress(event.value);
     } else if (type === "PoolPaused" || type === "PoolUnpaused") {
       // (type)
-    } else if (type === "ColDep" || type === "ColRel") {
-      // (loan_id, borrower), amount
+    } else if (
+      type === "CollateralDeposited" ||
+      type === "CollateralReleased"
+    ) {
+      // (type, borrower, loan_id), amount/()
       if (event.topic[1]) {
-        loanId = this.decodeLoanId(event.topic[1]);
+        address = this.decodeAddress(event.topic[1]);
       }
       if (event.topic[2]) {
-        address = this.decodeAddress(event.topic[2]);
+        loanId = this.decodeLoanId(event.topic[2]);
       }
-      if (type === "ColDep") {
+      if (type === "CollateralDeposited") {
         amount = this.decodeAmount(event.value);
       }
     } else if (type === "ScoreDecr") {
@@ -829,17 +886,30 @@ export class EventIndexer {
       }
     } else if (type === "LoanApprv") {
       // (type, admin), (loan_id, borrower)
+      // topic[1] = admin address who approved the loan
       const data = scValToNative(event.value);
       if (Array.isArray(data) && data.length >= 2) {
         loanId = Number(data[0]);
-        address = data[1].toString();
+        address = data[1].toString(); // borrower
       }
+      // adminAddress is decoded separately and attached below
     } else if (type === "LoanLiquidated") {
       // (type, loan_id, borrower, liquidator), (debt_repaid, liquidator_bonus, borrower_refund)
       if (!event.topic[1] || !event.topic[2]) return null;
       loanId = this.decodeLoanId(event.topic[1]);
       address = this.decodeAddress(event.topic[2]);
       amount = this.decodeTupleFirstNumericValue(event.value);
+      borrowerRefund = this.decodeTupleThirdNumericValue(event.value);
+    }
+
+    // Decode admin address for LoanApprv events (topic[1] = approving admin)
+    let adminAddress: string | undefined;
+    if (type === "LoanApprv" && event.topic[1]) {
+      try {
+        adminAddress = this.decodeAddress(event.topic[1]);
+      } catch {
+        // Admin address decode failed; audit row will fall back to "SYSTEM"
+      }
     }
 
     return {
@@ -856,6 +926,8 @@ export class EventIndexer {
       ...(interestRateBps !== undefined ? { interestRateBps } : {}),
       ...(termLedgers !== undefined ? { termLedgers } : {}),
       ...(address !== undefined ? { address } : {}),
+      ...(adminAddress !== undefined ? { adminAddress } : {}),
+      ...(borrowerRefund !== undefined ? { borrowerRefund } : {}),
     };
   }
 
@@ -871,12 +943,14 @@ export class EventIndexer {
            updated_at = CURRENT_TIMESTAMP`,
         [userId, 500 + delta, delta],
       );
-      logger.info("Updated user score from indexed event", {
+      logger.withContext().info("Updated user score from indexed event", {
         userId,
         delta,
       });
     } catch (error) {
-      logger.error("Failed to update user score", { userId, error });
+      logger
+        .withContext()
+        .error("Failed to update user score", { userId, error });
     }
   }
 
@@ -916,6 +990,18 @@ export class EventIndexer {
           ? `Collateral for loan #${event.loanId} has been seized due to default.`
           : "Collateral has been seized due to a loan default.";
         break;
+      case "LoanLiquidated": {
+        type = "loan_liquidated";
+        title = "Loan Liquidated";
+        const refundPart =
+          event.borrowerRefund && BigInt(event.borrowerRefund) > 0n
+            ? `A refund of ${event.borrowerRefund} has been returned to you.`
+            : "No refund is owed.";
+        message = event.loanId
+          ? `Loan #${event.loanId} has been liquidated. Your debt has been cleared. ${refundPart}`
+          : `Your loan has been liquidated. Your debt has been cleared. ${refundPart}`;
+        break;
+      }
       default:
         return;
     }
@@ -981,6 +1067,18 @@ export class EventIndexer {
     return undefined;
   }
 
+  private decodeTupleThirdNumericValue(value: xdr.ScVal): string | undefined {
+    const native = scValToNative(value);
+    if (!Array.isArray(native) || native.length < 3) {
+      return undefined;
+    }
+    const third = native[2];
+    if (typeof third === "bigint" || typeof third === "number") {
+      return third.toString();
+    }
+    return undefined;
+  }
+
   private decodeTupleSecondAddress(value: xdr.ScVal): string | undefined {
     const native = scValToNative(value);
     if (!Array.isArray(native) || native.length < 2) {
@@ -1023,7 +1121,7 @@ export class EventIndexer {
       contractId: event.contractId,
     };
 
-    logger.warn("Quarantining malformed event", {
+    logger.withContext().warn("Quarantining malformed event", {
       eventId: event.id,
       ledger: event.ledger,
       txHash: event.txHash,
@@ -1046,7 +1144,7 @@ export class EventIndexer {
         ],
       );
     } catch (dbError) {
-      logger.error("Failed to quarantine malformed event", {
+      logger.withContext().error("Failed to quarantine malformed event", {
         eventId: event.id,
         dbError,
       });
@@ -1063,7 +1161,7 @@ export class EventIndexer {
       const previousCount = this.lastObservedQuarantineCount;
 
       if (totalCount > previousCount) {
-        logger.warn("Quarantine event count increased", {
+        logger.withContext().warn("Quarantine event count increased", {
           previousCount,
           totalCount,
           delta: totalCount - previousCount,
@@ -1074,16 +1172,20 @@ export class EventIndexer {
           previousCount < this.quarantineAlertThreshold &&
           totalCount >= this.quarantineAlertThreshold
         ) {
-          logger.error("Quarantine event count exceeded alert threshold", {
-            threshold: this.quarantineAlertThreshold,
-            totalCount,
-          });
+          logger
+            .withContext()
+            .error("Quarantine event count exceeded alert threshold", {
+              threshold: this.quarantineAlertThreshold,
+              totalCount,
+            });
         }
       }
 
       this.lastObservedQuarantineCount = Math.max(previousCount, totalCount);
     } catch (error) {
-      logger.error("Failed to check quarantine event count", { error });
+      logger
+        .withContext()
+        .error("Failed to check quarantine event count", { error });
     }
   }
 

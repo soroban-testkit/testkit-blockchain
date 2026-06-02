@@ -66,9 +66,9 @@ beforeAll(async () => {
 
   jest.unstable_mockModule("../cacheService.js", () => ({
     cacheService: {
-      get: jest.fn<any>().mockResolvedValue(null),
-      set: jest.fn<any>().mockResolvedValue(undefined),
-      delete: jest.fn<any>().mockResolvedValue(undefined),
+      get: jest.fn<() => Promise<null>>().mockResolvedValue(null),
+      set: jest.fn<() => Promise<void>>().mockResolvedValue(undefined),
+      delete: jest.fn<() => Promise<void>>().mockResolvedValue(undefined),
     },
   }));
 
@@ -79,14 +79,17 @@ beforeAll(async () => {
     TRANSIENT_ERROR_CODES: new Set(),
   }));
 
-  jest.unstable_mockModule("../../utils/logger.js", () => ({
-    default: {
+  jest.unstable_mockModule("../../utils/logger.js", () => {
+    const mockLogger = {
       info: mockLoggerInfo,
       error: mockLoggerError,
       warn: jest.fn(),
       debug: jest.fn(),
-    },
-  }));
+      withContext: jest.fn(),
+    };
+    mockLogger.withContext.mockImplementation(() => mockLogger);
+    return { default: mockLogger };
+  });
 
   jest.unstable_mockModule("../cacheService.js", () => ({
     cacheService: {

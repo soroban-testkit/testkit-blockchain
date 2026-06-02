@@ -9,6 +9,8 @@ export const SUPPORTED_WEBHOOK_EVENT_TYPES = [
   "LoanDefaulted",
   "CollateralLiquidated",
   "CollateralReturned",
+  "CollateralDeposited",
+  "CollateralReleased",
   "ColDep",
   "ColRel",
   "LateFeeCharged",
@@ -223,12 +225,14 @@ function prepareWebhookPayload(
       );
     }
 
-    logger.warn("Webhook payload exceeds size limit, sending summary payload", {
-      eventId,
-      eventType,
-      payloadBytes,
-      maxPayloadBytes,
-    });
+    logger
+      .withContext()
+      .warn("Webhook payload exceeds size limit, sending summary payload", {
+        eventId,
+        eventType,
+        payloadBytes,
+        maxPayloadBytes,
+      });
 
     return {
       body: summarizedBody,
@@ -237,7 +241,7 @@ function prepareWebhookPayload(
   }
 
   if (payloadBytes >= Math.floor(maxPayloadBytes * 0.9)) {
-    logger.warn("Webhook payload is near size limit", {
+    logger.withContext().warn("Webhook payload is near size limit", {
       eventId,
       eventType,
       payloadBytes,
@@ -266,7 +270,10 @@ async function postWebhook(
       method: "POST",
       headers: {
         "content-type": "application/json",
-        ...(signature && { "x-remitlend-signature": signature }),
+        // X-RemitLend-Signature uses the GitHub/Stripe-style "sha256=<hex>"
+        // format so subscribers can verify payload integrity (see
+        // docs/wiki/webhook-signatures.md for the verification recipe).
+        ...(signature && { "x-remitlend-signature": `sha256=${signature}` }),
       },
       body,
       signal: controller.signal,
@@ -302,7 +309,7 @@ export const getRetryDelayMs = (attemptNumber: number): number => {
 export class WebhookService {
   // Retry processor that polls for pending retries
   static async processRetries(): Promise<void> {
-    logger.info("Starting webhook retry processor");
+    logger.withContext().info("Starting webhook retry processor");
 
     try {
       const now = new Date();
@@ -325,7 +332,9 @@ export class WebhookService {
         return;
       }
 
-      logger.info(`Processing ${result.rows.length} pending webhook retries`);
+      logger
+        .withContext()
+        .info(`Processing ${result.rows.length} pending webhook retries`);
 
       for (const row of result.rows) {
         const delivery = row as unknown as {
@@ -338,6 +347,12 @@ export class WebhookService {
           payload: Record<string, unknown>;
           attempt_count: number;
         };
+        // Defensive circuit breaker: the SQL filter above already excludes
+        // deliveries at the retry ceiling, but guard here too so a delivery
+        // at MAX_RETRY_ATTEMPTS is never re-sent even if it slips through.
+        if (delivery.attempt_count >= MAX_RETRY_ATTEMPTS) {
+          continue;
+        }
         await WebhookService.retryWebhookDelivery(
           delivery.id,
           delivery.subscription_id,
@@ -350,7 +365,7 @@ export class WebhookService {
         );
       }
     } catch (error) {
-      logger.error("Error in webhook retry processor", { error });
+      logger.withContext().error("Error in webhook retry processor", { error });
     }
   }
 
@@ -399,7 +414,7 @@ export class WebhookService {
           ],
         );
 
-        logger.info("Webhook delivery succeeded after retry", {
+        logger.withContext().info("Webhook delivery succeeded after retry", {
           deliveryId,
           subscriptionId,
           eventId,
@@ -432,26 +447,27 @@ export class WebhookService {
         );
 
         if (nextRetryTime) {
-          logger.warn("Webhook delivery failed, scheduled retry", {
-            deliveryId,
-            subscriptionId,
-            eventId,
-            attemptCount: newAttemptCount,
-            statusCode: response.status,
-            nextRetryAt: nextRetryTime,
-          });
+          logger
+            .withContext()
+            .warn("Webhook delivery failed, scheduled retry", {
+              deliveryId,
+              subscriptionId,
+              eventId,
+              attemptCount: newAttemptCount,
+              statusCode: response.status,
+              nextRetryAt: nextRetryTime,
+            });
         } else {
-          logger.error(
-            "Webhook delivery permanently failed after max retries",
-            {
+          logger
+            .withContext()
+            .error("Webhook delivery permanently failed after max retries", {
               deliveryId,
               subscriptionId,
               eventId,
               attemptCount: newAttemptCount,
               statusCode: response.status,
               payload: body,
-            },
-          );
+            });
         }
       }
     } catch (error) {
@@ -475,7 +491,7 @@ export class WebhookService {
       );
 
       if (nextRetryTime) {
-        logger.warn("Webhook delivery error, scheduled retry", {
+        logger.withContext().warn("Webhook delivery error, scheduled retry", {
           deliveryId,
           subscriptionId,
           eventId,
@@ -484,13 +500,15 @@ export class WebhookService {
           nextRetryAt: nextRetryTime,
         });
       } else {
-        logger.error("Webhook delivery permanently failed after max retries", {
-          deliveryId,
-          subscriptionId,
-          eventId,
-          attemptCount: newAttemptCount,
-          error,
-        });
+        logger
+          .withContext()
+          .error("Webhook delivery permanently failed after max retries", {
+            deliveryId,
+            subscriptionId,
+            eventId,
+            attemptCount: newAttemptCount,
+            error,
+          });
       }
     }
   }
@@ -558,7 +576,7 @@ export class WebhookService {
   }
 
   async dispatch(event: IndexedLoanEvent): Promise<void> {
-    logger.info("Dispatching webhook event", {
+    logger.withContext().info("Dispatching webhook event", {
       eventId: event.eventId,
       eventType: event.eventType,
       loanId: event.loanId,
@@ -589,7 +607,7 @@ export class WebhookService {
         ),
       );
     } catch (error) {
-      logger.error("Error during webhook dispatch", {
+      logger.withContext().error("Error during webhook dispatch", {
         eventId: event.eventId,
         eventType: event.eventType,
         error,
@@ -663,7 +681,7 @@ export class WebhookService {
           ],
         );
 
-        logger.warn("Webhook delivery failed, scheduled retry", {
+        logger.withContext().warn("Webhook delivery failed, scheduled retry", {
           subscriptionId,
           callbackUrl,
           eventId: payload.payload.eventId,
@@ -695,7 +713,7 @@ export class WebhookService {
         ],
       );
 
-      logger.error("Failed to send webhook, scheduled retry", {
+      logger.withContext().error("Failed to send webhook, scheduled retry", {
         subscriptionId,
         callbackUrl,
         eventId: payload.payload.eventId,

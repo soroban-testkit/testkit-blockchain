@@ -33,6 +33,78 @@ class SorobanService {
     return result.connected ? "ok" : "error";
   }
 
+  async buildCancelLoanTx(
+    borrower: string,
+    loanId: string,
+  ): Promise<{ unsignedTxXdr: string; networkPassphrase: string }> {
+    const server = this.getRpcServer();
+    const contractId = this.getLoanManagerContractId();
+    const passphrase = this.getNetworkPassphrase();
+
+    const account = await server.getAccount(borrower);
+
+    const borrowerScVal = nativeToScVal(Address.fromString(borrower), {
+      type: "address",
+    });
+    const loanIdScVal = nativeToScVal(loanId, { type: "symbol" });
+
+    const tx = new TransactionBuilder(account, {
+      fee: BASE_FEE,
+      networkPassphrase: passphrase,
+    })
+      .addOperation(
+        Operation.invokeContractFunction({
+          contract: contractId,
+          function: "cancel_loan",
+          args: [borrowerScVal, loanIdScVal],
+        }),
+      )
+      .setTimeout(30)
+      .build();
+
+    const prepared = await server.prepareTransaction(tx);
+    const unsignedTxXdr = prepared.toXDR();
+
+    return { unsignedTxXdr, networkPassphrase: passphrase };
+  }
+
+  async buildRejectLoanTx(
+    adminPublicKey: string,
+    loanId: string,
+    reason: string,
+  ): Promise<{ unsignedTxXdr: string; networkPassphrase: string }> {
+    const server = this.getRpcServer();
+    const contractId = this.getLoanManagerContractId();
+    const passphrase = this.getNetworkPassphrase();
+
+    const account = await server.getAccount(adminPublicKey);
+
+    const adminScVal = nativeToScVal(Address.fromString(adminPublicKey), {
+      type: "address",
+    });
+    const loanIdScVal = nativeToScVal(loanId, { type: "symbol" });
+    const reasonScVal = nativeToScVal(reason, { type: "string" });
+
+    const tx = new TransactionBuilder(account, {
+      fee: BASE_FEE,
+      networkPassphrase: passphrase,
+    })
+      .addOperation(
+        Operation.invokeContractFunction({
+          contract: contractId,
+          function: "reject_loan",
+          args: [adminScVal, loanIdScVal, reasonScVal],
+        }),
+      )
+      .setTimeout(30)
+      .build();
+
+    const prepared = await server.prepareTransaction(tx);
+    const unsignedTxXdr = prepared.toXDR();
+
+    return { unsignedTxXdr, networkPassphrase: passphrase };
+  }
+
   private getNetworkPassphrase(): string {
     return getStellarNetworkPassphrase();
   }
@@ -164,7 +236,7 @@ class SorobanService {
     const prepared = await server.prepareTransaction(tx);
     const unsignedTxXdr = prepared.toXDR();
 
-    logger.info("Built request_loan transaction", {
+    logger.withContext().info("Built request_loan transaction", {
       borrower: borrowerPublicKey,
       amount,
     });
@@ -210,7 +282,7 @@ class SorobanService {
     const prepared = await server.prepareTransaction(tx);
     const unsignedTxXdr = prepared.toXDR();
 
-    logger.info("Built repay transaction", {
+    logger.withContext().info("Built repay transaction", {
       borrower: borrowerPublicKey,
       loanId,
       amount,
@@ -260,7 +332,7 @@ class SorobanService {
     const prepared = await server.prepareTransaction(tx);
     const unsignedTxXdr = prepared.toXDR();
 
-    logger.info("Built deposit transaction", {
+    logger.withContext().info("Built deposit transaction", {
       provider: providerPublicKey,
       token: tokenAddress,
       amount,
@@ -310,7 +382,57 @@ class SorobanService {
     const prepared = await server.prepareTransaction(tx);
     const unsignedTxXdr = prepared.toXDR();
 
-    logger.info("Built withdraw transaction", {
+    logger.withContext().info("Built withdraw transaction", {
+      provider: providerPublicKey,
+      token: tokenAddress,
+      shares,
+    });
+
+    return { unsignedTxXdr, networkPassphrase: passphrase };
+  }
+
+  /**
+   * Builds an unsigned Soroban `emergency_withdraw(provider, token, shares)` transaction
+   * against the LendingPool contract. Bypasses the withdrawal cooldown as a safety valve.
+   * Returns base64 XDR for the frontend to sign with the user's wallet.
+   */
+  async buildEmergencyWithdrawTx(
+    providerPublicKey: string,
+    tokenAddress: string,
+    shares: number,
+  ): Promise<{ unsignedTxXdr: string; networkPassphrase: string }> {
+    const server = this.getRpcServer();
+    const contractId = this.getLendingPoolContractId();
+    const passphrase = this.getNetworkPassphrase();
+
+    const account = await server.getAccount(providerPublicKey);
+
+    const providerScVal = nativeToScVal(Address.fromString(providerPublicKey), {
+      type: "address",
+    });
+    const tokenScVal = nativeToScVal(Address.fromString(tokenAddress), {
+      type: "address",
+    });
+    const sharesScVal = nativeToScVal(BigInt(shares), { type: "i128" });
+
+    const tx = new TransactionBuilder(account, {
+      fee: BASE_FEE,
+      networkPassphrase: passphrase,
+    })
+      .addOperation(
+        Operation.invokeContractFunction({
+          contract: contractId,
+          function: "emergency_withdraw",
+          args: [providerScVal, tokenScVal, sharesScVal],
+        }),
+      )
+      .setTimeout(30)
+      .build();
+
+    const prepared = await server.prepareTransaction(tx);
+    const unsignedTxXdr = prepared.toXDR();
+
+    logger.info("Built emergency_withdraw transaction", {
       provider: providerPublicKey,
       token: tokenAddress,
       shares,
@@ -353,7 +475,7 @@ class SorobanService {
     const prepared = await server.prepareTransaction(tx);
     const unsignedTxXdr = prepared.toXDR();
 
-    logger.info("Built approve_loan transaction", {
+    logger.withContext().info("Built approve_loan transaction", {
       admin: adminPublicKey,
       loanId,
     });
@@ -396,7 +518,7 @@ class SorobanService {
     const prepared = await server.prepareTransaction(tx);
     const unsignedTxXdr = prepared.toXDR();
 
-    logger.info("Built deposit_collateral transaction", {
+    logger.withContext().info("Built deposit_collateral transaction", {
       borrower: borrowerPublicKey,
       loanId,
       amount,
@@ -438,7 +560,7 @@ class SorobanService {
     const prepared = await server.prepareTransaction(tx);
     const unsignedTxXdr = prepared.toXDR();
 
-    logger.info("Built release_collateral transaction", {
+    logger.withContext().info("Built release_collateral transaction", {
       borrower: borrowerPublicKey,
       loanId,
     });
@@ -483,7 +605,7 @@ class SorobanService {
     const prepared = await server.prepareTransaction(tx);
     const unsignedTxXdr = prepared.toXDR();
 
-    logger.info("Built refinance_loan transaction", {
+    logger.withContext().info("Built refinance_loan transaction", {
       borrower: borrowerPublicKey,
       loanId,
       newAmount,
@@ -531,7 +653,7 @@ class SorobanService {
     const prepared = await server.prepareTransaction(tx);
     const unsignedTxXdr = prepared.toXDR();
 
-    logger.info("Built extend_loan transaction", {
+    logger.withContext().info("Built extend_loan transaction", {
       borrower: borrowerPublicKey,
       loanId,
       extraLedgers,
@@ -579,7 +701,7 @@ class SorobanService {
     const prepared = await server.prepareTransaction(tx);
     const unsignedTxXdr = prepared.toXDR();
 
-    logger.info("Built liquidate transaction", {
+    logger.withContext().info("Built liquidate transaction", {
       liquidator: liquidatorPublicKey,
       loanId,
     });
@@ -635,7 +757,7 @@ class SorobanService {
       );
     }
 
-    logger.info("Soroban configuration validated", {
+    logger.withContext().info("Soroban configuration validated", {
       loanManagerContractId: process.env.LOAN_MANAGER_CONTRACT_ID,
       lendingPoolContractId: process.env.LENDING_POOL_CONTRACT_ID,
       rpcUrl,
@@ -665,7 +787,7 @@ class SorobanService {
       throw AppError.internal("Transaction submission returned no hash");
     }
 
-    logger.info("Transaction submitted", {
+    logger.withContext().info("Transaction submitted", {
       txHash,
       status: sendResult.status,
     });
@@ -740,18 +862,22 @@ class SorobanService {
         break;
       }
 
-      logger.warn("Retrying get_score simulation after transient RPC failure", {
-        borrower: userPublicKey,
-        attempt,
-        error: message,
-      });
+      logger
+        .withContext()
+        .warn("Retrying get_score simulation after transient RPC failure", {
+          borrower: userPublicKey,
+          attempt,
+          error: message,
+        });
     }
 
     if (!simulation) {
-      logger.warn("Falling back to default credit score: empty simulation", {
-        borrower: userPublicKey,
-        defaultScore,
-      });
+      logger
+        .withContext()
+        .warn("Falling back to default credit score: empty simulation", {
+          borrower: userPublicKey,
+          defaultScore,
+        });
       return defaultScore;
     }
 
@@ -761,7 +887,7 @@ class SorobanService {
         this.isMissingScoreError(message) ||
         this.isTransientRpcError(message)
       ) {
-        logger.warn("Falling back to default credit score", {
+        logger.withContext().warn("Falling back to default credit score", {
           borrower: userPublicKey,
           defaultScore,
           reason: message,
@@ -776,21 +902,25 @@ class SorobanService {
 
     const retval = simulation.result?.retval;
     if (!retval) {
-      logger.warn("Falling back to default credit score: no score returned", {
-        borrower: userPublicKey,
-        defaultScore,
-      });
+      logger
+        .withContext()
+        .warn("Falling back to default credit score: no score returned", {
+          borrower: userPublicKey,
+          defaultScore,
+        });
       return defaultScore;
     }
 
     const nativeScore = scValToNative(retval);
     const score = Number(nativeScore);
     if (!Number.isFinite(score)) {
-      logger.warn("Falling back to default credit score: invalid score value", {
-        borrower: userPublicKey,
-        defaultScore,
-        nativeScore,
-      });
+      logger
+        .withContext()
+        .warn("Falling back to default credit score: invalid score value", {
+          borrower: userPublicKey,
+          defaultScore,
+          nativeScore,
+        });
       return defaultScore;
     }
 
@@ -871,6 +1001,104 @@ class SorobanService {
     return entries;
   }
 
+  private stringifyBytes(value: unknown): string {
+    if (typeof value === "string") return value;
+    if (value instanceof Uint8Array) {
+      return Array.from(value)
+        .map((byte) => byte.toString(16).padStart(2, "0"))
+        .join("");
+    }
+    if (
+      Array.isArray(value) &&
+      value.every((item) => typeof item === "number")
+    ) {
+      return value.map((byte) => byte.toString(16).padStart(2, "0")).join("");
+    }
+    if (value && typeof value === "object" && "toString" in value) {
+      return String(value);
+    }
+    return "";
+  }
+
+  private async simulateRemittanceNftRead(
+    functionName: string,
+    userPublicKey: string,
+    extraArgs: ReturnType<typeof nativeToScVal>[] = [],
+  ): Promise<unknown> {
+    const server = this.getRpcServer();
+    const contractId = this.getRemittanceNftContractId();
+    const passphrase = this.getNetworkPassphrase();
+    const source = this.getScoreReadSourceKeypair();
+
+    const account = await server.getAccount(source.publicKey());
+    const userScVal = nativeToScVal(Address.fromString(userPublicKey), {
+      type: "address",
+    });
+
+    const tx = new TransactionBuilder(account, {
+      fee: BASE_FEE,
+      networkPassphrase: passphrase,
+    })
+      .addOperation(
+        Operation.invokeContractFunction({
+          contract: contractId,
+          function: functionName,
+          args: [userScVal, ...extraArgs],
+        }),
+      )
+      .setTimeout(30)
+      .build();
+
+    const simulation = await server.simulateTransaction(tx);
+    if ("error" in simulation) {
+      throw AppError.internal(
+        `Failed to simulate ${functionName} for ${userPublicKey}: ${String(simulation.error ?? "")}`,
+      );
+    }
+
+    return simulation.result?.retval
+      ? scValToNative(simulation.result.retval)
+      : null;
+  }
+
+  async getRemittanceNftMetadata(userPublicKey: string): Promise<{
+    score: number;
+    historyHash: string;
+    metadataUri: string;
+    defaultCount: number;
+    transferCooldownRemaining: number;
+    lastUpdateLedger: number;
+  } | null> {
+    const nativeMetadata = (await this.simulateRemittanceNftRead(
+      "get_metadata",
+      userPublicKey,
+    )) as Record<string, unknown> | null;
+
+    if (!nativeMetadata) {
+      return null;
+    }
+
+    const [defaultCountNative, cooldownNative, history] = await Promise.all([
+      this.simulateRemittanceNftRead("get_default_count", userPublicKey),
+      this.simulateRemittanceNftRead(
+        "get_transfer_cooldown_remaining",
+        userPublicKey,
+      ),
+      this.getOnChainScoreHistory(userPublicKey).catch(() => []),
+    ]);
+
+    const latestHistoryEntry = history[history.length - 1];
+
+    return {
+      score: Number(nativeMetadata.score ?? 0),
+      historyHash: this.stringifyBytes(nativeMetadata.history_hash),
+      metadataUri: String(nativeMetadata.metadata_uri ?? ""),
+      defaultCount: Number(defaultCountNative ?? 0),
+      transferCooldownRemaining: Number(cooldownNative ?? 0),
+      lastUpdateLedger: Number(latestHistoryEntry?.timestamp ?? 0),
+    };
+  }
+
   /**
    * Ping the Stellar RPC server to verify connectivity.
    * Calls getLatestLedger() with a 5-second timeout.
@@ -893,7 +1121,7 @@ class SorobanService {
 
       return await Promise.race([
         ledgerPromise,
-        timeoutPromise as Promise<any>,
+        timeoutPromise as Promise<never>,
       ]);
     } catch (error) {
       return {
@@ -901,6 +1129,57 @@ class SorobanService {
         error: error instanceof Error ? error.message : String(error),
       };
     }
+  }
+
+  /**
+   * Reads the current LP share price from the LendingPool contract.
+   * Returns the on-chain value scaled by SHARE_PRICE_SCALE (1_000_000 = 1.0).
+   */
+  async getSharePrice(tokenAddress?: string): Promise<number> {
+    const server = this.getRpcServer();
+    const token = tokenAddress ?? this.getPoolTokenAddress();
+    const poolId = this.getLendingPoolContractId();
+    const passphrase = this.getNetworkPassphrase();
+    const source = this.getScoreReadSourceKeypair();
+
+    const account = await server.getAccount(source.publicKey());
+    const tokenScVal = nativeToScVal(Address.fromString(token), {
+      type: "address",
+    });
+
+    const tx = new TransactionBuilder(account, {
+      fee: BASE_FEE,
+      networkPassphrase: passphrase,
+    })
+      .addOperation(
+        Operation.invokeContractFunction({
+          contract: poolId,
+          function: "get_share_price",
+          args: [tokenScVal],
+        }),
+      )
+      .setTimeout(30)
+      .build();
+
+    const simulation = await server.simulateTransaction(tx);
+    if ("error" in simulation) {
+      throw AppError.internal(
+        `Failed to simulate get_share_price: ${simulation.error}`,
+      );
+    }
+
+    const retval = simulation.result?.retval;
+    if (!retval) {
+      throw AppError.internal("No share price returned by lending pool");
+    }
+
+    const nativePrice = scValToNative(retval);
+    const price = Number(nativePrice);
+    if (!Number.isFinite(price)) {
+      throw AppError.internal("Invalid on-chain share price returned");
+    }
+
+    return price;
   }
 
   /**
@@ -952,6 +1231,50 @@ class SorobanService {
     }
 
     return balance;
+  }
+
+  async getWithdrawalCooldownLedgers(): Promise<number> {
+    const server = this.getRpcServer();
+    const poolId = this.getLendingPoolContractId();
+    const passphrase = this.getNetworkPassphrase();
+    const source = this.getScoreReadSourceKeypair();
+
+    const account = await server.getAccount(source.publicKey());
+    const tx = new TransactionBuilder(account, {
+      fee: BASE_FEE,
+      networkPassphrase: passphrase,
+    })
+      .addOperation(
+        Operation.invokeContractFunction({
+          contract: poolId,
+          function: "get_withdrawal_cooldown",
+          args: [],
+        }),
+      )
+      .setTimeout(30)
+      .build();
+
+    const simulation = await server.simulateTransaction(tx);
+    if ("error" in simulation) {
+      throw AppError.internal(
+        `Failed to simulate get_withdrawal_cooldown: ${simulation.error}`,
+      );
+    }
+
+    const retval = simulation.result?.retval;
+    if (!retval) {
+      throw AppError.internal(
+        "No withdrawal cooldown returned by lending pool",
+      );
+    }
+
+    const nativeCooldown = scValToNative(retval);
+    const cooldown = Number(nativeCooldown);
+    if (!Number.isFinite(cooldown)) {
+      throw AppError.internal("Invalid withdrawal cooldown returned");
+    }
+
+    return cooldown;
   }
 
   /**
@@ -1014,7 +1337,7 @@ class SorobanService {
       }
     }
 
-    logger.info("Score delta configuration validated", {
+    logger.withContext().info("Score delta configuration validated", {
       repaymentDelta: process.env.SCORE_DELTA_REPAY ?? "15",
       defaultPenalty: process.env.SCORE_DELTA_DEFAULT ?? "50",
       latePenalty: process.env.SCORE_DELTA_LATE ?? "5",

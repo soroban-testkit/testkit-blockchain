@@ -28,7 +28,7 @@ ENV GIT_SHA=$GIT_SHA \
 
 # Install only production dependencies
 COPY package*.json ./
-RUN npm ci --omit=dev
+RUN npm ci --omit=dev && rm -f package-lock.json
 
 # Copy compiled output from builder
 COPY --from=builder /app/dist ./dist

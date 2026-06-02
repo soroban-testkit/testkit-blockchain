@@ -15,6 +15,7 @@ import {
 } from "../config/stellar.js";
 
 import { cacheService } from "./cacheService.js";
+import { jobMetricsService } from "./jobMetricsService.js";
 
 /**
  * Mirrors `LoanManager::DEFAULT_TERM_LEDGERS` in `contracts/loan_manager/src/lib.rs`.
@@ -156,6 +157,10 @@ export class DefaultChecker {
     return { signer, server, passphrase };
   }
 
+  /**
+   * Fetches IDs of loans that are overdue based on the current ledger sequence.
+   * Queries the local database for active loans exceeding the term limit.
+   */
   private async fetchOverdueLoanIds(currentLedger: number): Promise<number[]> {
     const result = await query(
       `
@@ -193,6 +198,10 @@ export class DefaultChecker {
       .filter((id: number) => Number.isInteger(id) && id > 0);
   }
 
+  /**
+   * Calculates statistics for all currently overdue loans.
+   * Provides the total count and the age of the oldest overdue loan for monitoring.
+   */
   private async fetchOverdueStats(currentLedger: number): Promise<{
     overdueCount: number;
     oldestDueLedger?: number;
@@ -258,6 +267,10 @@ export class DefaultChecker {
     };
   }
 
+  /**
+   * Builds and submits a Soroban transaction to mark loans as defaulted.
+   * Invokes `check_defaults` on-chain; results in state changes and fee consumption.
+   */
   private async submitCheckDefaults(
     server: rpc.Server,
     signer: Keypair,
@@ -320,7 +333,7 @@ export class DefaultChecker {
       txStatus = polled.status;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      logger.warn("Default check transaction polling failed", {
+      logger.withContext().warn("Default check transaction polling failed", {
         txHash,
         message,
       });
@@ -334,6 +347,10 @@ export class DefaultChecker {
     };
   }
 
+  /**
+   * Executes `submitCheckDefaults` with a maximum execution time limit.
+   * Ensures that slow Soroban RPC responses do not block the entire processing queue.
+   */
   private async submitCheckDefaultsWithTimeout(
     server: rpc.Server,
     signer: Keypair,
@@ -372,7 +389,7 @@ export class DefaultChecker {
     }
 
     if (result.timedOut) {
-      logger.warn("Default check batch timed out", {
+      logger.withContext().warn("Default check batch timed out", {
         loanIds,
         timeoutMs: this.batchTimeoutMs,
       });
@@ -395,7 +412,9 @@ export class DefaultChecker {
       );
       return acquired;
     } catch (error) {
-      logger.error("Failed to acquire default checker lock", { error });
+      logger
+        .withContext()
+        .error("Failed to acquire default checker lock", { error });
       return false;
     }
   }
@@ -407,7 +426,9 @@ export class DefaultChecker {
     try {
       await cacheService.delete(LOCK_KEY);
     } catch (error) {
-      logger.error("Failed to release default checker lock", { error });
+      logger
+        .withContext()
+        .error("Failed to release default checker lock", { error });
     }
   }
 
@@ -419,12 +440,17 @@ export class DefaultChecker {
   async checkOverdueLoans(
     loanIds?: number[],
   ): Promise<DefaultCheckRunResult | null> {
+    const startTime = Date.now();
+    const jobName = "defaultChecker";
+
     // Try to acquire distributed lock to prevent overlapping runs
     const lockAcquired = await this.acquireLock();
     if (!lockAcquired) {
-      logger.warn(
-        "Default checker run skipped - another instance is already running",
-      );
+      logger
+        .withContext()
+        .warn(
+          "Default checker run skipped - another instance is already running",
+        );
       return null;
     }
 
@@ -448,7 +474,7 @@ export class DefaultChecker {
           ? explicitIds
           : await this.fetchOverdueLoanIds(currentLedger);
 
-      logger.info("default_check.run.start", {
+      logger.withContext().info("default_check.run.start", {
         runId,
         currentLedger,
         termLedgers: this.termLedgers,
@@ -476,7 +502,7 @@ export class DefaultChecker {
             batch,
           );
 
-          logger.info("default_check.batch", {
+          logger.withContext().info("default_check.batch", {
             runId,
             loanIds: result.loanIds,
             txHash: result.txHash,
@@ -498,7 +524,7 @@ export class DefaultChecker {
         (b) => b.error || !b.txHash,
       ).length;
 
-      logger.info("default_check.run.complete", {
+      logger.withContext().info("default_check.run.complete", {
         runId,
         batches: batchResults.length,
         loansChecked,
@@ -509,6 +535,10 @@ export class DefaultChecker {
         oldestDueLedger: stats.oldestDueLedger,
         ledgersPastOldestDue: stats.ledgersPastOldestDue,
       });
+
+      // Record success metrics
+      const durationMs = Date.now() - startTime;
+      jobMetricsService.recordSuccess(jobName, durationMs);
 
       return {
         runId,
@@ -526,6 +556,15 @@ export class DefaultChecker {
           : {}),
         batches: batchResults,
       };
+    } catch (error) {
+      // Record failure metrics
+      const durationMs = Date.now() - startTime;
+      jobMetricsService.recordFailure(
+        jobName,
+        error as Error | string,
+        durationMs,
+      );
+      throw error;
     } finally {
       // Always release the lock, even if the run failed
       await this.releaseLock();
@@ -549,9 +588,11 @@ export function startDefaultCheckerScheduler(): void {
     !process.env.LOAN_MANAGER_CONTRACT_ID ||
     !process.env.LOAN_MANAGER_ADMIN_SECRET
   ) {
-    logger.warn(
-      "Default checker scheduler disabled (set LOAN_MANAGER_CONTRACT_ID and LOAN_MANAGER_ADMIN_SECRET)",
-    );
+    logger
+      .withContext()
+      .warn(
+        "Default checker scheduler disabled (set LOAN_MANAGER_CONTRACT_ID and LOAN_MANAGER_ADMIN_SECRET)",
+      );
     return;
   }
 
@@ -567,18 +608,22 @@ export function startDefaultCheckerScheduler(): void {
       try {
         await defaultChecker.checkOverdueLoans();
       } catch (error) {
-        logger.error("Default checker scheduled run failed", { error });
+        logger
+          .withContext()
+          .error("Default checker scheduled run failed", { error });
       } finally {
         inFlight = false;
       }
     })();
   }, intervalMs);
 
-  logger.info("Default checker scheduler started", { intervalMs });
+  logger
+    .withContext()
+    .info("Default checker scheduler started", { intervalMs });
 }
 
 export function stopDefaultCheckerScheduler(): void {
   if (interval) clearInterval(interval);
   interval = undefined;
-  logger.info("Default checker scheduler stopped");
+  logger.withContext().info("Default checker scheduler stopped");
 }

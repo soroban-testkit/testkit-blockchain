@@ -1,24 +1,28 @@
-import express from "express";
+import express, { type Express, type Request, type Response } from "express";
 import request from "supertest";
 import { describe, it, expect, jest, beforeEach, afterEach } from "@jest/globals";
 
-const mockCreateWebhookSubscription = jest.fn((req, res) => {
-  res.status(201).json({ success: true });
-});
-const mockQuery = jest.fn().mockResolvedValue({ rows: [], rowCount: 0 });
+const mockCreateWebhookSubscription = jest.fn(
+  (_req: Request, res: Response) => {
+    res.status(201).json({ success: true });
+  },
+);
+const mockQuery = jest.fn<
+  (...args: unknown[]) => Promise<{ rows: unknown[]; rowCount: number }>
+>();
+
+const okHandler = (_req: Request, res: Response) => res.json({ success: true });
 
 jest.unstable_mockModule("../controllers/indexerController.js", () => ({
-  getIndexerStatus: jest.fn((req, res) => res.json({ success: true })),
-  getBorrowerEvents: jest.fn((req, res) => res.json({ success: true })),
-  getLoanEvents: jest.fn((req, res) => res.json({ success: true })),
-  getRecentEvents: jest.fn((req, res) => res.json({ success: true })),
-  listWebhookSubscriptions: jest.fn((req, res) =>
+  getIndexerStatus: jest.fn(okHandler),
+  getBorrowerEvents: jest.fn(okHandler),
+  getLoanEvents: jest.fn(okHandler),
+  getRecentEvents: jest.fn(okHandler),
+  listWebhookSubscriptions: jest.fn((_req: Request, res: Response) =>
     res.json({ success: true, data: [] }),
   ),
   createWebhookSubscription: mockCreateWebhookSubscription,
-  deleteWebhookSubscription: jest.fn((req, res) =>
-    res.json({ success: true }),
-  ),
+  deleteWebhookSubscription: jest.fn(okHandler),
 }));
 
 jest.unstable_mockModule("../db/connection.js", () => ({
@@ -31,7 +35,7 @@ const { errorHandler } = await import("../middleware/errorHandler.js");
 
 const originalApiKeys = process.env.INTERNAL_API_KEY;
 
-function buildApp() {
+function buildApp(): Express {
   const app = express();
   app.use(express.json());
   app.use("/api/indexer", indexerRoutes);
@@ -42,6 +46,7 @@ function buildApp() {
 describe("indexer route API key scopes", () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    mockQuery.mockResolvedValue({ rows: [], rowCount: 0 });
     process.env.INTERNAL_API_KEY =
       "admin:disputes:dispute-value,admin:webhooks:webhook-value,admin:indexer:indexer-value";
   });

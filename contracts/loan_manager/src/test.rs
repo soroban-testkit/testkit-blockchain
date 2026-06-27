@@ -3,7 +3,22 @@ use lending_pool::{LendingPool, LendingPoolClient};
 use remittance_nft::{RemittanceNFT, RemittanceNFTClient};
 use soroban_sdk::testutils::{Events, Ledger as _};
 use soroban_sdk::token::{Client as TokenClient, StellarAssetClient};
-use soroban_sdk::{testutils::Address as _, Address, BytesN, Env, FromVal, String};
+use soroban_sdk::{contract, contractimpl, testutils::Address as _, Address, BytesN, Env, FromVal, String};
+
+// Mock RateOracle contract for testing the oracle interest-rate code path.
+#[contract]
+pub struct MockRateOracle;
+
+#[contractimpl]
+impl MockRateOracle {
+    pub fn get_rate(_env: Env, _borrower: Address, _amount: i128, _score: u32) -> u32 {
+        _env.storage().instance().get(&"rate").unwrap_or(1200)
+    }
+
+    pub fn set_rate(env: Env, rate: u32) {
+        env.storage().instance().set(&"rate", &rate);
+    }
+}
 
 fn setup_test<'a>(
     env: &Env,
@@ -2291,12 +2306,20 @@ fn test_oracle_rate_within_bounds_accepted() {
     let stellar_token = StellarAssetClient::new(&env, &token_id);
     stellar_token.mint(&pool_client, &10_000);
 
-    // Request loan - should use default rate since no oracle is set
+    // Deploy mock oracle returning 800 BPS (within default bounds 1..100_000)
+    let oracle_id = env.register(MockRateOracle, ());
+    let oracle_client = MockRateOracleClient::new(&env, &oracle_id);
+    oracle_client.set_rate(&800);
+
+    // Set the oracle on the loan manager
+    manager.set_rate_oracle(&oracle_id);
+
+    // Request loan — the oracle branch should be taken
     let loan_id = manager.request_loan(&borrower, &1000, &17280);
     let loan = manager.get_loan(&loan_id);
 
-    // Default rate should be 1200 BPS (12%)
-    assert_eq!(loan.interest_rate_bps, 1200);
+    // Should use the oracle rate (800 BPS), not the default (1200 BPS)
+    assert_eq!(loan.interest_rate_bps, 800);
 }
 
 #[test]
@@ -2456,14 +2479,19 @@ fn test_oracle_rate_below_min_falls_back_to_default() {
     let stellar_token = StellarAssetClient::new(&env, &token_id);
     stellar_token.mint(&pool_client, &10_000);
 
-    // Set min rate to 500 BPS
+    // Deploy mock oracle returning 100 BPS (below the min we will set)
+    let oracle_id = env.register(MockRateOracle, ());
+    let oracle_client = MockRateOracleClient::new(&env, &oracle_id);
+    oracle_client.set_rate(&100);
+
+    manager.set_rate_oracle(&oracle_id);
     manager.set_min_rate_bps(&500);
 
-    // Request loan - should use default rate (1200) since no oracle is set
+    // Request loan — oracle returns 100 which is below min_rate_bps=500
     let loan_id = manager.request_loan(&borrower, &1000, &17280);
     let loan = manager.get_loan(&loan_id);
 
-    // Should use default rate (1200 BPS) which is within bounds
+    // Should fall back to default rate (1200 BPS)
     assert_eq!(loan.interest_rate_bps, 1200);
 }
 
@@ -2487,14 +2515,19 @@ fn test_oracle_rate_above_max_falls_back_to_default() {
     let stellar_token = StellarAssetClient::new(&env, &token_id);
     stellar_token.mint(&pool_client, &10_000);
 
-    // Set max rate to 2000 BPS (20%)
+    // Deploy mock oracle returning 5000 BPS (above the max we will set)
+    let oracle_id = env.register(MockRateOracle, ());
+    let oracle_client = MockRateOracleClient::new(&env, &oracle_id);
+    oracle_client.set_rate(&5000);
+
+    manager.set_rate_oracle(&oracle_id);
     manager.set_max_rate_bps(&2_000);
 
-    // Request loan - should use default rate (1200) since no oracle is set
+    // Request loan — oracle returns 5000 which is above max_rate_bps=2000
     let loan_id = manager.request_loan(&borrower, &1000, &17280);
     let loan = manager.get_loan(&loan_id);
 
-    // Should use default rate (1200 BPS) which is within bounds
+    // Should fall back to default rate (1200 BPS)
     assert_eq!(loan.interest_rate_bps, 1200);
 }
 
@@ -3587,4 +3620,50 @@ fn test_get_loan_health_matches_liquidation_state() {
     assert_eq!(pending_collateral, 0);
     assert_eq!(pending_debt, 0);
     assert_eq!(pending_ratio, 0);
+}
+
+// ── Oracle get/set and event tests ──────────────────────────────────────────
+
+#[test]
+fn test_get_rate_oracle_returns_set_address() {
+    let env = Env::default();
+    env.mock_all_auths_allowing_non_root_auth();
+
+    let (manager, _nft_client, _pool_client, _token_id, _admin) = setup_test(&env);
+
+    // Initially no oracle is set
+    assert_eq!(manager.get_rate_oracle(), None);
+
+    // Deploy and set a mock oracle
+    let oracle_id = env.register(MockRateOracle, ());
+    manager.set_rate_oracle(&oracle_id);
+
+    // get_rate_oracle should return the address we just set
+    assert_eq!(manager.get_rate_oracle(), Some(oracle_id));
+}
+
+#[test]
+fn test_set_rate_oracle_emits_rate_oracle_updated_event() {
+    let env = Env::default();
+    env.mock_all_auths_allowing_non_root_auth();
+
+    let (manager, _nft_client, _pool_client, _token_id, _admin) = setup_test(&env);
+
+    let oracle_id = env.register(MockRateOracle, ());
+    manager.set_rate_oracle(&oracle_id);
+
+    let events = env.events().all();
+    let has_oracle_event = events.iter().any(|(_contract_id, topics, _data)| {
+        topics.len() == 1
+            && topics
+                .get(0)
+                .map(|t| {
+                    t == soroban_sdk::Val::from_val(
+                        &env,
+                        &soroban_sdk::Symbol::new(&env, "RateOracleUpdated"),
+                    )
+                })
+                .unwrap_or(false)
+    });
+    assert!(has_oracle_event, "RateOracleUpdated event should be emitted");
 }

@@ -1,12 +1,14 @@
 import crypto from "crypto";
 import {
-  Account,
   Asset,
   Networks,
   Operation,
   TransactionBuilder,
 } from "@stellar/stellar-sdk";
-import { getStellarNetworkPassphrase } from "../config/stellar.js";
+import {
+  createSorobanRpcServer,
+  getStellarNetworkPassphrase,
+} from "../config/stellar.js";
 import { query } from "../db/connection.js";
 import { withTransaction } from "../db/transaction.js";
 import { AppError } from "../errors/AppError.js";
@@ -105,8 +107,12 @@ export const remittanceService = {
 
     try {
       const networkPassphrase = getStellarNetworkPassphrase();
+      const server = createSorobanRpcServer();
 
-      const sourceAccount = new Account(payload.senderAddress, "0");
+      // Load the real sender account so the returned XDR carries the current
+      // on-chain sequence number. Wallets sign this exact transaction and do
+      // not repair a stale sequence during signing.
+      const sourceAccount = await server.getAccount(payload.senderAddress);
 
       const transaction = new TransactionBuilder(sourceAccount, {
         fee: "100",

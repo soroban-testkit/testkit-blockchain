@@ -1,222 +1,130 @@
-import {
-  jest,
-  describe,
-  it,
-  expect,
-  beforeEach,
-  beforeAll,
-} from "@jest/globals";
+import { describe, it, expect, jest, beforeEach } from "@jest/globals";
 
-let rateLimitService: {
-  checkRateLimit: jest.Mock<any>;
-  resetRateLimit: jest.Mock<any>;
-  getRateLimitStatus: jest.Mock<any>;
-};
-let SCORE_UPDATE_RATE_LIMIT: { maxRequests: number; windowSeconds: number };
-let mockCacheService: {
-  get: jest.Mock<any>;
-  set: jest.Mock<any>;
-  delete: jest.Mock<any>;
-};
+const mockConnect = jest.fn<() => Promise<void>>();
+const mockOn = jest.fn();
+const mockIncr = jest.fn<(key: string) => Promise<number>>();
+const mockExpire = jest.fn<(key: string, seconds: number) => Promise<boolean>>();
+const mockTtl = jest.fn<(key: string) => Promise<number>>();
+const mockGet = jest.fn<(key: string) => Promise<string | null>>();
+const mockDel = jest.fn<(key: string) => Promise<number>>();
 
-beforeAll(async () => {
-  // Mock the cache service BEFORE importing the module under test
-  jest.unstable_mockModule("../cacheService.js", () => ({
-    cacheService: {
-      get: jest.fn(),
-      set: jest.fn(),
-      delete: jest.fn(),
-    },
-  }));
+jest.unstable_mockModule("redis", () => ({
+  createClient: () => ({
+    connect: mockConnect,
+    on: mockOn,
+    incr: mockIncr,
+    expire: mockExpire,
+    ttl: mockTtl,
+    get: mockGet,
+    del: mockDel,
+  }),
+}));
 
-  // Dynamically import after mocking
-  const imported = await import("../cacheService.js");
-  mockCacheService =
-    imported.cacheService as unknown as typeof mockCacheService;
-  const svc = await import("../rateLimitService.js");
-  rateLimitService = svc.rateLimitService as unknown as typeof rateLimitService;
-  SCORE_UPDATE_RATE_LIMIT = svc.SCORE_UPDATE_RATE_LIMIT;
-});
+const { rateLimitService, SCORE_UPDATE_RATE_LIMIT } = await import(
+  "../rateLimitService.js"
+);
 
-describe("RateLimitService", () => {
-  jest.setTimeout(20000);
+describe("rateLimitService", () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    mockConnect.mockResolvedValue(undefined);
+    mockExpire.mockResolvedValue(true);
+    mockTtl.mockResolvedValue(60);
+    mockGet.mockResolvedValue(null);
+    mockDel.mockResolvedValue(1);
   });
 
-  describe("checkRateLimit", () => {
-    it("should allow first request", async () => {
-      mockCacheService.get.mockResolvedValue(null);
-      mockCacheService.set.mockResolvedValue(undefined);
+  it("allows the first request and creates the rate-limit window", async () => {
+    mockIncr.mockResolvedValueOnce(1);
 
-      const result = await rateLimitService.checkRateLimit(
-        "user123",
-        SCORE_UPDATE_RATE_LIMIT,
-      );
+    const result = await rateLimitService.checkRateLimit(
+      "user123",
+      SCORE_UPDATE_RATE_LIMIT,
+    );
 
-      expect(result.allowed).toBe(true);
-      expect(result.remaining).toBe(4); // 5 - 1
-      expect(result.currentCount).toBe(1);
-      expect(mockCacheService.set).toHaveBeenCalledWith(
-        "rate_limit:user123",
-        { count: 1, firstRequest: expect.any(String) },
-        86400,
-      );
-    });
-
-    it("should block request when limit is exceeded", async () => {
-      const now = new Date();
-      mockCacheService.get.mockResolvedValue({
-        count: 5,
-        firstRequest: now.toISOString(),
-      });
-
-      const result = await rateLimitService.checkRateLimit(
-        "user123",
-        SCORE_UPDATE_RATE_LIMIT,
-      );
-
-      expect(result.allowed).toBe(false);
-      expect(result.remaining).toBe(0);
-      expect(result.currentCount).toBe(6);
-      expect(mockCacheService.set).not.toHaveBeenCalled();
-    });
-
-    it("should reset counter when window expires", async () => {
-      const expiredTime = new Date(Date.now() - 25 * 60 * 60 * 1000); // 25 hours ago
-      mockCacheService.get.mockResolvedValue({
-        count: 5,
-        firstRequest: expiredTime.toISOString(),
-      });
-      mockCacheService.set.mockResolvedValue(undefined);
-
-      const result = await rateLimitService.checkRateLimit(
-        "user123",
-        SCORE_UPDATE_RATE_LIMIT,
-      );
-
-      expect(result.allowed).toBe(true);
-      expect(result.remaining).toBe(4); // 5 - 1
-      expect(result.currentCount).toBe(1);
-      expect(mockCacheService.set).toHaveBeenCalledWith(
-        "rate_limit:user123",
-        { count: 1, firstRequest: expect.any(String) },
-        86400,
-      );
-    });
-
-    it("should fail open when Redis is unavailable", async () => {
-      mockCacheService.get.mockRejectedValue(
-        new Error("Redis connection failed"),
-      );
-
-      const result = await rateLimitService.checkRateLimit(
-        "user123",
-        SCORE_UPDATE_RATE_LIMIT,
-      );
-
-      expect(result.allowed).toBe(true);
-      expect(result.remaining).toBe(4); // 5 - 1
-      expect(result.currentCount).toBe(1);
-    });
-
-    it("should handle different identifiers independently", async () => {
-      mockCacheService.get.mockResolvedValue(null);
-      mockCacheService.set.mockResolvedValue(undefined);
-
-      // First user
-      const result1 = await rateLimitService.checkRateLimit(
-        "user1",
-        SCORE_UPDATE_RATE_LIMIT,
-      );
-      // Second user
-      const result2 = await rateLimitService.checkRateLimit(
-        "user2",
-        SCORE_UPDATE_RATE_LIMIT,
-      );
-
-      expect(result1.allowed).toBe(true);
-      expect(result1.currentCount).toBe(1);
-      expect(result2.allowed).toBe(true);
-      expect(result2.currentCount).toBe(1);
-      expect(mockCacheService.set).toHaveBeenCalledTimes(2);
-      expect(mockCacheService.set).toHaveBeenCalledWith(
-        "rate_limit:user1",
-        { count: 1, firstRequest: expect.any(String) },
-        86400,
-      );
-      expect(mockCacheService.set).toHaveBeenCalledWith(
-        "rate_limit:user2",
-        { count: 1, firstRequest: expect.any(String) },
-        86400,
-      );
-    });
+    expect(result.allowed).toBe(true);
+    expect(result.remaining).toBe(4);
+    expect(result.currentCount).toBe(1);
+    expect(mockIncr).toHaveBeenCalledWith("rate_limit:user123");
+    expect(mockExpire).toHaveBeenCalledWith("rate_limit:user123", 86400);
   });
 
-  describe("resetRateLimit", () => {
-    it("should reset the rate limit counter", async () => {
-      mockCacheService.delete.mockResolvedValue(undefined);
+  it("blocks requests once the atomic counter exceeds the limit", async () => {
+    mockIncr.mockResolvedValueOnce(6);
 
-      await rateLimitService.resetRateLimit("user123");
+    const result = await rateLimitService.checkRateLimit(
+      "user123",
+      SCORE_UPDATE_RATE_LIMIT,
+    );
 
-      expect(mockCacheService.delete).toHaveBeenCalledWith(
-        "rate_limit:user123",
-      );
-    });
-
-    it("should handle errors gracefully", async () => {
-      mockCacheService.delete.mockRejectedValue(new Error("Redis error"));
-
-      await expect(
-        rateLimitService.resetRateLimit("user123"),
-      ).resolves.not.toThrow();
-    });
+    expect(result.allowed).toBe(false);
+    expect(result.remaining).toBe(0);
+    expect(result.currentCount).toBe(6);
   });
 
-  describe("getRateLimitStatus", () => {
-    it("should return current status without incrementing", async () => {
-      const now = new Date();
-      mockCacheService.get.mockResolvedValue({
-        count: 2,
-        firstRequest: now.toISOString(),
-      });
-
-      const result = await rateLimitService.getRateLimitStatus(
-        "user123",
-        SCORE_UPDATE_RATE_LIMIT,
-      );
-
-      expect(result.allowed).toBe(true);
-      expect(result.remaining).toBe(3); // 5 - 2
-      expect(mockCacheService.set).not.toHaveBeenCalled();
+  it("admits at most maxRequests under concurrent requests", async () => {
+    let counter = 0;
+    mockIncr.mockImplementation(async () => {
+      counter += 1;
+      return counter;
     });
 
-    it("should return default status for new users", async () => {
-      mockCacheService.get.mockResolvedValue(null);
+    const results = await Promise.all(
+      Array.from({ length: 10 }, () =>
+        rateLimitService.checkRateLimit("score:user1", {
+          maxRequests: 5,
+          windowSeconds: 60,
+        }),
+      ),
+    );
 
-      const result = await rateLimitService.getRateLimitStatus(
-        "user123",
-        SCORE_UPDATE_RATE_LIMIT,
-      );
+    expect(results.filter((result) => result.allowed)).toHaveLength(5);
+    expect(results.filter((result) => !result.allowed)).toHaveLength(5);
+    expect(mockIncr).toHaveBeenCalledTimes(10);
+  });
 
-      expect(result.allowed).toBe(true);
-      expect(result.remaining).toBe(5);
-    });
+  it("preserves fail-open behavior when Redis is unavailable", async () => {
+    mockIncr.mockRejectedValueOnce(new Error("Redis connection failed"));
 
-    it("should handle expired windows", async () => {
-      const expiredTime = new Date(Date.now() - 25 * 60 * 60 * 1000); // 25 hours ago
-      mockCacheService.get.mockResolvedValue({
-        count: 5,
-        firstRequest: expiredTime.toISOString(),
-      });
+    const result = await rateLimitService.checkRateLimit(
+      "user123",
+      SCORE_UPDATE_RATE_LIMIT,
+    );
 
-      const result = await rateLimitService.getRateLimitStatus(
-        "user123",
-        SCORE_UPDATE_RATE_LIMIT,
-      );
+    expect(result.allowed).toBe(true);
+    expect(result.remaining).toBe(4);
+    expect(result.currentCount).toBe(1);
+  });
 
-      expect(result.allowed).toBe(true);
-      expect(result.remaining).toBe(5); // Reset to full limit
-    });
+  it("resets the rate limit counter", async () => {
+    await rateLimitService.resetRateLimit("user123");
+
+    expect(mockDel).toHaveBeenCalledWith("rate_limit:user123");
+  });
+
+  it("returns current status without incrementing", async () => {
+    mockGet.mockResolvedValueOnce("2");
+    mockTtl.mockResolvedValueOnce(120);
+
+    const result = await rateLimitService.getRateLimitStatus(
+      "user123",
+      SCORE_UPDATE_RATE_LIMIT,
+    );
+
+    expect(result.allowed).toBe(true);
+    expect(result.remaining).toBe(3);
+    expect(mockIncr).not.toHaveBeenCalled();
+  });
+
+  it("returns default status for new identifiers", async () => {
+    mockGet.mockResolvedValueOnce(null);
+
+    const result = await rateLimitService.getRateLimitStatus(
+      "user123",
+      SCORE_UPDATE_RATE_LIMIT,
+    );
+
+    expect(result.allowed).toBe(true);
+    expect(result.remaining).toBe(5);
   });
 });

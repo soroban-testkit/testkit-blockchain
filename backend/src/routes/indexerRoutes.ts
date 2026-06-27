@@ -15,6 +15,8 @@ import {
   requireWalletOwnership,
 } from "../middleware/jwtAuth.js";
 import { requireLoanBorrowerAccess } from "../middleware/loanAccess.js";
+import { strictRateLimiter } from "../middleware/rateLimiter.js";
+import { auditLog } from "../middleware/auditLog.js";
 
 const router = Router();
 
@@ -126,8 +128,8 @@ router.get(
  *   get:
  *     summary: Get recent events
  *     description: >
- *       Internal/admin use: requires `x-api-key` (`INTERNAL_API_KEY`). Returns the
- *       most recent loan events, optionally filtered by event type.
+ *       Internal/admin use: requires an `admin:indexer` scoped `x-api-key`.
+ *       Returns the most recent loan events, optionally filtered by event type.
  *     tags: [Indexer]
  *     security:
  *       - ApiKeyAuth: []
@@ -152,7 +154,7 @@ router.get(
  *       401:
  *         description: Missing or invalid API key
  */
-router.get("/events/recent", requireApiKey(), getRecentEvents);
+router.get("/events/recent", requireApiKey("admin:indexer"), getRecentEvents);
 
 /**
  * @swagger
@@ -172,7 +174,11 @@ router.get("/events/recent", requireApiKey(), getRecentEvents);
  *       401:
  *         description: Missing or invalid API key
  */
-router.get("/webhooks", requireApiKey(), listWebhookSubscriptions);
+router.get(
+  "/webhooks",
+  requireApiKey("admin:webhooks"),
+  listWebhookSubscriptions,
+);
 
 /**
  * @swagger
@@ -209,7 +215,13 @@ router.get("/webhooks", requireApiKey(), listWebhookSubscriptions);
  *       401:
  *         description: Missing or invalid API key
  */
-router.post("/webhooks", requireApiKey(), createWebhookSubscription);
+router.post(
+  "/webhooks",
+  requireApiKey("admin:webhooks"),
+  strictRateLimiter,
+  auditLog,
+  createWebhookSubscription,
+);
 
 /**
  * @swagger
@@ -237,7 +249,9 @@ router.post("/webhooks", requireApiKey(), createWebhookSubscription);
  */
 router.delete(
   "/webhooks/:subscriptionId",
-  requireApiKey(),
+  requireApiKey("admin:webhooks"),
+  strictRateLimiter,
+  auditLog,
   deleteWebhookSubscription,
 );
 

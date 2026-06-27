@@ -60,7 +60,8 @@ router.get("/stream", requireJwtAuth, streamEvents);
  *   get:
  *     summary: Get SSE connection counts
  *     description: >
- *       Returns current SSE connection statistics. Requires API key.
+ *       Returns current SSE connection statistics. Requires an `admin:indexer`
+ *       scoped API key.
  *     tags: [Events]
  *     security:
  *       - ApiKeyAuth: []
@@ -74,6 +75,6 @@ router.get("/stream", requireJwtAuth, streamEvents);
  *       401:
  *         description: Missing or invalid API key
  */
-router.get("/status", requireApiKey(), getEventStreamStatus);
+router.get("/status", requireApiKey("admin:indexer"), getEventStreamStatus);
 
 export default router;

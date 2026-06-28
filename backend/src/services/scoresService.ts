@@ -1,6 +1,6 @@
-import { cacheService } from "./cacheService.js";
-import { type PoolClient, query } from "../db/connection.js";
-import logger from "../utils/logger.js";
+import { cacheService } from './cacheService.js';
+import { type PoolClient, query } from '../db/connection.js';
+import logger from '../utils/logger.js';
 
 /**
  * Apply multiple user score deltas atomically.
@@ -52,7 +52,7 @@ export async function updateUserScoresBulk(
     } else {
       await query(sql, params);
     }
-    logger.withContext().info("Applied bulk user score updates", {
+    logger.withContext().info('Applied bulk user score updates', {
       updatedCount: params.length / 2,
     });
 
@@ -62,9 +62,7 @@ export async function updateUserScoresBulk(
       await cacheService.delete(`score:breakdown:${userId}`);
     }
   } catch (error) {
-    logger
-      .withContext()
-      .error("Failed to apply bulk user score updates", { error });
+    logger.withContext().error('Failed to apply bulk user score updates', { error });
     throw error;
   }
 }
@@ -73,9 +71,7 @@ export async function updateUserScoresBulk(
  * Set multiple user scores to authoritative absolute values in a single query.
  * Used by reconciliation paths where on-chain state should overwrite DB state.
  */
-export async function setAbsoluteUserScoresBulk(
-  scores: Map<string, number>,
-): Promise<void> {
+export async function setAbsoluteUserScoresBulk(scores: Map<string, number>): Promise<void> {
   if (!scores || scores.size === 0) return;
 
   const params: (string | number)[] = [];
@@ -95,7 +91,7 @@ export async function setAbsoluteUserScoresBulk(
   // to ensure out-of-bounds calculations from external sources never trigger CHECK runtime failures.
   const sql = `
     WITH reconciled_scores (user_id, current_score) AS (
-      VALUES ${valuePlaceholders.join(",")}
+      VALUES ${valuePlaceholders.join(',')}
     )
     INSERT INTO scores (user_id, current_score)
     SELECT user_id, LEAST(850, GREATEST(300, current_score)) FROM reconciled_scores
@@ -107,11 +103,9 @@ export async function setAbsoluteUserScoresBulk(
 
   try {
     await query(sql, params);
-    logger
-      .withContext()
-      .info("Applied absolute user score reconciliation updates", {
-        updatedCount: valuePlaceholders.length,
-      });
+    logger.withContext().info('Applied absolute user score reconciliation updates', {
+      updatedCount: valuePlaceholders.length,
+    });
 
     // Invalidate Redis cache for reconciled users
     for (const [userId] of scores) {
@@ -121,11 +115,9 @@ export async function setAbsoluteUserScoresBulk(
       }
     }
   } catch (error) {
-    logger
-      .withContext()
-      .error("Failed to apply absolute user score reconciliation updates", {
-        error,
-      });
+    logger.withContext().error('Failed to apply absolute user score reconciliation updates', {
+      error,
+    });
     throw error;
   }
 }

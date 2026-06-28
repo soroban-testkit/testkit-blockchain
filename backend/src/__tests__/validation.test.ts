@@ -6,37 +6,34 @@ import { generateJwtToken } from "../services/authService.js";
 process.env.JWT_SECRET = "test-jwt-secret-min-32-chars-long!!";
 
 // Setup mocks BEFORE importing the app
-const mockQuery =
-  jest.fn<(...args: unknown[]) => Promise<{ rows: unknown[] }>>();
+const mockQuery = jest.fn<(...args: unknown[]) => Promise<{ rows: unknown[] }>>();
 const mockRelease = jest.fn();
 const mockClient = {
   query: mockQuery,
   release: mockRelease,
 };
 
-jest.unstable_mockModule("../db/connection.js", () => ({
+jest.unstable_mockModule('../db/connection.js', () => ({
   default: { query: mockQuery },
   query: mockQuery,
-  getClient: jest
-    .fn<() => Promise<typeof mockClient>>()
-    .mockResolvedValue(mockClient),
+  getClient: jest.fn<() => Promise<typeof mockClient>>().mockResolvedValue(mockClient),
   closePool: jest.fn(),
   withTransaction: jest.fn(),
 }));
 
 // Mock CacheService to prevent Redis connections
-jest.unstable_mockModule("../services/cacheService.js", () => ({
+jest.unstable_mockModule('../services/cacheService.js', () => ({
   cacheService: {
     get: jest.fn<() => Promise<null>>().mockResolvedValue(null),
     set: jest.fn<() => Promise<void>>().mockResolvedValue(undefined),
     delete: jest.fn<() => Promise<void>>().mockResolvedValue(undefined),
-    ping: jest.fn<() => Promise<string>>().mockResolvedValue("ok"),
+    ping: jest.fn<() => Promise<string>>().mockResolvedValue('ok'),
   },
 }));
 
 // Use dynamic imports to ensure mocks are applied
-await import("../db/connection.js");
-const { default: app } = await import("../app.js");
+await import('../db/connection.js');
+const { default: app } = await import('../app.js');
 
 const TEST_WALLET = Keypair.random().publicKey();
 const OTHER_WALLET = Keypair.random().publicKey();

@@ -32,8 +32,13 @@ import {
 import { sorobanService } from "./services/sorobanService.js";
 import { validateLoanConfig } from "./config/loanConfig.js";
 import { startLoanDueCheckCron } from "./cron/loanCheckCron.js";
+// Imported the score decay scheduler initialization wrapper
+import { startScoreDecayScheduler } from "./cron/scoreDecayJob.js";
 
 const port = process.env.PORT || 3001;
+
+// Maintain a mutable handle to invoke clean scheduler closures on process stops
+let scoreDecaySchedulerHandle: { stop: () => void } | null = null;
 
 // Validate score delta and loan config on startup before accepting traffic
 try {
@@ -72,6 +77,9 @@ const server = app.listen(port, () => {
 
   // Start loan due check cron
   startLoanDueCheckCron();
+
+  // Wire up and activate the score decay daily scheduler loop
+  scoreDecaySchedulerHandle = startScoreDecayScheduler() || null;
 });
 
 const shutdown = async (signal: "SIGTERM" | "SIGINT") => {
@@ -85,6 +93,11 @@ const shutdown = async (signal: "SIGTERM" | "SIGINT") => {
   timeout.unref();
 
   try {
+    // Gracefully stop the score decay scheduler if it was active
+    if (scoreDecaySchedulerHandle) {
+      scoreDecaySchedulerHandle.stop();
+    }
+
     await stopIndexer();
     stopDefaultCheckerScheduler();
     stopWebhookRetryScheduler();

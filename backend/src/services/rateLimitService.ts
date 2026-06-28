@@ -73,7 +73,8 @@ class RateLimitService {
 
       const ttlSeconds = await this.client.ttl(key);
       const resetTime = new Date(
-        Date.now() + (ttlSeconds > 0 ? ttlSeconds : config.windowSeconds) * 1000,
+        Date.now() +
+          (ttlSeconds > 0 ? ttlSeconds : config.windowSeconds) * 1000,
       );
       const allowed = currentCount <= config.maxRequests;
       const remaining = Math.max(0, config.maxRequests - currentCount);
@@ -153,7 +154,8 @@ class RateLimitService {
 
       const ttlSeconds = await this.client.ttl(key);
       const resetTime = new Date(
-        Date.now() + (ttlSeconds > 0 ? ttlSeconds : config.windowSeconds) * 1000,
+        Date.now() +
+          (ttlSeconds > 0 ? ttlSeconds : config.windowSeconds) * 1000,
       );
       const remaining = Math.max(0, config.maxRequests - currentCount);
       const allowed = currentCount < config.maxRequests;

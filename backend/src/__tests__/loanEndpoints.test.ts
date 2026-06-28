@@ -356,7 +356,7 @@ describe('GET /api/loans/:loanId', () => {
 describe('GET /api/loans/:loanId/amortization-schedule', () => {
   it('should return amortization schedule for an approved loan', async () => {
     mockedQuery
-      .mockResolvedValueOnce({ rows: [{ address: TEST_BORROWER }] })
+      .mockResolvedValueOnce({ rows: [{ borrower: "GABC123" }] })
       .mockResolvedValueOnce({
         rows: [
           {
@@ -375,8 +375,8 @@ describe('GET /api/loans/:loanId/amortization-schedule', () => {
       });
 
     const response = await request(app)
-      .get('/api/loans/123/amortization-schedule')
-      .set(bearer(TEST_BORROWER));
+      .get("/api/loans/123/amortization-schedule")
+      .set(bearer("GABC123"));
 
     expect(response.status).toBe(200);
     expect(response.body.success).toBe(true);
@@ -391,7 +391,7 @@ describe('GET /api/loans/:loanId/amortization-schedule', () => {
 
   it('should return 404 when loan is not fully approved', async () => {
     mockedQuery
-      .mockResolvedValueOnce({ rows: [{ address: TEST_BORROWER }] })
+      .mockResolvedValueOnce({ rows: [{ borrower: "GABC123" }] })
       .mockResolvedValueOnce({
         rows: [
           {
@@ -403,8 +403,8 @@ describe('GET /api/loans/:loanId/amortization-schedule', () => {
       });
 
     const response = await request(app)
-      .get('/api/loans/123/amortization-schedule')
-      .set(bearer(TEST_BORROWER));
+      .get("/api/loans/123/amortization-schedule")
+      .set(bearer("GABC123"));
 
     expect(response.status).toBe(404);
   });

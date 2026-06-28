@@ -1,4 +1,11 @@
-import { describe, it, expect, jest, beforeEach, afterEach } from "@jest/globals";
+import {
+  describe,
+  it,
+  expect,
+  jest,
+  beforeEach,
+  afterEach,
+} from "@jest/globals";
 
 type QueryResult = { rows: Record<string, unknown>[]; rowCount: number };
 const mockQuery = jest.fn<(sql: string, params?: unknown[]) => Promise<QueryResult>>();
@@ -186,8 +193,14 @@ describe('notificationService', () => {
       delete process.env.ADMIN_EMAIL;
 
       mockQuery
-        .mockResolvedValueOnce({ rows: [makeNotificationRow("wallet1", 99)], rowCount: 1 })
-        .mockResolvedValueOnce({ rows: [makeNotificationRow("wallet2", 99)], rowCount: 1 });
+        .mockResolvedValueOnce({
+          rows: [makeNotificationRow("wallet1", 99)],
+          rowCount: 1,
+        })
+        .mockResolvedValueOnce({
+          rows: [makeNotificationRow("wallet2", 99)],
+          rowCount: 1,
+        });
 
       await notificationService.notifyAdmins({
         title: "Loan Default",
@@ -195,7 +208,9 @@ describe('notificationService', () => {
         loanId: 99,
       });
 
-      const sqls = (mockQuery.mock.calls as [string, unknown[]][]).map((c) => c[0]);
+      const sqls = (mockQuery.mock.calls as [string, unknown[]][]).map(
+        (c) => c[0],
+      );
       expect(sqls.some((s) => s.includes("WHERE role"))).toBe(false);
       expect(mockQuery).toHaveBeenCalledTimes(2);
 
@@ -209,7 +224,10 @@ describe('notificationService', () => {
       delete process.env.ADMIN_WALLETS;
       delete process.env.ADMIN_EMAIL;
 
-      await notificationService.notifyAdmins({ title: "Test", message: "Test" });
+      await notificationService.notifyAdmins({
+        title: "Test",
+        message: "Test",
+      });
 
       expect(mockQuery).not.toHaveBeenCalled();
     });
@@ -218,7 +236,10 @@ describe('notificationService', () => {
       process.env.ADMIN_WALLETS = " , , ";
       delete process.env.ADMIN_EMAIL;
 
-      await notificationService.notifyAdmins({ title: "Test", message: "Test" });
+      await notificationService.notifyAdmins({
+        title: "Test",
+        message: "Test",
+      });
 
       expect(mockQuery).not.toHaveBeenCalled();
     });

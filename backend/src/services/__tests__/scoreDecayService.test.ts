@@ -7,7 +7,8 @@ jest.unstable_mockModule('../../db/connection.js', () => ({
   query: mockQuery,
 }));
 
-const { getInactiveBorrowers, applyScoreDecay } = await import('../scoreDecayService.js');
+const { getInactiveBorrowers, applyScoreDecay } =
+  await import("../scoreDecayService.js");
 
 describe('scoreDecayService', () => {
   beforeEach(() => {

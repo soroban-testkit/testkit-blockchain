@@ -59,7 +59,7 @@ export const requireApiKey = (requiredScope?: ApiKeyScope) => {
       throw AppError.unauthorized('Unauthorised: missing API key');
     }
 
-    const keyStr = Array.isArray(providedKey) ? providedKey[0] : providedKey;
+    const keyStr = Array.isArray(providedKey) ? providedKey[0]! : providedKey;
     let valueMatched = false;
 
     const match = configuredKeys.find((k) => {

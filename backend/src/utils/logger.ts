@@ -9,10 +9,19 @@ const levels = {
   debug: 4,
 };
 
+const validLevels = Object.keys(levels);
+
+const defaultLevelForEnv = () => {
+  const env = process.env.NODE_ENV || "development";
+  return env === "development" ? "debug" : "info";
+};
+
 const level = () => {
-  const env = process.env.NODE_ENV || 'development';
-  const isDevelopment = env === 'development';
-  return isDevelopment ? 'debug' : 'info';
+  const configured = process.env.LOG_LEVEL?.toLowerCase();
+  if (configured && validLevels.includes(configured)) {
+    return configured;
+  }
+  return defaultLevelForEnv();
 };
 
 const colors = {

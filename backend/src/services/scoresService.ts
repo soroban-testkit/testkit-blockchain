@@ -32,8 +32,9 @@ export async function updateUserScoresBulk(
 
   const valuePlaceholders = Array.from(
     { length: params.length / 2 },
-    (_, i) => `($${i * 2 + 1}, 500 + $${i * 2 + 2})`,
-  ).join(', ');
+    (_, i) =>
+      `($${i * 2 + 1}, LEAST(850, GREATEST(300, 500 + $${i * 2 + 2})))`,
+  ).join(", ");
 
   const sql = `
     INSERT INTO scores (user_id, current_score)

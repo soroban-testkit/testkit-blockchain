@@ -1,8 +1,18 @@
-import { Router } from 'express';
-import { getRemittanceHistory, simulatePayment } from '../controllers/simulationController.js';
-import { validate } from '../middleware/validation.js';
-import { getRemittanceHistorySchema, simulatePaymentSchema } from '../schemas/simulationSchemas.js';
-import { simulationRateLimiter } from '../middleware/rateLimiter.js';
+import { Router } from "express";
+import {
+  getRemittanceHistory,
+  simulatePayment,
+} from "../controllers/simulationController.js";
+import { validate } from "../middleware/validation.js";
+import {
+  getRemittanceHistorySchema,
+  simulatePaymentSchema,
+} from "../schemas/simulationSchemas.js";
+import { simulationRateLimiter } from "../middleware/rateLimiter.js";
+import {
+  requireJwtAuth,
+  requireWalletParamMatchesJwt,
+} from "../middleware/jwtAuth.js";
 
 const router = Router();
 
@@ -11,8 +21,10 @@ const router = Router();
  * /history/{userId}:
  *   get:
  *     summary: Get remittance history for a user
- *     description: Retrieve the remittance history for a specific user by their ID.
+ *     description: Retrieve the remittance history for the authenticated user. The userId path parameter must match the JWT wallet.
  *     tags: [Simulation]
+ *     security:
+ *       - BearerAuth: []
  *     parameters:
  *       - in: path
  *         name: userId
@@ -26,6 +38,18 @@ const router = Router();
  *           application/json:
  *             schema:
  *               $ref: '#/components/schemas/RemittanceHistory'
+ *       401:
+ *         description: Missing or invalid authentication.
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *       403:
+ *         description: Authenticated wallet does not match userId.
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
  *       404:
  *         description: User not found or no remittance history available.
  *         content:
@@ -37,6 +61,8 @@ const router = Router();
 router.get(
   '/history/:userId',
   simulationRateLimiter,
+  requireJwtAuth,
+  requireWalletParamMatchesJwt("userId"),
   validate(getRemittanceHistorySchema),
   getRemittanceHistory,
 );
@@ -46,8 +72,10 @@ router.get(
  * /simulate:
  *   post:
  *     summary: Simulate a remittance payment
- *     description: Simulate a remittance payment and return the updated user score.
+ *     description: Simulate a remittance payment for the authenticated user and return the projected score change.
  *     tags: [Simulation]
+ *     security:
+ *       - BearerAuth: []
  *     requestBody:
  *       required: true
  *       content:
@@ -55,14 +83,10 @@ router.get(
  *           schema:
  *             type: object
  *             properties:
- *               userId:
- *                 type: string
- *                 description: ID of the user.
  *               amount:
  *                 type: number
  *                 description: Amount to simulate remittance for.
  *             required:
- *               - userId
  *               - amount
  *     responses:
  *       200:
@@ -77,7 +101,19 @@ router.get(
  *           application/json:
  *             schema:
  *               $ref: '#/components/schemas/ErrorResponse'
+ *       401:
+ *         description: Missing or invalid authentication.
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
  */
-router.post('/simulate', simulationRateLimiter, validate(simulatePaymentSchema), simulatePayment);
+router.post(
+  "/simulate",
+  simulationRateLimiter,
+  requireJwtAuth,
+  validate(simulatePaymentSchema),
+  simulatePayment,
+);
 
 export default router;

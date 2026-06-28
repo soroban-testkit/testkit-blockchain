@@ -1,7 +1,16 @@
-import type { Request, Response, NextFunction } from 'express';
-import { AppError } from '../errors/AppError.js';
-import { type UserRole } from '../auth/rbac.js';
-import { verifyJwtToken, extractBearerToken, type JwtPayload } from '../services/authService.js';
+import type { Request, Response, NextFunction } from "express";
+import { AppError } from "../errors/AppError.js";
+import {
+  resolveRoleForWallet,
+  resolveScopesForRole,
+  type UserRole,
+} from "../auth/rbac.js";
+import {
+  verifyJwtToken,
+  extractBearerToken,
+  isTokenRevoked,
+  type JwtPayload,
+} from "../services/authService.js";
 
 const DEFAULT_JWT_COOKIE_NAME = 'remitlend_jwt';
 
@@ -41,7 +50,30 @@ declare module 'express' {
   }
 }
 
-export const requireJwtAuth = (req: Request, _res: Response, next: NextFunction): void => {
+/**
+ * Caps a token's embedded scopes with whatever its wallet's *current* role
+ * grants. A token can never carry more privilege than its role currently
+ * allows, so removing a wallet from ADMIN_WALLETS/LENDER_WALLETS takes
+ * effect immediately instead of waiting out the token's remaining lifetime.
+ * A token deliberately minted with a narrower scope set (e.g. for testing,
+ * or a future "least privilege" session) is still respected as long as
+ * those scopes are still within the wallet's current role.
+ */
+function capPayloadToCurrentRole(payload: JwtPayload): JwtPayload {
+  const currentRole = resolveRoleForWallet(payload.publicKey);
+  const currentRoleScopes = new Set(resolveScopesForRole(currentRole));
+  const cappedScopes = (payload.scopes ?? []).filter((scope) =>
+    currentRoleScopes.has(scope),
+  );
+
+  return { ...payload, role: currentRole, scopes: cappedScopes };
+}
+
+export const requireJwtAuth = async (
+  req: Request,
+  _res: Response,
+  next: NextFunction,
+): Promise<void> => {
   const authHeader = req.headers.authorization;
   const cookieToken = extractCookieToken(req.headers.cookie);
 
@@ -57,11 +89,19 @@ export const requireJwtAuth = (req: Request, _res: Response, next: NextFunction)
     throw AppError.unauthorized('Invalid or expired token');
   }
 
-  req.user = payload;
+  if (payload.jti && (await isTokenRevoked(payload.jti))) {
+    throw AppError.unauthorized("Token has been revoked");
+  }
+
+  req.user = capPayloadToCurrentRole(payload);
   next();
 };
 
-export const optionalJwtAuth = (req: Request, _res: Response, next: NextFunction): void => {
+export const optionalJwtAuth = async (
+  req: Request,
+  _res: Response,
+  next: NextFunction,
+): Promise<void> => {
   const authHeader = req.headers.authorization;
 
   const token = extractBearerToken(authHeader);
@@ -70,8 +110,8 @@ export const optionalJwtAuth = (req: Request, _res: Response, next: NextFunction
   }
 
   const payload = verifyJwtToken(token);
-  if (payload) {
-    req.user = payload;
+  if (payload && !(payload.jti && (await isTokenRevoked(payload.jti)))) {
+    req.user = capPayloadToCurrentRole(payload);
   }
 
   next();

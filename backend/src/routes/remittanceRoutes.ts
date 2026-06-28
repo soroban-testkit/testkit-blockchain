@@ -4,9 +4,10 @@ import {
   getRemittances,
   getRemittance,
   submitRemittanceTransaction,
-} from '../controllers/remittanceController.js';
-import { requireJwtAuth, requireScopes } from '../middleware/jwtAuth.js';
-import { validate } from '../middleware/validation.js';
+} from "../controllers/remittanceController.js";
+import { requireJwtAuth, requireScopes } from "../middleware/jwtAuth.js";
+import { idempotencyMiddleware } from "../middleware/idempotency.js";
+import { validate } from "../middleware/validation.js";
 import {
   createRemittanceSchema,
   getRemittancesSchema,
@@ -75,6 +76,7 @@ router.post(
   requireJwtAuth,
   requireScopes('write:remittances'),
   validate(createRemittanceSchema),
+  idempotencyMiddleware,
   createRemittance,
 );
 
@@ -94,7 +96,7 @@ router.post(
  *         name: limit
  *         schema:
  *           type: integer
- *           default: 20
+ *           default: 50
  *           maximum: 100
  *       - in: query
  *         name: cursor
@@ -229,7 +231,8 @@ router.get(
 router.post(
   '/:id/submit',
   requireJwtAuth,
-  requireScopes('write:remittances'),
+  requireScopes("write:remittances"),
+  idempotencyMiddleware,
   submitRemittanceTransaction,
 );
 

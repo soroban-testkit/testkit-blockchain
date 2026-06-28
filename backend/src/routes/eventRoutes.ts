@@ -22,7 +22,6 @@ const router = Router();
  *     tags: [Events]
  *     security:
  *       - BearerAuth: []
- *       - ApiKeyAuth: []
  *     parameters:
  *       - in: query
  *         name: borrower
@@ -31,7 +30,7 @@ const router = Router();
  *         description: >
  *           Borrower's Stellar address. When provided, only events for this
  *           borrower are streamed (JWT must match). When omitted, all events
- *           are streamed (API key required).
+ *           are streamed (admin JWT required).
  *       - in: header
  *         name: Last-Event-ID
  *         schema:

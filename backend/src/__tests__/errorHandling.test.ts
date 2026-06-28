@@ -1,5 +1,13 @@
+import { jest } from "@jest/globals";
 import request from "supertest";
+import { Keypair } from "@stellar/stellar-sdk";
+import { generateJwtToken } from "../services/authService.js";
 import app from "../app.js";
+
+jest.setTimeout(20000);
+
+process.env.JWT_SECRET = "test-jwt-secret-min-32-chars-long!!";
+const authHeader = `Bearer ${generateJwtToken(Keypair.random().publicKey())}`;
 
 describe("Centralized Error Handling", () => {
   /* ── 404 Not Found ────────────────────────────────────────── */
@@ -15,7 +23,9 @@ describe("Centralized Error Handling", () => {
       // New structured format
       expect(response.body.error).toBeDefined();
       expect(response.body.error.code).toBe("NOT_FOUND");
-      expect(response.body.error.message).toMatch(/Cannot GET \/nonexistent-route/);
+      expect(response.body.error.message).toMatch(
+        /Cannot GET \/nonexistent-route/,
+      );
     });
 
     it("should return 404 for unknown POST routes with error code", async () => {
@@ -33,7 +43,10 @@ describe("Centralized Error Handling", () => {
 
   describe("Zod validation errors", () => {
     it("should return 400 with validation failed message and error code", async () => {
-      const response = await request(app).post("/api/simulate").send({});
+      const response = await request(app)
+        .post("/api/simulate")
+        .set("Authorization", authHeader)
+        .send({});
 
       expect(response.status).toBe(400);
       expect(response.body.success).toBe(false);
@@ -51,7 +64,8 @@ describe("Centralized Error Handling", () => {
     it("should include field and message in each validation error detail", async () => {
       const response = await request(app)
         .post("/api/simulate")
-        .send({ userId: "user1" });
+        .set("Authorization", authHeader)
+        .send({});
 
       expect(response.status).toBe(400);
       // Legacy format
@@ -97,7 +111,9 @@ describe("Centralized Error Handling", () => {
 
       process.env.NODE_ENV = "development";
       process.env.EXPOSE_STACK_TRACES = "true";
-      const developmentResponse = await request(app).get("/test/error/unexpected");
+      const developmentResponse = await request(app).get(
+        "/test/error/unexpected",
+      );
 
       expect(developmentResponse.status).toBe(500);
       expect(developmentResponse.body).toHaveProperty("stack");
@@ -187,9 +203,7 @@ describe("Centralized Error Handling", () => {
   describe("Authentication error codes", () => {
     it("should return VALIDATION_ERROR error code for missing public key (Zod validation)", async () => {
       // Zod validation runs before controller logic
-      const response = await request(app)
-        .post("/api/auth/challenge")
-        .send({});
+      const response = await request(app).post("/api/auth/challenge").send({});
 
       expect(response.status).toBe(400);
       expect(response.body.error.code).toBe("VALIDATION_ERROR");

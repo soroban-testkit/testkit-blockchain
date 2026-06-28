@@ -15,16 +15,16 @@ const router = Router();
  *     summary: SSE stream for real-time loan events
  *     description: >
  *       Server-Sent Events endpoint for real-time loan event push.
- *       Auth is provided via Authorization bearer token or JWT cookie.
+ *       Auth MUST be provided via the Authorization: Bearer <token> header.
  *       Borrowers receive only their own events; optional `?borrower=G...`
  *       must match the authenticated wallet.
  *       Admin users receive all events when borrower is omitted.
  *       Supports replay on reconnect via `Last-Event-ID` header.
- *       Frontend can use the EventSource API for automatic reconnection.
+ *       Since native EventSource does not support custom headers, clients
+ *       should use fetch with ReadableStream to connect.
  *     tags: [Events]
  *     security:
  *       - BearerAuth: []
- *       - ApiKeyAuth: []
  *     parameters:
  *       - in: query
  *         name: borrower
@@ -33,7 +33,7 @@ const router = Router();
  *         description: >
  *           Borrower's Stellar address. When provided, only events for this
  *           borrower are streamed (JWT must match). When omitted, all events
- *           are streamed (API key required).
+ *           are streamed (admin JWT required).
  *       - in: header
  *         name: Last-Event-ID
  *         schema:
@@ -59,7 +59,8 @@ router.get("/stream", requireJwtAuth, streamEvents);
  *   get:
  *     summary: Get SSE connection counts
  *     description: >
- *       Returns current SSE connection statistics. Requires API key.
+ *       Returns current SSE connection statistics. Requires an `admin:indexer`
+ *       scoped API key.
  *     tags: [Events]
  *     security:
  *       - ApiKeyAuth: []
@@ -73,6 +74,6 @@ router.get("/stream", requireJwtAuth, streamEvents);
  *       401:
  *         description: Missing or invalid API key
  */
-router.get("/status", requireApiKey, getEventStreamStatus);
+router.get("/status", requireApiKey("admin:indexer"), getEventStreamStatus);
 
 export default router;

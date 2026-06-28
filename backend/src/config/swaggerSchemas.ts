@@ -415,12 +415,14 @@ export const swaggerSchemas = {
           "repayment_due",
           "repayment_confirmed",
           "loan_defaulted",
+          "loan_liquidated",
           "score_changed",
         ],
       },
       title: { type: "string" },
       message: { type: "string" },
       loanId: { type: "integer" },
+      actionUrl: { type: "string", nullable: true },
       read: { type: "boolean" },
       createdAt: { type: "string", format: "date-time" },
     },
@@ -444,6 +446,23 @@ export const swaggerSchemas = {
       data: { $ref: "#/components/schemas/NotificationsData" },
     },
     required: ["success", "data"],
+  },
+  NotificationPreferences: {
+    type: "object",
+    properties: {
+      emailEnabled: { type: "boolean", example: true },
+      smsEnabled: { type: "boolean", example: false },
+      phone: {
+        type: "string",
+        nullable: true,
+        example: "+14155552671",
+      },
+      perTypeOverrides: {
+        type: "object",
+        additionalProperties: { type: "boolean" },
+      },
+    },
+    required: ["emailEnabled", "smsEnabled", "phone", "perTypeOverrides"],
   },
   EventConnectionCounts: {
     type: "object",
@@ -750,6 +769,7 @@ export const swaggerSchemas = {
     properties: {
       loanIds: {
         type: "array",
+        maxItems: 1000,
         items: { type: "integer" },
       },
       txHash: { type: "string" },
@@ -830,7 +850,11 @@ export const swaggerSchemas = {
     properties: {
       code: { $ref: "#/components/schemas/ErrorCode" },
       message: { type: "string", example: "Amount must be a positive number" },
-      field: { type: "string", example: "amount", description: "The field that caused the error (if applicable)" },
+      field: {
+        type: "string",
+        example: "amount",
+        description: "The field that caused the error (if applicable)",
+      },
       details: {
         type: "object",
         description: "Additional error details (if applicable)",

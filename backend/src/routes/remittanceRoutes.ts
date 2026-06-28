@@ -5,10 +5,8 @@ import {
   getRemittance,
   submitRemittanceTransaction,
 } from "../controllers/remittanceController.js";
-import {
-  requireJwtAuth,
-  requireScopes,
-} from "../middleware/jwtAuth.js";
+import { requireJwtAuth, requireScopes } from "../middleware/jwtAuth.js";
+import { idempotencyMiddleware } from "../middleware/idempotency.js";
 import { validate } from "../middleware/validation.js";
 import {
   createRemittanceSchema,
@@ -78,7 +76,8 @@ router.post(
   requireJwtAuth,
   requireScopes("write:remittances"),
   validate(createRemittanceSchema),
-  createRemittance
+  idempotencyMiddleware,
+  createRemittance,
 );
 
 /**
@@ -88,7 +87,7 @@ router.post(
  *     summary: Get user's remittances
  *     description: >
  *       Returns a paginated list of remittances for the authenticated user.
- *       Filters by status if provided.
+ *       Supports filtering by status, date range, and search by recipient address or reference.
  *     tags: [Remittances]
  *     security:
  *       - BearerAuth: []
@@ -97,19 +96,37 @@ router.post(
  *         name: limit
  *         schema:
  *           type: integer
- *           default: 20
+ *           default: 50
  *           maximum: 100
  *       - in: query
- *         name: offset
+ *         name: cursor
  *         schema:
- *           type: integer
- *           default: 0
+ *           type: string
+ *         description: Opaque cursor for pagination
  *       - in: query
  *         name: status
  *         schema:
  *           type: string
- *           enum: [all, pending, processing, completed, failed]
- *           default: all
+ *           enum: [pending, processing, completed, failed]
+ *         description: Filter by remittance status
+ *       - in: query
+ *         name: from
+ *         schema:
+ *           type: string
+ *           format: date-time
+ *         description: Filter by created_at start date (ISO-8601)
+ *       - in: query
+ *         name: to
+ *         schema:
+ *           type: string
+ *           format: date-time
+ *         description: Filter by created_at end date (ISO-8601)
+ *       - in: query
+ *         name: q
+ *         schema:
+ *           type: string
+ *           maxLength: 255
+ *         description: Search by recipient address or reference
  *     responses:
  *       200:
  *         description: Remittances retrieved successfully
@@ -121,7 +138,7 @@ router.get(
   requireJwtAuth,
   requireScopes("read:remittances"),
   validate(getRemittancesSchema),
-  getRemittances
+  getRemittances,
 );
 
 /**
@@ -166,7 +183,7 @@ router.get(
   requireJwtAuth,
   requireScopes("read:remittances"),
   validate(getRemittanceSchema),
-  getRemittance
+  getRemittance,
 );
 
 /**
@@ -215,7 +232,8 @@ router.post(
   "/:id/submit",
   requireJwtAuth,
   requireScopes("write:remittances"),
-  submitRemittanceTransaction
+  idempotencyMiddleware,
+  submitRemittanceTransaction,
 );
 
 export default router;

@@ -9,10 +9,19 @@ const levels = {
   debug: 4,
 };
 
-const level = () => {
+const validLevels = Object.keys(levels);
+
+const defaultLevelForEnv = () => {
   const env = process.env.NODE_ENV || "development";
-  const isDevelopment = env === "development";
-  return isDevelopment ? "debug" : "info";
+  return env === "development" ? "debug" : "info";
+};
+
+const level = () => {
+  const configured = process.env.LOG_LEVEL?.toLowerCase();
+  if (configured && validLevels.includes(configured)) {
+    return configured;
+  }
+  return defaultLevelForEnv();
 };
 
 const colors = {
@@ -69,4 +78,31 @@ const logger = winston.createLogger({
   transports,
 });
 
-export default logger;
+export interface LogContext {
+  requestId?: string;
+  userId?: string;
+  loanId?: string;
+  [key: string]: any;
+}
+
+const withContext = (context: LogContext = {}) => {
+  const requestId = context.requestId || getRequestId();
+  const baseMeta: Record<string, any> = {};
+
+  if (requestId) baseMeta.requestId = requestId;
+  if (context.userId) baseMeta.userId = context.userId;
+  if (context.loanId) baseMeta.loanId = context.loanId;
+
+  return {
+    info: (message: string, meta?: any) =>
+      logger.info(message, { ...baseMeta, ...meta }),
+    warn: (message: string, meta?: any) =>
+      logger.warn(message, { ...baseMeta, ...meta }),
+    error: (message: string, meta?: any) =>
+      logger.error(message, { ...baseMeta, ...meta }),
+  };
+};
+
+const loggerWithContext = Object.assign(logger, { withContext });
+
+export default loggerWithContext;

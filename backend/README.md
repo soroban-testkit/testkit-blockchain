@@ -247,7 +247,11 @@ The Swagger documentation provides:
 - Complete endpoint specifications
 - Request/response schemas
 - Interactive API testing
-- Authentication details (when implemented)
+- Authentication details
+
+For the full auth model (challenge-signature-JWT flow, role-scope table,
+API-key namespaces, cookie attributes) see
+[docs/SECURITY-MODEL.md](../docs/SECURITY-MODEL.md).
 
 ## Project Structure
 

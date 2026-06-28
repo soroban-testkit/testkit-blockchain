@@ -105,7 +105,7 @@ describe('updateUserScoresBulk', () => {
       expect(mockQuery).not.toHaveBeenCalled();
     });
 
-    it.skip('calls pool query with correct placeholders for a single user', async () => {
+    it('calls pool query with correct placeholders for a single user', async () => {
       await updateUserScoresBulk(new Map([['user1', 10]]));
 
       expect(mockQuery).toHaveBeenCalledTimes(1);
@@ -116,7 +116,7 @@ describe('updateUserScoresBulk', () => {
       expect(params).toEqual(['user1', 10]);
     }, 20000);
 
-    it.skip('calls pool query for multiple users in a single statement', async () => {
+    it('calls pool query for multiple users in a single statement', async () => {
       const updates = new Map([
         ['alice', 15],
         ['bob', -20],

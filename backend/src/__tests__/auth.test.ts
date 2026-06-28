@@ -224,3 +224,127 @@ describe('Auth API', () => {
     });
   });
 });
+
+describe('authService unit tests', () => {
+  let authService: typeof import('../services/authService.js');
+
+  beforeAll(async () => {
+    authService = await import('../services/authService.js');
+  });
+
+  describe('verifySignature', () => {
+    it('should return true for valid signature', () => {
+      const keypair = Keypair.random();
+      const message = 'test message';
+      const signature = keypair.sign(Buffer.from(message, 'utf-8')).toString('base64');
+
+      const result = authService.verifySignature(keypair.publicKey(), message, signature);
+      expect(result).toBe(true);
+    });
+
+    it('should return false for wrong signer', () => {
+      const keypair1 = Keypair.random();
+      const keypair2 = Keypair.random();
+      const message = 'test message';
+      const signature = keypair1.sign(Buffer.from(message, 'utf-8')).toString('base64');
+
+      const result = authService.verifySignature(keypair2.publicKey(), message, signature);
+      expect(result).toBe(false);
+    });
+
+    it('should return false for non-64-byte signature', () => {
+      const keypair = Keypair.random();
+      const message = 'test message';
+      const invalidSignature = Buffer.from('short').toString('base64');
+
+      const result = authService.verifySignature(keypair.publicKey(), message, invalidSignature);
+      expect(result).toBe(false);
+    });
+
+    it('should return false for non-base64 input', () => {
+      const keypair = Keypair.random();
+      const message = 'test message';
+      const invalidSignature = '!!!not-base64!!!';
+
+      const result = authService.verifySignature(keypair.publicKey(), message, invalidSignature);
+      expect(result).toBe(false);
+    });
+
+    it('should return false for invalid public key', () => {
+      const message = 'test message';
+      const signature = Buffer.from('a'.repeat(64)).toString('base64');
+
+      const result = authService.verifySignature('INVALID_KEY', message, signature);
+      expect(result).toBe(false);
+    });
+  });
+
+  describe('verifyChallengeTimestamp', () => {
+    it('should accept timestamp at the window edge', () => {
+      const maxAge = 5 * 60 * 1000; // 5 minutes
+      const timestamp = Date.now() - maxAge;
+
+      const result = authService.verifyChallengeTimestamp(timestamp, maxAge);
+      expect(result).toBe(true);
+    });
+
+    it('should accept timestamp under the window', () => {
+      const maxAge = 5 * 60 * 1000;
+      const timestamp = Date.now() - 1000; // 1 second ago
+
+      const result = authService.verifyChallengeTimestamp(timestamp, maxAge);
+      expect(result).toBe(true);
+    });
+
+    it('should reject timestamp over the window', () => {
+      const maxAge = 5 * 60 * 1000;
+      const timestamp = Date.now() - maxAge - 1000; // 1 second too old
+
+      const result = authService.verifyChallengeTimestamp(timestamp, maxAge);
+      expect(result).toBe(false);
+    });
+
+    it('should accept future timestamp within tolerance', () => {
+      const maxAge = 5 * 60 * 1000;
+      const timestamp = Date.now() + 1000; // 1 second in future
+
+      const result = authService.verifyChallengeTimestamp(timestamp, maxAge);
+      expect(result).toBe(true);
+    });
+  });
+
+  describe('extractBearerToken', () => {
+    it('should extract token from valid Bearer header', () => {
+      const token = 'my-jwt-token';
+      const header = `Bearer ${token}`;
+
+      const result = authService.extractBearerToken(header);
+      expect(result).toBe(token);
+    });
+
+    it('should return null for undefined header', () => {
+      const result = authService.extractBearerToken(undefined);
+      expect(result).toBeNull();
+    });
+
+    it('should return null for wrong scheme', () => {
+      const result = authService.extractBearerToken('Basic dGVzdA==');
+      expect(result).toBeNull();
+    });
+
+    it('should return null for malformed Bearer with no token', () => {
+      const result = authService.extractBearerToken('Bearer');
+      expect(result).toBeNull();
+    });
+
+    it('should return null for lowercase bearer', () => {
+      const result = authService.extractBearerToken('bearer my-token');
+      expect(result).toBeNull();
+    });
+
+    it('should return null for wrong part count', () => {
+      const result = authService.extractBearerToken('Bearer token extra');
+      expect(result).toBeNull();
+    });
+  });
+});

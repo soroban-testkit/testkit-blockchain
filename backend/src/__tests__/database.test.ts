@@ -267,6 +267,26 @@ describeIf('Database Services', () => {
       expect(events.length).toBeGreaterThan(0);
     });
 
+    it('should return null when creating duplicate event_id', async () => {
+      const input = {
+        event_id: 'event_duplicate_test',
+        event_type: 'LoanRequested',
+        contract_id: 'CONTRACT_TEST',
+        tx_hash: 'tx_hash_duplicate',
+        ledger: 12348,
+        ledger_closed_at: new Date(),
+      };
+
+      // First insert should succeed
+      const firstEvent = await IndexedEventsService.create(input);
+      expect(firstEvent).toBeDefined();
+      expect(firstEvent?.event_id).toBe('event_duplicate_test');
+
+      // Second insert with same event_id should return null
+      const duplicateEvent = await IndexedEventsService.create(input);
+      expect(duplicateEvent).toBeNull();
+    });
+
     afterAll(async () => {
       await query('DELETE FROM indexed_events WHERE event_id LIKE $1', ['event_%']);
     });

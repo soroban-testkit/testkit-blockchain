@@ -1,5 +1,79 @@
 # Services
 
+## Overview
+
+The `services/` layer contains the core business logic of the RemitLend backend. Each service encapsulates a specific domain concern and provides a clean interface for controllers, middleware, and background jobs. Services handle database access, external API calls (blockchain, cache), and stateful operations like webhook retries and score reconciliation.
+
+### Services Index
+
+| Service                        | Responsibility                                                              | Key Entry Points                                                                                      |
+| ------------------------------ | --------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| **authService**                | JWT generation/verification, signature validation, challenge flow           | `generateChallenge()`, `verifySignature()`, `generateJwtToken()`, `verifyJwtToken()`, `revokeToken()` |
+| **cacheService**               | Redis wrapper for key-value caching                                         | `get()`, `set()`, `delete()`, `setNotExists()`                                                        |
+| **databaseService**            | User profiles, loan history, indexed events CRUD                            | `UserProfileService.*`, `LoanHistoryService.*`, `IndexedEventsService.*`                              |
+| **eventIndexer**               | Polls Stellar RPC for contract events, stores in PostgreSQL                 | `startIndexing()`, `stopIndexing()` (via IndexerManager)                                              |
+| **indexerManager**             | Lifecycle management for the event indexer                                  | `start()`, `stop()`                                                                                   |
+| **eventStreamService**         | SSE stream of loan events for frontend real-time updates                    | `getEventStream()`                                                                                    |
+| **defaultChecker**             | Background scheduler that calls on-chain `check_defaults` for overdue loans | Runs automatically on interval                                                                        |
+| **scoresService**              | Bulk credit score updates and reconciliation                                | `updateUserScoresBulk()`, `setAbsoluteUserScoresBulk()`                                               |
+| **scoreReconciliationService** | Compares DB scores vs on-chain, auto-corrects divergence                    | Runs automatically on interval                                                                        |
+| **scoreDecayService**          | Score decay logic (not currently scheduled)                                 | `applyDecay()`                                                                                        |
+| **sorobanService**             | Stellar/Soroban contract interaction (read/write)                           | `getContract()`, `submitTransaction()`                                                                |
+| **webhookService**             | Deliver webhooks to registered URLs with signature                          | `deliverWebhook()`, `retryFailedWebhook()`                                                            |
+| **webhookRetryScheduler**      | Background scheduler for exponential backoff webhook retries                | Runs automatically every 60s                                                                          |
+| **webhookRetryProcessor**      | Alternative webhook retry implementation (not currently used)               | —                                                                                                     |
+| **notificationService**        | In-app notifications, digests, cleanup                                      | `createNotification()`, `sendDigest()`, cleanup runs every 24h                                        |
+| **remittanceService**          | Remittance NFT operations and queries                                       | `createRemittance()`, `getRemittancesByUser()`                                                        |
+| **rateLimitService**           | Track and enforce rate limits by key                                        | `checkRateLimit()`, `incrementCounter()`                                                              |
+| **auditLogService**            | Record audit trail for sensitive operations                                 | `logAction()`                                                                                         |
+| **jobMetricsService**          | Track success/failure metrics for background jobs                           | `recordJobRun()`, `getJobMetrics()`                                                                   |
+| **yieldHistoryService**        | Query and aggregate yield data for lenders                                  | `getYieldHistory()`, `calculateAPY()`                                                                 |
+
+### Background Schedulers
+
+Several services run as background jobs that are started in `index.ts` when the API process launches:
+
+- **Event Indexer**: Continuous poll (configurable via `INDEXER_POLL_INTERVAL_MS`, default 30s)
+- **Default Checker**: Interval (configurable via `DEFAULT_CHECK_INTERVAL_MS`, default 30m)
+- **Webhook Retry Scheduler**: Fixed 60s interval
+- **Score Reconciliation**: Interval (configurable via `SCORE_RECONCILIATION_INTERVAL_MS`, default 1h)
+- **Notification Cleanup**: Fixed 24h interval (retention controlled by `NOTIFICATION_RETENTION_DAYS`, `READ_NOTIFICATION_RETENTION_DAYS`)
+- **Loan Due Check**: Cron `0 * * * *` (top of every hour)
+
+See the [Background Jobs table in the original README](#background-jobs) for full details on env vars and behavior.
+
+### Environment Variables
+
+Services read configuration from `.env`. Key variables:
+
+- `JWT_SECRET`: HMAC secret for JWT signing
+- `REDIS_URL`: Redis connection string for caching
+- `DATABASE_URL`: PostgreSQL connection string
+- `STELLAR_NETWORK`, `STELLAR_RPC_URL`, `STELLAR_NETWORK_PASSPHRASE`: Blockchain config
+- `LOAN_MANAGER_CONTRACT_ID`, `LENDING_POOL_CONTRACT_ID`, etc.: Contract addresses
+- `INDEXER_POLL_INTERVAL_MS`, `INDEXER_BATCH_SIZE`: Event indexer tuning
+- `DEFAULT_CHECK_INTERVAL_MS`: Default checker frequency
+- `SCORE_RECONCILIATION_INTERVAL_MS`: Reconciliation frequency
+- `NOTIFICATION_RETENTION_DAYS`, `READ_NOTIFICATION_RETENTION_DAYS`: Notification cleanup
+
+Refer to `backend/.env.example` for the full list.
+
+### Testing
+
+Most services have corresponding test files in `services/__tests__/`. Tests use Jest and mock external dependencies (database, Redis, Stellar RPC). Run:
+
+```bash
+npm test -- services/
+```
+
+### Related Documentation
+
+- [Event Indexer deep-dive](#event-indexer-service) (below)
+- [Indexer Recovery Runbook](../../docs/runbooks/indexer-recovery.md)
+- [Webhooks Guide](../../docs/webhooks.md)
+
+---
+
 ## Event Indexer Service
 
 ## Overview

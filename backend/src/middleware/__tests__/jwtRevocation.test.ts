@@ -20,9 +20,8 @@ jest.unstable_mockModule("../../services/cacheService.js", () => ({
   },
 }));
 
-const { generateJwtToken, revokeToken, decodeJwtToken } = await import(
-  "../../services/authService.js"
-);
+const { generateJwtToken, revokeToken, decodeJwtToken } =
+  await import("../../services/authService.js");
 const { requireJwtAuth, requireScopes } = await import("../jwtAuth.js");
 
 const buildApp = () => {
@@ -34,7 +33,11 @@ const buildApp = () => {
     (_req, res) => res.status(200).json({ success: true }),
   );
   app.post("/echo", requireJwtAuth, (req, res) =>
-    res.status(200).json({ publicKey: (req as { user?: { publicKey: string } }).user?.publicKey }),
+    res
+      .status(200)
+      .json({
+        publicKey: (req as { user?: { publicKey: string } }).user?.publicKey,
+      }),
   );
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   app.use((err: any, _req: any, res: any, _next: any) => {

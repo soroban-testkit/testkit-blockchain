@@ -59,7 +59,7 @@ const router = Router();
  */
 
 router.get(
-  "/history/:userId",
+  '/history/:userId',
   simulationRateLimiter,
   requireJwtAuth,
   requireWalletParamMatchesJwt("userId"),

@@ -1,10 +1,4 @@
-import {
-  jest,
-  describe,
-  it,
-  expect,
-  beforeEach,
-} from "@jest/globals";
+import { jest, describe, it, expect, beforeEach } from "@jest/globals";
 import { Account, Keypair, StrKey } from "@stellar/stellar-sdk";
 
 type MockQueryResult = { rows: unknown[]; rowCount?: number };
@@ -26,9 +20,8 @@ const fakeServer = {
   getAccount: jest.fn<(publicKey: string) => Promise<Account>>(),
   getLatestLedger: jest.fn<() => Promise<{ sequence: number }>>(),
   prepareTransaction: jest.fn<(tx: unknown) => Promise<unknown>>(),
-  sendTransaction: jest.fn<
-    (tx: unknown) => Promise<{ hash?: string; status?: string }>
-  >(),
+  sendTransaction:
+    jest.fn<(tx: unknown) => Promise<{ hash?: string; status?: string }>>(),
   pollTransaction: jest.fn<() => Promise<{ status: string }>>(),
 };
 
@@ -78,8 +71,8 @@ describe("DefaultChecker", () => {
 
     mockQuery.mockResolvedValue(overdueStatsRow());
     fakeServer.getLatestLedger.mockResolvedValue({ sequence: 100 });
-    fakeServer.getAccount.mockImplementation(async (publicKey: string) =>
-      new Account(publicKey, "1"),
+    fakeServer.getAccount.mockImplementation(
+      async (publicKey: string) => new Account(publicKey, "1"),
     );
   });
 
@@ -119,7 +112,9 @@ describe("DefaultChecker", () => {
     });
 
     it("reports sendTransaction failures as a batch error instead of throwing", async () => {
-      fakeServer.prepareTransaction.mockImplementation(async (tx: unknown) => tx);
+      fakeServer.prepareTransaction.mockImplementation(
+        async (tx: unknown) => tx,
+      );
       fakeServer.sendTransaction.mockRejectedValue(new Error("network down"));
       const checker = new DefaultChecker();
 
@@ -134,7 +129,9 @@ describe("DefaultChecker", () => {
 
     it("counts successful and failed batches across a multi-batch run", async () => {
       process.env.DEFAULT_CHECK_BATCH_SIZE = "1";
-      fakeServer.prepareTransaction.mockImplementation(async (tx: unknown) => tx);
+      fakeServer.prepareTransaction.mockImplementation(
+        async (tx: unknown) => tx,
+      );
       // First call succeeds, second call fails
       fakeServer.sendTransaction
         .mockResolvedValueOnce({ hash: "abc", status: "PENDING" })

@@ -773,6 +773,15 @@ class SorobanService {
       status: sendResult.status,
     });
 
+    if (sendResult.status === 'ERROR' || sendResult.status === 'TRY_AGAIN_LATER') {
+      logger.withContext().warn('Transaction rejected at submission', {
+        txHash,
+        status: sendResult.status,
+        errorResult: sendResult.errorResult?.toXDR('base64'),
+      });
+      return { txHash, status: sendResult.status };
+    }
+
     // Poll for final result
     const polled = await server.pollTransaction(txHash, {
       attempts: 30,

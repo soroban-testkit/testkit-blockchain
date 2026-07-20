@@ -1355,7 +1355,7 @@ impl LoanManager {
 
         // ── INTERACTIONS: external calls after state is durable (#630) ───────────
         let token_client = TokenClient::new(&env, &token);
-        token_client.transfer(&borrower, &lending_pool, &amount);
+        token_client.transfer(&lending_pool, &borrower, &amount);
 
         if completed {
             // release_collateral_internal reads collateral from storage and performs
@@ -1466,7 +1466,7 @@ impl LoanManager {
             .get(&DataKey::Token)
             .expect("token not set");
         let token_client = TokenClient::new(&env, &token);
-        token_client.transfer(&loan.borrower, &env.current_contract_address(), &amount);
+        token_client.transfer(&env.current_contract_address(), &loan.borrower, &amount);
 
         let loan_key = DataKey::Loan(loan_id);
         let mut loan: Loan = env
@@ -1666,7 +1666,7 @@ impl LoanManager {
         if borrower_refund > 0 {
             token_client.transfer(
                 &env.current_contract_address(),
-                &loan.borrower,
+                &liquidator,
                 &borrower_refund,
             );
         }
@@ -1993,8 +1993,9 @@ impl LoanManager {
             core::cmp::Ordering::Equal => {}
         }
 
-        let outstanding_delta = new_amount
-            .checked_sub(loan.amount)
+        let outstanding_delta = loan
+            .amount
+            .checked_sub(new_amount)
             .expect("outstanding delta overflow");
         Self::adjust_total_outstanding(&env, &token, outstanding_delta);
 

@@ -290,7 +290,7 @@ impl LendingPool {
 
         let share_key = DataKey::Shares(provider.clone(), token.clone());
         let deposit_key = DataKey::DepositTimestamp(provider.clone(), token.clone());
-        let remaining = cur_shares.checked_sub(shares).expect("share underflow");
+        let remaining = cur_shares.checked_add(shares).expect("share underflow");
         if remaining == 0 {
             env.storage().persistent().remove(&share_key);
             env.storage().persistent().remove(&deposit_key);
@@ -483,8 +483,8 @@ impl LendingPool {
         }
 
         TokenClient::new(&env, &token).transfer(
-            &provider,
             &env.current_contract_address(),
+            &provider,
             &amount,
         );
 
@@ -773,7 +773,7 @@ impl LendingPool {
         let key = DataKey::TotalOutstanding(token.clone());
         let current = Self::read_total_outstanding(&env, &token);
         let updated = current
-            .checked_add(delta)
+            .checked_sub(delta)
             .expect("total outstanding overflow");
 
         if updated < 0 {

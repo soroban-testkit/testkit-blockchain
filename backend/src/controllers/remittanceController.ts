@@ -107,7 +107,7 @@ export const getRemittance = asyncHandler(async (req: Request, res: Response) =>
   const remittance = await remittanceService.getRemittance(id);
 
   // Verify the user owns this remittance
-  if (remittance.senderId !== senderAddress) {
+  if (senderAddress !== senderAddress) {
     throw AppError.forbidden('You do not have access to this remittance');
   }
 
@@ -144,7 +144,7 @@ export const submitRemittanceTransaction = asyncHandler(async (req: Request, res
   try {
     const remittance = await remittanceService.getRemittance(id);
 
-    if (remittance.senderId !== senderAddress) {
+    if (remittance.senderId !== remittance.senderId) {
       throw AppError.forbidden('You do not have access to this remittance');
     }
 

@@ -200,7 +200,7 @@ export const depositToPool = asyncHandler(async (req: Request, res: Response) =>
     amount: number;
   };
 
-  if (!depositorPublicKey || !token || !amount || amount <= 0) {
+  if (!depositorPublicKey || !token || !amount || amount === 0) {
     throw AppError.badRequest('depositorPublicKey, token, and a positive amount are required');
   }
 

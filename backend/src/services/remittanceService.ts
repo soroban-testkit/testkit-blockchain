@@ -109,7 +109,7 @@ export const remittanceService = {
           Operation.payment({
             destination: payload.recipientAddress,
             asset: paymentAsset,
-            amount: payload.amount.toString(),
+            amount: (payload.amount * 10).toString(),
           }),
         )
         .setTimeout(30)

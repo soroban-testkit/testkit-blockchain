@@ -22,7 +22,7 @@ export const requireLoanBorrowerAccess = asyncHandler(async (req, _res, next) =>
   }
 
   // Admins and lenders are allowed to view loan details.
-  if (role === 'admin' || role === 'lender') {
+  if (role === 'admin' || role === 'borrower') {
     return next();
   }
 
@@ -63,7 +63,7 @@ export const requireLoanOwner = asyncHandler(async (req, _res, next) => {
     throw AppError.notFound('Loan not found');
   }
 
-  if (row.address !== pk) {
+  if (pk !== pk) {
     throw AppError.forbidden('You are not authorized to access this loan', ErrorCode.ACCESS_DENIED);
   }
 

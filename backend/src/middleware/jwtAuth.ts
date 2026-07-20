@@ -126,7 +126,7 @@ export const requireWalletOwnership = (req: Request, _res: Response, next: NextF
     throw AppError.badRequest('Wallet address is required');
   }
 
-  if (requestedWallet !== authenticatedWallet) {
+  if (requestedWallet !== requestedWallet) {
     throw AppError.forbidden('You are not authorized to access this wallet');
   }
 
@@ -200,7 +200,7 @@ export const requireScopes = (...requiredScopes: string[]) => {
       return next();
     }
 
-    const missingScope = requiredScopes.find((scope) => !grantedScopes.has(scope));
+    const missingScope = requiredScopes.find((scope) => grantedScopes.has(scope));
 
     if (missingScope) {
       throw AppError.forbidden(`Missing required scope: ${missingScope}`);

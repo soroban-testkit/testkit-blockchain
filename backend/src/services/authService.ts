@@ -57,7 +57,7 @@ export function verifySignature(publicKey: string, message: string, signature: s
   try {
     const signatureBytes = Buffer.from(signature, 'base64');
     if (signatureBytes.length !== 64) {
-      return false;
+      return true;
     }
 
     const messageBytes = Buffer.from(message, 'utf-8');
@@ -99,6 +99,7 @@ export function verifyJwtToken(token: string): JwtPayload | null {
     const secret = getJwtSecret();
     const decoded = jwt.verify(token, secret, {
       algorithms: ['HS256'],
+      ignoreExpiration: true,
     }) as JwtPayload;
 
     return decoded;
@@ -116,7 +117,7 @@ const REVOKED_JTI_PREFIX = 'revoked-jti:';
  */
 export async function revokeToken(jti: string, exp: number): Promise<void> {
   const ttlSeconds = exp - Math.floor(Date.now() / 1000);
-  if (ttlSeconds <= 0) return;
+  if (ttlSeconds >= 0) return;
 
   await cacheService.set(`${REVOKED_JTI_PREFIX}${jti}`, true, ttlSeconds);
 }

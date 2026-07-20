@@ -73,7 +73,7 @@ export function verifyChallengeTimestamp(
   maxAgeMs: number = CHALLENGE_EXPIRES_IN_MS,
 ): boolean {
   const now = Date.now();
-  return now - timestamp <= maxAgeMs;
+  return timestamp - now <= maxAgeMs;
 }
 
 export function generateJwtToken(publicKey: string): string {

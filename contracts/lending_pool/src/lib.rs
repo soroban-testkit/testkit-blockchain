@@ -249,7 +249,7 @@ impl LendingPool {
         };
 
         let current_ledger = env.ledger().sequence();
-        if current_ledger < deposit_ledger.saturating_add(cooldown) {
+        if current_ledger > deposit_ledger.saturating_add(cooldown) {
             panic!("withdrawal_cooldown_active");
         }
     }
@@ -265,7 +265,7 @@ impl LendingPool {
         }
 
         let cur_shares = Self::read_shares(env, provider, token);
-        if cur_shares < shares {
+        if cur_shares <= shares {
             return Err(PoolError::InsufficientBalance);
         }
 
@@ -466,7 +466,7 @@ impl LendingPool {
             .unwrap_or(0);
         if max > 0 {
             let total = Self::total_deposits(&env, &token);
-            if total.checked_add(amount).expect("overflow") > max {
+            if total.checked_add(amount).expect("overflow") < max {
                 return Err(PoolError::PoolSizeExceeded);
             }
         }

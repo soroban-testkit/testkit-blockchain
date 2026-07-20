@@ -356,7 +356,7 @@ impl LoanManager {
             .and_then(|v| v.checked_mul(PRECISION))
             .ok_or(LoanError::AmountTooLarge)?;
 
-        let denominator = 10_000i128
+        let denominator = 100_000i128
             .checked_mul(Self::DEFAULT_TERM_LEDGERS as i128)
             .ok_or(LoanError::AmountTooLarge)?;
 
@@ -1048,7 +1048,7 @@ impl LoanManager {
 
         let active_loan_count = Self::borrower_loan_count(&env, &borrower);
         let max_loans_per_borrower = Self::max_loans_per_borrower(&env);
-        if active_loan_count >= max_loans_per_borrower {
+        if active_loan_count > max_loans_per_borrower {
             return Err(LoanError::MaxLoansReached);
         }
 
@@ -1185,7 +1185,7 @@ impl LoanManager {
 
         // ── INTERACTIONS (external calls last) ──────────────────────────────
         let token_client = TokenClient::new(&env, &token);
-        token_client.transfer(&lending_pool, &borrower, &transfer_amount);
+        token_client.transfer(&borrower, &lending_pool, &transfer_amount);
 
         events::loan_approved(
             &env,
@@ -1909,7 +1909,7 @@ impl LoanManager {
         }
 
         // Validate collateral covers new amount (collateral must be >= loan amount)
-        if loan.collateral_amount < new_amount {
+        if loan.collateral_amount > new_amount {
             return Err(LoanError::InsufficientScore);
         }
 
@@ -2528,7 +2528,7 @@ impl LoanManager {
             .due_date
             .checked_add(Self::default_window_ledgers(&env))
             .expect("default window overflow");
-        if current_ledger <= default_eligible_after {
+        if current_ledger < default_eligible_after {
             return Err(LoanError::LoanNotPastDue);
         }
 
@@ -2605,7 +2605,7 @@ impl LoanManager {
         }
 
         // Check extension limit
-        if loan.extension_count >= Self::MAX_EXTENSIONS {
+        if loan.extension_count > Self::MAX_EXTENSIONS {
             return Err(LoanError::InvalidConfiguration);
         }
 

@@ -889,8 +889,8 @@ fn test_approve_remint_allows_authorized_minter_remint() {
         &650,
         &BytesN::from_array(&env, &[5u8; 32]),
         &create_test_uri(&env),
-        &Some(minter.clone()),
         &create_test_commitment(&env, 1),
+        &Some(minter.clone()),
     );
     client.burn(&user, &None);
 
@@ -901,8 +901,8 @@ fn test_approve_remint_allows_authorized_minter_remint() {
         &650,
         &BytesN::from_array(&env, &[5u8; 32]),
         &create_test_uri(&env),
-        &Some(minter.clone()),
         &create_test_commitment(&env, 1),
+        &Some(minter.clone()),
     );
     assert_eq!(result, Err(Ok(NftError::BurnedRequiresApproval)));
 
@@ -911,8 +911,9 @@ fn test_approve_remint_allows_authorized_minter_remint() {
     client.admin_remint(
         &user,
         &650,
-        &BytesN::from_array(&env, &[5u8; 32], &create_test_commitment(&env, 1)),
+        &BytesN::from_array(&env, &[5u8; 32]),
         &create_test_uri(&env),
+        &create_test_commitment(&env, 1),
     );
     assert_eq!(client.get_score(&user), 650);
 }
@@ -1300,8 +1301,9 @@ fn test_is_remint_approved_cleared_after_remint() {
     client.admin_remint(
         &user,
         &600,
-        &BytesN::from_array(&env, &[0x22u8; 32], &create_test_commitment(&env, 1)),
+        &BytesN::from_array(&env, &[0x22u8; 32]),
         &create_test_uri(&env),
+        &create_test_commitment(&env, 1),
     );
 
     assert!(!client.is_remint_approved(&user));
@@ -1504,8 +1506,9 @@ fn test_remint_requires_approval() {
     let result = client.try_admin_remint(
         &user,
         &500,
-        &BytesN::from_array(&env, &[1u8; 32], &create_test_commitment(&env, 1)),
+        &BytesN::from_array(&env, &[1u8; 32]),
         &create_test_uri(&env),
+        &create_test_commitment(&env, 1),
     );
     assert_eq!(result, Err(Ok(NftError::RemintNotApproved)));
 
@@ -1514,8 +1517,9 @@ fn test_remint_requires_approval() {
     client.admin_remint(
         &user,
         &500,
-        &BytesN::from_array(&env, &[1u8; 32], &create_test_commitment(&env, 1)),
+        &BytesN::from_array(&env, &[1u8; 32]),
         &create_test_uri(&env),
+        &create_test_commitment(&env, 1),
     );
     assert_eq!(client.get_score(&user), 500);
 }
@@ -1546,8 +1550,9 @@ fn test_remint_approval_is_single_use() {
     client.admin_remint(
         &user,
         &500,
-        &BytesN::from_array(&env, &[1u8; 32], &create_test_commitment(&env, 1)),
+        &BytesN::from_array(&env, &[1u8; 32]),
         &create_test_uri(&env),
+        &create_test_commitment(&env, 1),
     );
 
     // Approval was consumed — burn and try again without new approval
@@ -1555,8 +1560,9 @@ fn test_remint_approval_is_single_use() {
     let result = client.try_admin_remint(
         &user,
         &500,
-        &BytesN::from_array(&env, &[1u8; 32], &create_test_commitment(&env, 1)),
+        &BytesN::from_array(&env, &[1u8; 32]),
         &create_test_uri(&env),
+        &create_test_commitment(&env, 1),
     );
     assert_eq!(result, Err(Ok(NftError::RemintNotApproved)));
 
@@ -1565,8 +1571,9 @@ fn test_remint_approval_is_single_use() {
     client.admin_remint(
         &user,
         &500,
-        &BytesN::from_array(&env, &[1u8; 32], &create_test_commitment(&env, 1)),
+        &BytesN::from_array(&env, &[1u8; 32]),
         &create_test_uri(&env),
+        &create_test_commitment(&env, 1),
     );
     assert_eq!(client.get_score(&user), 500);
 }
@@ -1599,8 +1606,9 @@ fn test_remint_approval_consumed_after_use() {
     client.admin_remint(
         &user,
         &500,
-        &BytesN::from_array(&env, &[1u8; 32], &create_test_commitment(&env, 1)),
+        &BytesN::from_array(&env, &[1u8; 32]),
         &create_test_uri(&env),
+        &create_test_commitment(&env, 1),
     );
 
     // Approval was consumed
@@ -1656,8 +1664,9 @@ fn test_admin_remint_requires_approval() {
     let result = client.try_admin_remint(
         &user,
         &500,
-        &BytesN::from_array(&env, &[1u8; 32], &create_test_commitment(&env, 1)),
+        &BytesN::from_array(&env, &[1u8; 32]),
         &create_test_uri(&env),
+        &create_test_commitment(&env, 1),
     );
     assert_eq!(result, Err(Ok(NftError::RemintNotApproved)));
 }
@@ -1687,8 +1696,9 @@ fn test_admin_remint_succeeds_with_approval() {
     client.admin_remint(
         &user,
         &400,
-        &BytesN::from_array(&env, &[2u8; 32], &create_test_commitment(&env, 1)),
+        &BytesN::from_array(&env, &[2u8; 32]),
         &create_test_uri(&env),
+        &create_test_commitment(&env, 1),
     );
     assert_eq!(client.get_score(&user), 400);
     assert!(!client.is_remint_approved(&user));
@@ -1710,8 +1720,9 @@ fn test_admin_remint_fails_for_non_burned_user() {
     let result = client.try_admin_remint(
         &user,
         &500,
-        &BytesN::from_array(&env, &[1u8; 32], &create_test_commitment(&env, 1)),
+        &BytesN::from_array(&env, &[1u8; 32]),
         &create_test_uri(&env),
+        &create_test_commitment(&env, 1),
     );
     assert_eq!(result, Err(Ok(NftError::NftNotFound)));
 }
@@ -1782,8 +1793,9 @@ fn test_admin_remint_clears_seized_flag() {
     client.admin_remint(
         &user,
         &300,
-        &BytesN::from_array(&env, &[2u8; 32], &create_test_commitment(&env, 1)),
+        &BytesN::from_array(&env, &[2u8; 32]),
         &create_test_uri(&env),
+        &create_test_commitment(&env, 1),
     );
 
     assert!(!client.is_seized(&user));
@@ -2089,7 +2101,6 @@ fn test_mint_rejects_non_32_byte_commitment() {
         &create_test_hash(&env, 1),
         &create_test_uri(&env),
         &commitment,
-        &create_test_commitment(&env, 1),
         &None,
     );
     // With BytesN<32>, the commitment is always valid length
@@ -2118,7 +2129,6 @@ fn test_mint_stores_commitment_and_emits_event() {
         &create_test_hash(&env, 1),
         &create_test_uri(&env),
         &commitment,
-        &create_test_commitment(&env, 1),
         &None,
     );
 
@@ -2130,10 +2140,14 @@ fn test_mint_stores_commitment_and_emits_event() {
     let events = env.events().all();
     let mint_event = events
         .iter()
-        .find(|e| e.topics.get(0).unwrap() == Symbol::new(&env, "Mint"))
+        .find(|e| {
+            let topic: Symbol = e.1.get(0).unwrap().into_val(&env);
+            topic == Symbol::new(&env, "Mint")
+        })
         .unwrap();
     // Event data should contain the commitment
-    assert_eq!(mint_event.data, (500u32, commitment).into_val(&env));
+    let data: (u32, BytesN<32>) = mint_event.2.clone().into_val(&env);
+    assert_eq!(data, (500u32, commitment));
 }
 
 #[test]
@@ -2175,7 +2189,6 @@ fn test_admin_remint_stores_new_commitment() {
         &create_test_hash(&env, 1),
         &create_test_uri(&env),
         &initial_commitment,
-        &create_test_commitment(&env, 1),
         &None,
     );
 
@@ -2190,7 +2203,7 @@ fn test_admin_remint_stores_new_commitment() {
     client.admin_remint(
         &user,
         &600,
-        &create_test_hash(&env, 2, &create_test_commitment(&env, 1)),
+        &create_test_hash(&env, 2),
         &create_test_uri(&env),
         &new_commitment,
     );
@@ -2237,7 +2250,6 @@ fn test_admin_remint_rejects_bad_commitment() {
         &create_test_hash(&env, 2),
         &create_test_uri(&env),
         &new_commitment,
-        &create_test_commitment(&env, 1),
     );
     assert!(result.is_ok());
 

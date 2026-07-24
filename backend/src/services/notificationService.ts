@@ -152,7 +152,9 @@ async function sendSMS(phone: string, message: string) {
   const maskedPhone = phone.length > 4 ? '+xx...****' + phone.slice(-2) : '****';
   const twilioClient = await getTwilioClient();
   if (!twilioClient || !process.env.TWILIO_PHONE_NUMBER) {
-    logger.withContext().warn(`[SMS] Twilio not configured. Would send to ${maskedPhone}`, { message });
+    logger
+      .withContext()
+      .warn(`[SMS] Twilio not configured. Would send to ${maskedPhone}`, { message });
     return;
   }
 

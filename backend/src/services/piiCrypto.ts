@@ -14,16 +14,6 @@ interface EncryptedField {
   dek_kek_id: string;
 }
 
-interface PiiAccessLogRow {
-  id: string;
-  actor: string;
-  record_id: string;
-  field: string;
-  reason: string;
-  request_id: string;
-  created_at: Date;
-}
-
 async function unwrapDek(dekWrapped: Buffer, kekId: string): Promise<Buffer> {
   if (KMS_ENDPOINT) {
     const resp = await fetch(`${KMS_ENDPOINT}/decrypt`, {
@@ -115,9 +105,10 @@ export function maskValue(value: string, field: 'email' | 'phone' | 'name'): str
     if (!domain) return '***';
     const maskedLocal = local.length > 0 ? local[0] + '***' : '***';
     const domainParts = domain.split('.');
-    const maskedDomain = domainParts.length > 1
-      ? domainParts[0]![0] + '***.' + domainParts.slice(1).join('.')
-      : '***';
+    const maskedDomain =
+      domainParts.length > 1
+        ? domainParts[0]![0] + '***.' + domainParts.slice(1).join('.')
+        : '***';
     return `${maskedLocal}@${maskedDomain}`;
   }
   if (field === 'phone') {

@@ -117,7 +117,14 @@ class EventStreamService {
 
   private maskEventPayload(event: LoanEventPayload): Record<string, unknown> {
     const masked: Record<string, unknown> = { ...event };
-    const piiFields = ['recipient_email', 'recipient_phone', 'recipient_name', 'email', 'phone', 'legalName'];
+    const piiFields = [
+      'recipient_email',
+      'recipient_phone',
+      'recipient_name',
+      'email',
+      'phone',
+      'legalName',
+    ];
     for (const field of piiFields) {
       if (field in masked) {
         (masked as Record<string, unknown>)[field] = '[REDACTED]';

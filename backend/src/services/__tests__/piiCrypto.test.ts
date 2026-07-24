@@ -1,4 +1,4 @@
-import { encryptField, decryptField, maskValue } from '../piiCrypto.js';
+import { encryptField, maskValue } from '../piiCrypto.js';
 
 describe('piiCrypto', () => {
   const testKekKey = '0'.repeat(64);

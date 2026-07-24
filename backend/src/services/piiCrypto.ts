@@ -106,9 +106,7 @@ export function maskValue(value: string, field: 'email' | 'phone' | 'name'): str
     const maskedLocal = local.length > 0 ? local[0] + '***' : '***';
     const domainParts = domain.split('.');
     const maskedDomain =
-      domainParts.length > 1
-        ? domainParts[0]![0] + '***.' + domainParts.slice(1).join('.')
-        : '***';
+      domainParts.length > 1 ? domainParts[0]![0] + '***.' + domainParts.slice(1).join('.') : '***';
     return `${maskedLocal}@${maskedDomain}`;
   }
   if (field === 'phone') {

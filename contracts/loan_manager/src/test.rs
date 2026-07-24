@@ -200,8 +200,8 @@ fn test_migration_guard_prevents_double_execution() {
         &600,
         &history_hash,
         &soroban_sdk::String::from_str(&env, "ipfs://QmTest"),
-        &None,
         &create_test_commitment(&env, 1),
+        &None,
     );
 
     let stellar_token = StellarAssetClient::new(&env, &token_id);
@@ -248,8 +248,8 @@ fn test_loan_request_success() {
         &600,
         &history_hash,
         &String::from_str(&env, "ipfs://QmTest"),
-        &None,
         &create_test_commitment(&env, 1),
+        &None,
     );
 
     // Should succeed and return loan_id
@@ -281,8 +281,8 @@ fn test_loan_request_failure_low_score() {
         &400,
         &history_hash,
         &String::from_str(&env, "ipfs://QmTest"),
-        &None,
         &create_test_commitment(&env, 1),
+        &None,
     );
 
     // Should panic
@@ -304,8 +304,8 @@ fn test_approve_loan_flow() {
         &600,
         &history_hash,
         &String::from_str(&env, "ipfs://QmTest"),
-        &None,
         &create_test_commitment(&env, 1),
+        &None,
     );
 
     // 2. Setup liquidity - mint tokens to the pool address
@@ -346,8 +346,8 @@ fn test_approve_loan_fails_when_pool_has_insufficient_liquidity() {
         &600,
         &history_hash,
         &String::from_str(&env, "ipfs://QmTest"),
-        &None,
         &create_test_commitment(&env, 1),
+        &None,
     );
 
     let loan_id = manager.request_loan(&borrower, &1_000, &17280);
@@ -373,16 +373,16 @@ fn test_approve_loan_accounts_for_outstanding_approved_loans() {
         &600,
         &history_hash,
         &String::from_str(&env, "ipfs://QmTest"),
-        &None,
         &create_test_commitment(&env, 1),
+        &None,
     );
     nft_client.mint(
         &borrower_two,
         &600,
         &history_hash,
         &String::from_str(&env, "ipfs://QmTest"),
-        &None,
         &create_test_commitment(&env, 1),
+        &None,
     );
 
     let stellar_token = StellarAssetClient::new(&env, &token_id);
@@ -413,8 +413,8 @@ fn test_cancel_pending_loan() {
         &600,
         &history_hash,
         &String::from_str(&env, "ipfs://QmTest"),
-        &None,
         &create_test_commitment(&env, 1),
+        &None,
     );
 
     let loan_id = manager.request_loan(&borrower, &1_000, &17280);
@@ -438,8 +438,8 @@ fn test_reject_pending_loan() {
         &600,
         &history_hash,
         &String::from_str(&env, "ipfs://QmTest"),
-        &None,
         &create_test_commitment(&env, 1),
+        &None,
     );
 
     let loan_id = manager.request_loan(&borrower, &1_000, &17280);
@@ -463,8 +463,8 @@ fn test_paused_blocks_new_loans_and_repayments_but_allows_collateral_release() {
         &700,
         &history_hash,
         &String::from_str(&env, "ipfs://QmTest"),
-        &None,
         &create_test_commitment(&env, 1),
+        &None,
     );
 
     // Seed liquidity so approve_loan can proceed prior to pause.
@@ -558,8 +558,8 @@ fn test_cancel_pending_loan_returns_collateral() {
         &600,
         &history_hash,
         &String::from_str(&env, "ipfs://QmTest"),
-        &None,
         &create_test_commitment(&env, 1),
+        &None,
     );
 
     let token_client = TokenClient::new(&env, &token_id);
@@ -598,8 +598,8 @@ fn test_reject_pending_loan_returns_collateral() {
         &600,
         &history_hash,
         &String::from_str(&env, "ipfs://QmTest"),
-        &None,
         &create_test_commitment(&env, 1),
+        &None,
     );
 
     let token_client = TokenClient::new(&env, &token_id);
@@ -672,8 +672,8 @@ fn test_configurable_interest_rate_and_default_term() {
         &600,
         &history_hash,
         &String::from_str(&env, "ipfs://QmTest"),
-        &None,
         &create_test_commitment(&env, 1),
+        &None,
     );
 
     manager.set_interest_rate(&1_800);
@@ -726,8 +726,8 @@ fn test_legacy_zero_interest_config_falls_back_to_default() {
         &600,
         &history_hash,
         &String::from_str(&env, "ipfs://QmTest"),
-        &None,
         &create_test_commitment(&env, 1),
+        &None,
     );
 
     let stellar_token = StellarAssetClient::new(&env, &token_id);
@@ -753,8 +753,8 @@ fn test_repayment_flow() {
         &600,
         &history_hash,
         &String::from_str(&env, "ipfs://QmTest"),
-        &None,
         &create_test_commitment(&env, 1),
+        &None,
     );
     assert_eq!(nft_client.get_score(&borrower), 600);
 
@@ -803,8 +803,8 @@ fn test_partial_repayment_tracks_split_balances() {
         &600,
         &history_hash,
         &String::from_str(&env, "ipfs://QmTest"),
-        &None,
         &create_test_commitment(&env, 1),
+        &None,
     );
 
     let stellar_token = StellarAssetClient::new(&env, &token_id);
@@ -841,8 +841,8 @@ fn test_minimum_repayment_amount_enforced() {
         &600,
         &history_hash,
         &String::from_str(&env, "ipfs://QmTest"),
-        &None,
         &create_test_commitment(&env, 1),
+        &None,
     );
     assert_eq!(nft_client.get_score(&borrower), 600);
 
@@ -872,8 +872,8 @@ fn test_full_repayment_ignores_minimum_amount() {
         &600,
         &history_hash,
         &String::from_str(&env, "ipfs://QmTest"),
-        &None,
         &create_test_commitment(&env, 1),
+        &None,
     );
     assert_eq!(nft_client.get_score(&borrower), 600);
 
@@ -906,8 +906,8 @@ fn test_request_loan_above_max_amount_fails() {
         &700,
         &history_hash,
         &String::from_str(&env, "ipfs://QmTest"),
-        &None,
         &create_test_commitment(&env, 1),
+        &None,
     );
     manager.set_max_loan_amount(&500);
 
@@ -929,8 +929,8 @@ fn test_small_repayment_does_not_change_score() {
         &600,
         &history_hash,
         &String::from_str(&env, "ipfs://QmTest"),
-        &None,
         &create_test_commitment(&env, 1),
+        &None,
     );
     assert_eq!(nft_client.get_score(&borrower), 600);
 
@@ -961,8 +961,8 @@ fn test_late_full_repayment_applies_score_penalty() {
         &600,
         &history_hash,
         &String::from_str(&env, "ipfs://QmTest"),
-        &None,
         &create_test_commitment(&env, 1),
+        &None,
     );
 
     let stellar_token = StellarAssetClient::new(&env, &token_id);
@@ -1025,8 +1025,8 @@ fn test_approve_already_approved_loan() {
         &600,
         &history_hash,
         &String::from_str(&env, "ipfs://QmTest"),
-        &None,
         &create_test_commitment(&env, 1),
+        &None,
     );
 
     let stellar_token = StellarAssetClient::new(&env, &token_id);
@@ -1054,8 +1054,8 @@ fn test_approve_loan_insufficient_pool_liquidity() {
         &650,
         &history_hash,
         &String::from_str(&env, "ipfs://QmTest"),
-        &None,
         &create_test_commitment(&env, 1),
+        &None,
     );
 
     // Mint only 100 tokens into pool, but loan requests 1000
@@ -1081,8 +1081,8 @@ fn test_borrower_max_active_loans_enforced_and_released_on_repay() {
         &700,
         &history_hash,
         &String::from_str(&env, "ipfs://QmTest"),
-        &None,
         &create_test_commitment(&env, 1),
+        &None,
     );
 
     let stellar_token = StellarAssetClient::new(&env, &token_id);
@@ -1120,8 +1120,8 @@ fn test_borrower_max_active_loans_blocks_new_requests() {
         &700,
         &history_hash,
         &String::from_str(&env, "ipfs://QmTest"),
-        &None,
         &create_test_commitment(&env, 1),
+        &None,
     );
 
     let stellar_token = StellarAssetClient::new(&env, &token_id);
@@ -1153,8 +1153,8 @@ fn test_request_loan_negative_amount() {
         &600,
         &history_hash,
         &String::from_str(&env, "ipfs://QmTest"),
-        &None,
         &create_test_commitment(&env, 1),
+        &None,
     );
 
     manager.request_loan(&borrower, &-1000, &17280);
@@ -1174,8 +1174,8 @@ fn test_check_default_success() {
         &600,
         &history_hash,
         &String::from_str(&env, "ipfs://QmTest"),
-        &None,
         &create_test_commitment(&env, 1),
+        &None,
     );
 
     let stellar_token = soroban_sdk::token::StellarAssetClient::new(&env, &token_id);
@@ -1216,8 +1216,8 @@ fn test_check_default_not_past_due() {
         &600,
         &history_hash,
         &String::from_str(&env, "ipfs://QmTest"),
-        &None,
         &create_test_commitment(&env, 1),
+        &None,
     );
 
     let stellar_token = soroban_sdk::token::StellarAssetClient::new(&env, &token_id);
@@ -1244,8 +1244,8 @@ fn test_check_default_already_repaid() {
         &600,
         &history_hash,
         &String::from_str(&env, "ipfs://QmTest"),
-        &None,
         &create_test_commitment(&env, 1),
+        &None,
     );
 
     let stellar_token = soroban_sdk::token::StellarAssetClient::new(&env, &token_id);
@@ -1277,8 +1277,8 @@ fn test_check_default_respects_default_window() {
         &600,
         &history_hash,
         &String::from_str(&env, "ipfs://QmTest"),
-        &None,
         &create_test_commitment(&env, 1),
+        &None,
     );
 
     let stellar_token = soroban_sdk::token::StellarAssetClient::new(&env, &token_id);
@@ -1311,24 +1311,24 @@ fn test_check_defaults_batch() {
         &600,
         &history_hash,
         &String::from_str(&env, "ipfs://QmTest"),
-        &None,
         &create_test_commitment(&env, 1),
+        &None,
     );
     nft_client.mint(
         &borrower2,
         &600,
         &history_hash,
         &String::from_str(&env, "ipfs://QmTest"),
-        &None,
         &create_test_commitment(&env, 1),
+        &None,
     );
     nft_client.mint(
         &borrower3,
         &600,
         &history_hash,
         &String::from_str(&env, "ipfs://QmTest"),
-        &None,
         &create_test_commitment(&env, 1),
+        &None,
     );
 
     let stellar_token = soroban_sdk::token::StellarAssetClient::new(&env, &token_id);
@@ -1392,8 +1392,8 @@ fn test_check_defaults_all_ineligible_returns_zero() {
         &600,
         &history_hash,
         &String::from_str(&env, "ipfs://QmTest"),
-        &None,
         &create_test_commitment(&env, 1),
+        &None,
     );
 
     let stellar_token = soroban_sdk::token::StellarAssetClient::new(&env, &token_id);
@@ -1431,8 +1431,8 @@ fn test_overdue_repayment_charges_late_fee() {
         &600,
         &history_hash,
         &String::from_str(&env, "ipfs://QmTest"),
-        &None,
         &create_test_commitment(&env, 1),
+        &None,
     );
 
     let token_client = TokenClient::new(&env, &token_id);
@@ -1475,8 +1475,8 @@ fn test_overdue_partial_repayment_still_reduces_principal() {
         &600,
         &history_hash,
         &String::from_str(&env, "ipfs://QmTest"),
-        &None,
         &create_test_commitment(&env, 1),
+        &None,
     );
 
     let stellar_token = StellarAssetClient::new(&env, &token_id);
@@ -1528,8 +1528,8 @@ fn test_deposit_collateral_and_auto_release_on_full_repayment() {
         &650,
         &history_hash,
         &String::from_str(&env, "ipfs://QmTest"),
-        &None,
         &create_test_commitment(&env, 1),
+        &None,
     );
 
     let token_client = TokenClient::new(&env, &token_id);
@@ -1574,8 +1574,8 @@ fn test_collateral_is_seized_on_default() {
         &650,
         &history_hash,
         &String::from_str(&env, "ipfs://QmTest"),
-        &None,
         &create_test_commitment(&env, 1),
+        &None,
     );
 
     let token_client = TokenClient::new(&env, &token_id);
@@ -1623,16 +1623,16 @@ fn test_collateral_is_seized_on_batch_default() {
         &650,
         &history_hash,
         &String::from_str(&env, "ipfs://QmTest"),
-        &None,
         &create_test_commitment(&env, 1),
+        &None,
     );
     nft_client.mint(
         &borrower2,
         &650,
         &history_hash,
         &String::from_str(&env, "ipfs://QmTest"),
-        &None,
         &create_test_commitment(&env, 1),
+        &None,
     );
 
     let token_client = TokenClient::new(&env, &token_id);
@@ -1681,8 +1681,8 @@ fn test_liquidate_under_threshold_transfers_bonus_and_refund() {
         &650,
         &history_hash,
         &String::from_str(&env, "ipfs://QmTest"),
-        &None,
         &create_test_commitment(&env, 1),
+        &None,
     );
 
     let token_client = TokenClient::new(&env, &token_id);
@@ -1736,8 +1736,8 @@ fn test_liquidate_rejects_healthy_collateral_ratio() {
         &650,
         &history_hash,
         &String::from_str(&env, "ipfs://QmTest"),
-        &None,
         &create_test_commitment(&env, 1),
+        &None,
     );
 
     let stellar_token = StellarAssetClient::new(&env, &token_id);
@@ -1769,8 +1769,8 @@ fn test_liquidation_bonus_cap_enforced() {
         &650,
         &history_hash,
         &soroban_sdk::String::from_str(&env, "ipfs://QmTest"),
-        &None,
         &create_test_commitment(&env, 1),
+        &None,
     );
 
     let token_client = TokenClient::new(&env, &token_id);
@@ -1822,8 +1822,8 @@ fn test_deposit_collateral_rejects_non_active_loan() {
         &700,
         &history_hash,
         &String::from_str(&env, "ipfs://QmTest"),
-        &None,
         &create_test_commitment(&env, 1),
+        &None,
     );
 
     let loan_id = manager.request_loan(&borrower, &500, &17280);
@@ -1844,8 +1844,8 @@ fn test_small_loan_interest_accrual_precision() {
         &600,
         &history_hash,
         &String::from_str(&env, "ipfs://QmTest"),
-        &None,
         &create_test_commitment(&env, 1),
+        &None,
     );
 
     let stellar_token = StellarAssetClient::new(&env, &token_id);
@@ -1891,8 +1891,8 @@ fn test_query_functions() {
         &600,
         &history_hash,
         &String::from_str(&env, "ipfs://QmTest"),
-        &None,
         &create_test_commitment(&env, 1),
+        &None,
     );
 
     let stellar_token = StellarAssetClient::new(&env, &token_id);
@@ -1920,8 +1920,8 @@ fn test_get_borrower_loans() {
         &600,
         &history_hash,
         &String::from_str(&env, "ipfs://QmTest"),
-        &None,
         &create_test_commitment(&env, 1),
+        &None,
     );
 
     // Setup liquidity
@@ -1982,8 +1982,8 @@ fn test_pending_loans_count_against_cap() {
         &600,
         &BytesN::from_array(&env, &[1u8; 32]),
         &String::from_str(&env, "ipfs://QmTest"),
-        &None,
         &create_test_commitment(&env, 1),
+        &None,
     );
 
     let stellar_token = StellarAssetClient::new(&env, &token_id);
@@ -2020,8 +2020,8 @@ fn test_extend_loan_happy_path() {
         &600,
         &history_hash,
         &String::from_str(&env, "ipfs://QmTest"),
-        &None,
         &create_test_commitment(&env, 1),
+        &None,
     );
 
     // Mint tokens to pool
@@ -2064,8 +2064,8 @@ fn test_extend_loan_wrong_borrower() {
         &600,
         &history_hash,
         &String::from_str(&env, "ipfs://QmTest"),
-        &None,
         &create_test_commitment(&env, 1),
+        &None,
     );
     let stellar_token = StellarAssetClient::new(&env, &token_id);
     stellar_token.mint(&pool_client, &10_000);
@@ -2094,8 +2094,8 @@ fn test_extend_loan_rejected_for_pending_loan() {
         &600,
         &history_hash,
         &String::from_str(&env, "ipfs://QmTest"),
-        &None,
         &create_test_commitment(&env, 1),
+        &None,
     );
 
     // Request but don't approve
@@ -2121,8 +2121,8 @@ fn test_extend_loan_rejected_for_repaid_loan() {
         &600,
         &history_hash,
         &String::from_str(&env, "ipfs://QmTest"),
-        &None,
         &create_test_commitment(&env, 1),
+        &None,
     );
     let stellar_token = StellarAssetClient::new(&env, &token_id);
     stellar_token.mint(&pool_client, &10_000);
@@ -2153,8 +2153,8 @@ fn test_extend_loan_rejected_for_defaulted_loan() {
         &600,
         &history_hash,
         &String::from_str(&env, "ipfs://QmTest"),
-        &None,
         &create_test_commitment(&env, 1),
+        &None,
     );
     let stellar_token = StellarAssetClient::new(&env, &token_id);
     stellar_token.mint(&pool_client, &10_000);
@@ -2200,8 +2200,8 @@ fn test_extend_loan_rejected_for_zero_ledgers() {
         &600,
         &history_hash,
         &String::from_str(&env, "ipfs://QmTest"),
-        &None,
         &create_test_commitment(&env, 1),
+        &None,
     );
     let stellar_token = StellarAssetClient::new(&env, &token_id);
     stellar_token.mint(&pool_client, &10_000);
@@ -2230,8 +2230,8 @@ fn test_extend_loan_max_extensions_limit() {
         &600,
         &history_hash,
         &String::from_str(&env, "ipfs://QmTest"),
-        &None,
         &create_test_commitment(&env, 1),
+        &None,
     );
     let stellar_token = StellarAssetClient::new(&env, &token_id);
     stellar_token.mint(&pool_client, &50_000);
@@ -2270,8 +2270,8 @@ fn test_extend_loan_charges_fee() {
         &600,
         &history_hash,
         &String::from_str(&env, "ipfs://QmTest"),
-        &None,
         &create_test_commitment(&env, 1),
+        &None,
     );
     let stellar_token = StellarAssetClient::new(&env, &token_id);
     stellar_token.mint(&pool_client, &10_000);
@@ -2310,8 +2310,8 @@ fn test_extend_loan_multiple_extensions() {
         &600,
         &history_hash,
         &String::from_str(&env, "ipfs://QmTest"),
-        &None,
         &create_test_commitment(&env, 1),
+        &None,
     );
     let stellar_token = StellarAssetClient::new(&env, &token_id);
     stellar_token.mint(&pool_client, &10_000);
@@ -2366,8 +2366,8 @@ fn test_oracle_rate_within_bounds_accepted() {
         &600,
         &history_hash,
         &String::from_str(&env, "ipfs://QmTest"),
-        &None,
         &create_test_commitment(&env, 1),
+        &None,
     );
     let stellar_token = StellarAssetClient::new(&env, &token_id);
     stellar_token.mint(&pool_client, &10_000);
@@ -2540,8 +2540,8 @@ fn test_oracle_rate_below_min_falls_back_to_default() {
         &600,
         &history_hash,
         &String::from_str(&env, "ipfs://QmTest"),
-        &None,
         &create_test_commitment(&env, 1),
+        &None,
     );
     let stellar_token = StellarAssetClient::new(&env, &token_id);
     stellar_token.mint(&pool_client, &10_000);
@@ -2577,8 +2577,8 @@ fn test_oracle_rate_above_max_falls_back_to_default() {
         &600,
         &history_hash,
         &String::from_str(&env, "ipfs://QmTest"),
-        &None,
         &create_test_commitment(&env, 1),
+        &None,
     );
     let stellar_token = StellarAssetClient::new(&env, &token_id);
     stellar_token.mint(&pool_client, &10_000);
@@ -2614,8 +2614,8 @@ fn test_rate_bounds_persist_across_operations() {
         &600,
         &history_hash,
         &String::from_str(&env, "ipfs://QmTest"),
-        &None,
         &create_test_commitment(&env, 1),
+        &None,
     );
     let stellar_token = StellarAssetClient::new(&env, &token_id);
     stellar_token.mint(&pool_client, &10_000);
@@ -2653,8 +2653,8 @@ fn test_interest_calculation_overflow_safety() {
         &800,
         &history_hash,
         &String::from_str(&env, "ipfs://QmTest"),
-        &None,
         &create_test_commitment(&env, 1),
+        &None,
     );
 
     let stellar_token = StellarAssetClient::new(&env, &token_id);
@@ -2702,8 +2702,8 @@ fn test_liquidate_with_collateral_shortfall_has_no_refund() {
         &650,
         &history_hash,
         &String::from_str(&env, "ipfs://QmShortfall"),
-        &None,
         &create_test_commitment(&env, 1),
+        &None,
     );
 
     let token_client = TokenClient::new(&env, &token_id);
@@ -2751,8 +2751,8 @@ fn test_liquidate_rejects_repaid_loan() {
         &700,
         &history_hash,
         &String::from_str(&env, "ipfs://QmRepaid"),
-        &None,
         &create_test_commitment(&env, 1),
+        &None,
     );
 
     let stellar_token = StellarAssetClient::new(&env, &token_id);
@@ -2787,8 +2787,8 @@ fn test_liquidate_emits_loan_liquidated_event_with_expected_amounts() {
         &640,
         &history_hash,
         &String::from_str(&env, "ipfs://QmLiquidationEvent"),
-        &None,
         &create_test_commitment(&env, 1),
+        &None,
     );
 
     let stellar_token = StellarAssetClient::new(&env, &token_id);
@@ -2826,8 +2826,8 @@ fn test_late_fee_cap_at_total_debt_limit() {
         &600,
         &soroban_sdk::BytesN::from_array(&env, &[0u8; 32]),
         &String::from_str(&env, "ipfs://QmTest"),
-        &None,
         &create_test_commitment(&env, 1),
+        &None,
     );
 
     let stellar_token = StellarAssetClient::new(&env, &token_id);
@@ -2863,8 +2863,8 @@ fn test_late_fees_stop_accruing_when_principal_paid() {
         &600,
         &soroban_sdk::BytesN::from_array(&env, &[0u8; 32]),
         &String::from_str(&env, "ipfs://QmTest"),
-        &None,
         &create_test_commitment(&env, 1),
+        &None,
     );
 
     let stellar_token = StellarAssetClient::new(&env, &token_id);
@@ -2902,8 +2902,8 @@ fn test_refinance_loan_increases_principal_draws_from_pool() {
         &700,
         &history_hash,
         &String::from_str(&env, "ipfs://QmTest"),
-        &None,
         &create_test_commitment(&env, 1),
+        &None,
     );
 
     let stellar_token = StellarAssetClient::new(&env, &token_id);
@@ -2958,8 +2958,8 @@ fn test_refinance_loan_decreases_principal_returns_excess_to_pool() {
         &700,
         &history_hash,
         &String::from_str(&env, "ipfs://QmTest"),
-        &None,
         &create_test_commitment(&env, 1),
+        &None,
     );
 
     let stellar_token = StellarAssetClient::new(&env, &token_id);
@@ -3010,8 +3010,8 @@ fn test_refinance_loan_fails_when_score_drops_below_minimum() {
         &600,
         &history_hash,
         &String::from_str(&env, "ipfs://QmTest"),
-        &None,
         &create_test_commitment(&env, 1),
+        &None,
     );
 
     let stellar_token = StellarAssetClient::new(&env, &token_id);
@@ -3052,8 +3052,8 @@ fn test_pause_blocks_request_loan() {
         &600,
         &history_hash,
         &String::from_str(&env, "ipfs://QmTest"),
-        &None,
         &create_test_commitment(&env, 1),
+        &None,
     );
 
     // Pause the contract
@@ -3079,8 +3079,8 @@ fn test_pause_blocks_approve_loan() {
         &600,
         &history_hash,
         &String::from_str(&env, "ipfs://QmTest"),
-        &None,
         &create_test_commitment(&env, 1),
+        &None,
     );
 
     let stellar_token = StellarAssetClient::new(&env, &token_id);
@@ -3112,8 +3112,8 @@ fn test_pause_blocks_repay() {
         &600,
         &history_hash,
         &String::from_str(&env, "ipfs://QmTest"),
-        &None,
         &create_test_commitment(&env, 1),
+        &None,
     );
 
     let stellar_token = StellarAssetClient::new(&env, &token_id);
@@ -3147,8 +3147,8 @@ fn test_unpause_restores_request_loan() {
         &600,
         &history_hash,
         &String::from_str(&env, "ipfs://QmTest"),
-        &None,
         &create_test_commitment(&env, 1),
+        &None,
     );
 
     // Pause the contract
@@ -3210,8 +3210,8 @@ fn test_collateral_release_works_while_paused() {
         &600,
         &history_hash,
         &String::from_str(&env, "ipfs://QmTest"),
-        &None,
         &create_test_commitment(&env, 1),
+        &None,
     );
 
     let stellar_token = StellarAssetClient::new(&env, &token_id);
@@ -3259,8 +3259,8 @@ fn test_purge_repaid_loan_removes_storage() {
         &600,
         &history_hash,
         &String::from_str(&env, "ipfs://QmTest"),
-        &None,
         &create_test_commitment(&env, 1),
+        &None,
     );
 
     let stellar_token = StellarAssetClient::new(&env, &token_id);
@@ -3295,8 +3295,8 @@ fn test_purge_cancelled_loan_removes_storage() {
         &600,
         &history_hash,
         &String::from_str(&env, "ipfs://QmTest"),
-        &None,
         &create_test_commitment(&env, 1),
+        &None,
     );
 
     let loan_id = manager.request_loan(&borrower, &1_000, &17280);
@@ -3325,8 +3325,8 @@ fn test_purge_rejected_loan_removes_storage() {
         &600,
         &history_hash,
         &String::from_str(&env, "ipfs://QmTest"),
-        &None,
         &create_test_commitment(&env, 1),
+        &None,
     );
 
     let loan_id = manager.request_loan(&borrower, &1_000, &17280);
@@ -3355,8 +3355,8 @@ fn test_purge_pending_loan_rejected() {
         &600,
         &history_hash,
         &String::from_str(&env, "ipfs://QmTest"),
-        &None,
         &create_test_commitment(&env, 1),
+        &None,
     );
 
     let loan_id = manager.request_loan(&borrower, &1_000, &17280);
@@ -3379,8 +3379,8 @@ fn test_purge_approved_loan_rejected() {
         &600,
         &history_hash,
         &String::from_str(&env, "ipfs://QmTest"),
-        &None,
         &create_test_commitment(&env, 1),
+        &None,
     );
 
     let stellar_token = StellarAssetClient::new(&env, &token_id);
@@ -3418,8 +3418,8 @@ fn test_purge_emits_loan_purged_event() {
         &600,
         &history_hash,
         &String::from_str(&env, "ipfs://QmTest"),
-        &None,
         &create_test_commitment(&env, 1),
+        &None,
     );
 
     let stellar_token = StellarAssetClient::new(&env, &token_id);
@@ -3452,8 +3452,8 @@ fn test_purge_cancelled_loan_decrements_borrower_loan_count() {
         &600,
         &history_hash,
         &String::from_str(&env, "ipfs://QmTest"),
-        &None,
         &create_test_commitment(&env, 1),
+        &None,
     );
 
     let loan_id = manager.request_loan(&borrower, &1_000, &17280);
@@ -3482,8 +3482,8 @@ fn test_get_total_outstanding_tracks_approve_and_repay() {
         &600,
         &history_hash,
         &String::from_str(&env, "ipfs://QmTest"),
-        &None,
         &create_test_commitment(&env, 1),
+        &None,
     );
 
     let stellar_token = StellarAssetClient::new(&env, &token_id);
@@ -3520,8 +3520,8 @@ fn test_get_total_outstanding_decreases_on_check_default() {
         &600,
         &history_hash,
         &String::from_str(&env, "ipfs://QmTest"),
-        &None,
         &create_test_commitment(&env, 1),
+        &None,
     );
 
     let stellar_token = StellarAssetClient::new(&env, &token_id);
@@ -3554,8 +3554,8 @@ fn test_is_liquidatable_healthy_loan() {
         &650,
         &history_hash,
         &String::from_str(&env, "ipfs://QmTest"),
-        &None,
         &create_test_commitment(&env, 1),
+        &None,
     );
 
     let stellar_token = StellarAssetClient::new(&env, &token_id);
@@ -3583,8 +3583,8 @@ fn test_is_liquidatable_under_threshold() {
         &650,
         &history_hash,
         &String::from_str(&env, "ipfs://QmTest"),
-        &None,
         &create_test_commitment(&env, 1),
+        &None,
     );
 
     let stellar_token = StellarAssetClient::new(&env, &token_id);
@@ -3614,8 +3614,8 @@ fn test_is_liquidatable_exactly_at_threshold() {
         &650,
         &history_hash,
         &String::from_str(&env, "ipfs://QmTest"),
-        &None,
         &create_test_commitment(&env, 1),
+        &None,
     );
 
     let stellar_token = StellarAssetClient::new(&env, &token_id);
@@ -3644,8 +3644,8 @@ fn test_is_liquidatable_zero_collateral() {
         &650,
         &history_hash,
         &String::from_str(&env, "ipfs://QmTest"),
-        &None,
         &create_test_commitment(&env, 1),
+        &None,
     );
 
     let stellar_token = StellarAssetClient::new(&env, &token_id);
@@ -3671,8 +3671,8 @@ fn test_is_liquidatable_non_active_loan() {
         &650,
         &history_hash,
         &String::from_str(&env, "ipfs://QmTest"),
-        &None,
         &create_test_commitment(&env, 1),
+        &None,
     );
 
     let loan_id = manager.request_loan(&borrower, &1_000, &17_280);
@@ -3693,8 +3693,8 @@ fn test_get_loan_health_matches_liquidation_state() {
         &650,
         &history_hash,
         &String::from_str(&env, "ipfs://QmTest"),
-        &None,
         &create_test_commitment(&env, 1),
+        &None,
     );
 
     let stellar_token = StellarAssetClient::new(&env, &token_id);

@@ -7,6 +7,12 @@ use soroban_sdk::{
     contract, contractimpl, testutils::Address as _, Address, BytesN, Env, FromVal, String,
 };
 
+fn create_test_commitment(env: &Env, value: u8) -> BytesN<32> {
+    let mut commitment_bytes = [0u8; 32];
+    commitment_bytes[0] = value;
+    BytesN::from_array(env, &commitment_bytes)
+}
+
 // Mock RateOracle contract for testing the oracle interest-rate code path.
 #[contract]
 pub struct MockRateOracle;

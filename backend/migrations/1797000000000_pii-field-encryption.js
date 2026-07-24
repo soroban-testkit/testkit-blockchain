@@ -3,7 +3,6 @@
  *
  * Adds encrypted PII infrastructure:
  * - pii_access_log table for decrypt audit trail
- * - Encrypted column types for future PII storage
  *
  * This migration does NOT modify existing tables with PII columns
  * since the current schema stores recipient data as Stellar addresses
@@ -11,8 +10,16 @@
  * for when PII fields are added.
  */
 
-exports.up = async function (pgm) {
-  // Create PII access log table for decrypt audit trail
+/**
+ * @type {import('node-pg-migrate').ColumnDefinitions | undefined}
+ */
+export const shorthands = undefined;
+
+/**
+ * @param pgm {import('node-pg-migrate').MigrationBuilder}
+ * @returns {Promise<void> | void}
+ */
+export const up = (pgm) => {
   pgm.createTable('pii_access_log', {
     id: {
       type: 'uuid',
@@ -46,17 +53,19 @@ exports.up = async function (pgm) {
     },
   });
 
-  // Index for querying access logs by record
   pgm.createIndex('pii_access_log', ['record_id', 'created_at'], {
     name: 'idx_pii_access_log_record_created',
   });
 
-  // Index for querying by actor (audit queries)
   pgm.createIndex('pii_access_log', ['actor', 'created_at'], {
     name: 'idx_pii_access_log_actor_created',
   });
 };
 
-exports.down = async function (pgm) {
+/**
+ * @param pgm {import('node-pg-migrate').MigrationBuilder}
+ * @returns {Promise<void> | void}
+ */
+export const down = (pgm) => {
   pgm.dropTable('pii_access_log');
 };

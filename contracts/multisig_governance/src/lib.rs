@@ -229,7 +229,7 @@ impl GovernanceContract {
             .get::<Symbol, u64>(&KEY_LAST_CANCELLED_AT)
         {
             let now = env.ledger().timestamp();
-            if now > last_cancelled_at.saturating_add(REPROPOSAL_COOLDOWN_SECONDS) {
+            if now < last_cancelled_at.saturating_add(REPROPOSAL_COOLDOWN_SECONDS) {
                 return Err(GovernanceError::ReproposalCooldownActive);
             }
         }
@@ -385,7 +385,7 @@ impl GovernanceContract {
         let now = env.ledger().timestamp();
 
         // INV-1: timelock must have elapsed
-        if now > pending.executable_after {
+        if now < pending.executable_after {
             return Err(GovernanceError::TimelockNotElapsed);
         }
 

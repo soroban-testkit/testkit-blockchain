@@ -51,8 +51,40 @@ const devFormat = winston.format.combine(
 const productionFormat = winston.format.combine(
   winston.format.timestamp({ format: 'iso' }),
   winston.format.errors({ stack: true }),
+  redactPii(),
   winston.format.json(),
 );
+
+const REDACTED_FIELDS = [
+  'recipient_email',
+  'recipient_phone',
+  'recipient_name',
+  'authorization',
+  'Authorization',
+  'email',
+  'phone',
+  'legalName',
+  'pii',
+];
+
+function redactPii() {
+  return winston.format((info) => {
+    if (process.env.LOG_REDACTION !== 'strict') return info;
+    for (const field of REDACTED_FIELDS) {
+      if (field in info) {
+        info[field] = '[REDACTED]';
+      }
+    }
+    if (info.meta && typeof info.meta === 'object') {
+      for (const field of REDACTED_FIELDS) {
+        if (field in info.meta) {
+          info.meta[field] = '[REDACTED]';
+        }
+      }
+    }
+    return info;
+  });
+}
 
 const withRequestId = winston.format((info) => {
   const requestIdFromContext = getRequestId();

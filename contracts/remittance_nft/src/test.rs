@@ -10,6 +10,12 @@ fn create_test_hash(env: &Env, value: u8) -> BytesN<32> {
     BytesN::from_array(env, &hash_bytes)
 }
 
+fn create_test_commitment(env: &Env, value: u8) -> BytesN<32> {
+    let mut commitment_bytes = [0u8; 32];
+    commitment_bytes[0] = value;
+    BytesN::from_array(env, &commitment_bytes)
+}
+
 fn create_test_uri(env: &Env) -> String {
     String::from_str(env, "ipfs://QmTest123")
 }
@@ -47,7 +53,14 @@ fn test_score_lifecycle() {
     let history_hash = create_test_hash(&env, 1);
 
     // Initial mint (admin mints, so minter is None)
-    client.mint(&user, &500, &history_hash, &create_test_uri(&env), &None);
+    client.mint(
+        &user,
+        &500,
+        &history_hash,
+        &create_test_uri(&env),
+        &create_test_commitment(&env, 1),
+        &None,
+    );
     assert_eq!(client.get_score(&user), 500);
 
     // Check metadata
@@ -91,7 +104,14 @@ fn test_history_hash_update() {
     client.initialize(&admin);
 
     let initial_hash = create_test_hash(&env, 1);
-    client.mint(&user, &500, &initial_hash, &create_test_uri(&env), &None);
+    client.mint(
+        &user,
+        &500,
+        &initial_hash,
+        &create_test_uri(&env),
+        &create_test_commitment(&env, 1),
+        &None,
+    );
 
     let metadata = client.get_metadata(&user).unwrap();
     assert_eq!(metadata.history_hash, initial_hash);
@@ -119,7 +139,14 @@ fn test_update_history_hash_rejects_zero_hash() {
 
     client.initialize(&admin);
     let initial_hash = create_test_hash(&env, 1);
-    client.mint(&user, &500, &initial_hash, &create_test_uri(&env), &None);
+    client.mint(
+        &user,
+        &500,
+        &initial_hash,
+        &create_test_uri(&env),
+        &create_test_commitment(&env, 1),
+        &None,
+    );
 
     // Passing an all-zero hash must panic (Err(InvalidHistoryHash))
     let zero_hash = BytesN::from_array(&env, &[0u8; 32]);
@@ -140,7 +167,14 @@ fn test_update_history_hash_rejects_same_hash() {
 
     client.initialize(&admin);
     let initial_hash = create_test_hash(&env, 1);
-    client.mint(&user, &500, &initial_hash, &create_test_uri(&env), &None);
+    client.mint(
+        &user,
+        &500,
+        &initial_hash,
+        &create_test_uri(&env),
+        &create_test_commitment(&env, 1),
+        &None,
+    );
 
     // Passing the same hash that is already stored must panic (Err(InvalidHistoryHash))
     client.update_history_hash(&user, &initial_hash, &None);
@@ -210,7 +244,14 @@ fn test_not_initialized() {
     let client = RemittanceNFTClient::new(&env, &contract_id);
 
     let history_hash = create_test_hash(&env, 1);
-    client.mint(&user, &500, &history_hash, &create_test_uri(&env), &None);
+    client.mint(
+        &user,
+        &500,
+        &history_hash,
+        &create_test_uri(&env),
+        &create_test_commitment(&env, 1),
+        &None,
+    );
 }
 
 #[test]
@@ -240,11 +281,25 @@ fn test_duplicate_mint() {
     client.initialize(&admin);
 
     let history_hash = create_test_hash(&env, 1);
-    client.mint(&user, &500, &history_hash, &create_test_uri(&env), &None);
+    client.mint(
+        &user,
+        &500,
+        &history_hash,
+        &create_test_uri(&env),
+        &create_test_commitment(&env, 1),
+        &None,
+    );
 
     // Try to mint again for the same user
     let history_hash2 = create_test_hash(&env, 2);
-    client.mint(&user, &600, &history_hash2, &create_test_uri(&env), &None);
+    client.mint(
+        &user,
+        &600,
+        &history_hash2,
+        &create_test_uri(&env),
+        &create_test_commitment(&env, 1),
+        &None,
+    );
 }
 
 #[test]
@@ -364,7 +419,14 @@ fn test_small_repayment_does_not_write_score_change() {
 
     client.initialize(&admin);
     let history_hash = create_test_hash(&env, 1);
-    client.mint(&user, &500, &history_hash, &create_test_uri(&env), &None);
+    client.mint(
+        &user,
+        &500,
+        &history_hash,
+        &create_test_uri(&env),
+        &create_test_commitment(&env, 1),
+        &None,
+    );
 
     // Below MIN_SCORE_UPDATE_REPAYMENT (100) should be rejected to prevent spammy
     // zero-point updates that still write storage and emit events.
@@ -385,7 +447,14 @@ fn test_update_score_rejects_non_positive_repayment() {
 
     client.initialize(&admin);
     let history_hash = create_test_hash(&env, 1);
-    client.mint(&user, &500, &history_hash, &create_test_uri(&env), &None);
+    client.mint(
+        &user,
+        &500,
+        &history_hash,
+        &create_test_uri(&env),
+        &create_test_commitment(&env, 1),
+        &None,
+    );
 
     client.update_score(&user, &0, &None);
 }
@@ -403,7 +472,14 @@ fn test_apply_score_delta_supports_positive_and_negative_adjustments() {
 
     client.initialize(&admin);
     let history_hash = create_test_hash(&env, 1);
-    client.mint(&user, &500, &history_hash, &create_test_uri(&env), &None);
+    client.mint(
+        &user,
+        &500,
+        &history_hash,
+        &create_test_uri(&env),
+        &create_test_commitment(&env, 1),
+        &None,
+    );
 
     client.apply_score_delta(&user, &15, &None);
     assert_eq!(client.get_score(&user), 515);
@@ -425,7 +501,14 @@ fn test_apply_score_delta_floors_at_zero() {
 
     client.initialize(&admin);
     let history_hash = create_test_hash(&env, 1);
-    client.mint(&user, &350, &history_hash, &create_test_uri(&env), &None);
+    client.mint(
+        &user,
+        &350,
+        &history_hash,
+        &create_test_uri(&env),
+        &create_test_commitment(&env, 1),
+        &None,
+    );
 
     client.apply_score_delta(&user, &-50, &None);
     assert_eq!(client.get_score(&user), 300);
@@ -444,7 +527,14 @@ fn test_decrease_score_applies_floor_at_300() {
 
     client.initialize(&admin);
     let history_hash = create_test_hash(&env, 8);
-    client.mint(&user, &320, &history_hash, &create_test_uri(&env), &None);
+    client.mint(
+        &user,
+        &320,
+        &history_hash,
+        &create_test_uri(&env),
+        &create_test_commitment(&env, 1),
+        &None,
+    );
 
     client.decrease_score(&user, &50, &None);
     assert_eq!(client.get_score(&user), 300);
@@ -554,7 +644,14 @@ fn test_metadata_retrieval_before_and_after_mint() {
     assert!(client.get_metadata(&user).is_none());
 
     let history_hash = create_test_hash(&env, 11);
-    client.mint(&user, &250, &history_hash, &create_test_uri(&env), &None);
+    client.mint(
+        &user,
+        &250,
+        &history_hash,
+        &create_test_uri(&env),
+        &create_test_commitment(&env, 1),
+        &None,
+    );
 
     let metadata = client.get_metadata(&user).unwrap();
     assert_eq!(metadata.score, 250);
@@ -614,7 +711,14 @@ fn test_seize_collateral() {
 
     client.initialize(&admin);
     let history_hash = create_test_hash(&env, 1);
-    client.mint(&user, &500, &history_hash, &create_test_uri(&env), &None);
+    client.mint(
+        &user,
+        &500,
+        &history_hash,
+        &create_test_uri(&env),
+        &create_test_commitment(&env, 1),
+        &None,
+    );
 
     assert!(!client.is_seized(&user));
 
@@ -654,7 +758,14 @@ fn test_seize_collateral_already_seized() {
 
     client.initialize(&admin);
     let history_hash = create_test_hash(&env, 1);
-    client.mint(&user, &500, &history_hash, &create_test_uri(&env), &None);
+    client.mint(
+        &user,
+        &500,
+        &history_hash,
+        &create_test_uri(&env),
+        &create_test_commitment(&env, 1),
+        &None,
+    );
 
     client.seize_collateral(&user, &None);
     client.seize_collateral(&user, &None);
@@ -970,7 +1081,14 @@ fn test_score_cap_at_850() {
     let history_hash = create_test_hash(&env, 1);
 
     // Test initial mint cap
-    client.mint(&user, &900, &history_hash, &create_test_uri(&env), &None);
+    client.mint(
+        &user,
+        &900,
+        &history_hash,
+        &create_test_uri(&env),
+        &create_test_commitment(&env, 1),
+        &None,
+    );
     assert_eq!(client.get_score(&user), 850);
 
     // Test update_score cap
@@ -993,7 +1111,14 @@ fn test_score_overflow_handling() {
     client.initialize(&admin);
 
     let history_hash = create_test_hash(&env, 1);
-    client.mint(&user, &800, &history_hash, &create_test_uri(&env), &None);
+    client.mint(
+        &user,
+        &800,
+        &history_hash,
+        &create_test_uri(&env),
+        &create_test_commitment(&env, 1),
+        &None,
+    );
 
     // Very large repayment that would overflow u32 if converted to points (e.g., u32::MAX * 100 + 1)
     // repayment_amount is i128, so it can be very large.
@@ -1649,7 +1774,14 @@ fn test_mint_nft_success() {
 
     client.initialize(&admin);
     let history_hash = create_test_hash(&env, 1);
-    client.mint(&user, &500, &history_hash, &create_test_uri(&env), &None);
+    client.mint(
+        &user,
+        &500,
+        &history_hash,
+        &create_test_uri(&env),
+        &create_test_commitment(&env, 1),
+        &None,
+    );
 
     assert_eq!(client.get_score(&user), 500);
     let metadata = client.get_metadata(&user).unwrap();
@@ -1886,4 +2018,175 @@ fn test_score_history_max_50_entries() {
         .get(RemittanceNFT::MAX_SCORE_HISTORY_ENTRIES - 1)
         .unwrap();
     assert_eq!(last_entry.ledger, 60);
+}
+
+#[test]
+fn test_mint_rejects_non_32_byte_commitment() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+
+    let contract_id = env.register(RemittanceNFT, ());
+    let client = RemittanceNFTClient::new(&env, &contract_id);
+
+    client.initialize(&admin);
+
+    // Create a 16-byte commitment (too short)
+    let short_commitment = BytesN::from_array(&env, &[0u8; 16]);
+
+    // Should panic with CommitmentMalformed
+    env.mock_auths(&[]);
+    let result = client.try_mint(
+        &user,
+        &500,
+        &create_test_hash(&env, 1),
+        &create_test_uri(&env),
+        &short_commitment,
+        &None,
+    );
+    assert_eq!(result, Err(Ok(NftError::CommitmentMalformed)));
+}
+
+#[test]
+fn test_mint_stores_commitment_and_emits_event() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+
+    let contract_id = env.register(RemittanceNFT, ());
+    let client = RemittanceNFTClient::new(&env, &contract_id);
+
+    client.initialize(&admin);
+
+    let commitment = create_test_commitment(&env, 42);
+
+    // Mint with commitment
+    client.mint(
+        &user,
+        &500,
+        &create_test_hash(&env, 1),
+        &create_test_uri(&env),
+        &commitment,
+        &None,
+    );
+
+    // Verify commitment is stored
+    let stored = client.get_recipient_commitment(&user);
+    assert_eq!(stored, commitment);
+
+    // Verify event contains commitment (not plaintext)
+    let events = env.events().all();
+    let mint_event = events
+        .find(|e| e.topics.get(0).unwrap() == Symbol::new(&env, "Mint"))
+        .unwrap();
+    // Event data should contain the commitment
+    assert_eq!(mint_event.data, (500u32, commitment).into_val(&env));
+}
+
+#[test]
+fn test_get_recipient_commitment_missing() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+
+    let contract_id = env.register(RemittanceNFT, ());
+    let client = RemittanceNFTClient::new(&env, &contract_id);
+
+    client.initialize(&admin);
+
+    // Try to get commitment for user without minted NFT
+    let result = client.try_get_recipient_commitment(&user);
+    assert_eq!(result, Err(Ok(NftError::CommitmentMissing)));
+}
+
+#[test]
+fn test_admin_remint_stores_new_commitment() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+
+    let contract_id = env.register(RemittanceNFT, ());
+    let client = RemittanceNFTClient::new(&env, &contract_id);
+
+    client.initialize(&admin);
+
+    // Initial mint
+    let initial_commitment = create_test_commitment(&env, 1);
+    client.mint(
+        &user,
+        &500,
+        &create_test_hash(&env, 1),
+        &create_test_uri(&env),
+        &initial_commitment,
+        &None,
+    );
+
+    // Burn
+    client.burn(&user, &None);
+
+    // Approve remint
+    client.approve_remint(&user);
+
+    // Admin remint with new commitment
+    let new_commitment = create_test_commitment(&env, 2);
+    client.admin_remint(
+        &user,
+        &600,
+        &create_test_hash(&env, 2),
+        &create_test_uri(&env),
+        &new_commitment,
+    );
+
+    // Verify new commitment is stored
+    let stored = client.get_recipient_commitment(&user);
+    assert_eq!(stored, new_commitment);
+}
+
+#[test]
+fn test_admin_remint_rejects_bad_commitment() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+
+    let contract_id = env.register(RemittanceNFT, ());
+    let client = RemittanceNFTClient::new(&env, &contract_id);
+
+    client.initialize(&admin);
+
+    // Initial mint
+    client.mint(
+        &user,
+        &500,
+        &create_test_hash(&env, 1),
+        &create_test_uri(&env),
+        &create_test_commitment(&env, 1),
+        &None,
+    );
+
+    // Burn
+    client.burn(&user, &None);
+
+    // Approve remint
+    client.approve_remint(&user);
+
+    // Try admin remint with short commitment
+    let short_commitment = BytesN::from_array(&env, &[0u8; 16]);
+    let result = client.try_admin_remint(
+        &user,
+        &600,
+        &create_test_hash(&env, 2),
+        &create_test_uri(&env),
+        &short_commitment,
+    );
+    assert_eq!(result, Err(Ok(NftError::CommitmentMalformed)));
 }

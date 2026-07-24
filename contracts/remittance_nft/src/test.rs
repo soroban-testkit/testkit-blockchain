@@ -596,6 +596,7 @@ fn test_minting_with_authorized_minter_sets_expected_metadata() {
         &420,
         &history_hash,
         &create_test_uri(&env),
+        &create_test_commitment(&env, 1),
         &Some(authorized_minter),
     );
 
@@ -626,6 +627,7 @@ fn test_mint_rejects_unauthorized_minter() {
         &history_hash,
         &create_test_uri(&env),
         &Some(unauthorized_minter),
+        &create_test_commitment(&env, 1),
     );
 }
 
@@ -678,6 +680,7 @@ fn test_score_update_is_isolated_to_owner() {
         &create_test_hash(&env, 1),
         &create_test_uri(&env),
         &None,
+        &create_test_commitment(&env, 1),
     );
     client.mint(
         &bob,
@@ -685,6 +688,7 @@ fn test_score_update_is_isolated_to_owner() {
         &create_test_hash(&env, 2),
         &create_test_uri(&env),
         &None,
+        &create_test_commitment(&env, 1),
     );
 
     client.update_score(&alice, &900, &None);
@@ -804,6 +808,7 @@ fn test_score_history_tracks_and_caps_recent_updates() {
         &create_test_hash(&env, 7),
         &create_test_uri(&env),
         &None,
+        &create_test_commitment(&env, 1),
     );
 
     // Add 52 updates — exceeds MAX_SCORE_HISTORY_ENTRIES (50)
@@ -848,6 +853,7 @@ fn test_burn_blocks_authorized_remint_without_admin_approval() {
         &create_test_hash(&env, 4),
         &create_test_uri(&env),
         &None,
+        &create_test_commitment(&env, 1),
     );
 
     client.burn(&user, &None);
@@ -859,6 +865,7 @@ fn test_burn_blocks_authorized_remint_without_admin_approval() {
         &create_test_hash(&env, 5),
         &create_test_uri(&env),
         &Some(authorized_minter),
+        &create_test_commitment(&env, 1),
     );
 }
 
@@ -883,6 +890,7 @@ fn test_approve_remint_allows_authorized_minter_remint() {
         &BytesN::from_array(&env, &[5u8; 32]),
         &create_test_uri(&env),
         &Some(minter.clone()),
+        &create_test_commitment(&env, 1),
     );
     client.burn(&user, &None);
 
@@ -894,6 +902,7 @@ fn test_approve_remint_allows_authorized_minter_remint() {
         &BytesN::from_array(&env, &[5u8; 32]),
         &create_test_uri(&env),
         &Some(minter.clone()),
+        &create_test_commitment(&env, 1),
     );
     assert_eq!(result, Err(Ok(NftError::BurnedRequiresApproval)));
 
@@ -927,6 +936,7 @@ fn test_record_default_auto_burns_after_threshold() {
         &create_test_hash(&env, 6),
         &create_test_uri(&env),
         &None,
+        &create_test_commitment(&env, 1),
     );
 
     client.record_default(&user, &None);
@@ -960,6 +970,7 @@ fn test_transfer_moves_identity_state_to_new_wallet() {
         &create_test_hash(&env, 21),
         &create_test_uri(&env),
         &None,
+        &create_test_commitment(&env, 1),
     );
     client.update_score(&old_wallet, &300, &None);
     client.record_default(&old_wallet, &None);
@@ -1001,6 +1012,7 @@ fn test_transfer_enforces_cooldown_before_retransfer() {
         &create_test_hash(&env, 22),
         &create_test_uri(&env),
         &None,
+        &create_test_commitment(&env, 1),
     );
     client.transfer(&wallet_a, &wallet_b, &None);
 
@@ -1027,6 +1039,7 @@ fn test_transfer_rejects_destination_with_existing_state() {
         &create_test_hash(&env, 23),
         &create_test_uri(&env),
         &None,
+        &create_test_commitment(&env, 1),
     );
     client.mint(
         &to,
@@ -1034,6 +1047,7 @@ fn test_transfer_rejects_destination_with_existing_state() {
         &create_test_hash(&env, 24),
         &create_test_uri(&env),
         &None,
+        &create_test_commitment(&env, 1),
     );
 
     client.transfer(&from, &to, &None);
@@ -1060,6 +1074,7 @@ fn test_transfer_rejects_unauthorized_minter() {
         &create_test_hash(&env, 25),
         &create_test_uri(&env),
         &None,
+        &create_test_commitment(&env, 1),
     );
 
     client.transfer(&from, &to, &Some(unauthorized_minter));
@@ -1148,6 +1163,7 @@ fn test_get_transfer_cooldown_remaining_no_cooldown() {
         &create_test_hash(&env, 1),
         &create_test_uri(&env),
         &None,
+        &create_test_commitment(&env, 1),
     );
 
     assert_eq!(client.get_transfer_cooldown_remaining(&user), 0);
@@ -1173,6 +1189,7 @@ fn test_get_transfer_cooldown_remaining_active() {
         &create_test_hash(&env, 30),
         &create_test_uri(&env),
         &None,
+        &create_test_commitment(&env, 1),
     );
     client.transfer(&from, &to, &None);
 
@@ -1204,6 +1221,7 @@ fn test_get_transfer_cooldown_remaining_expired() {
         &create_test_hash(&env, 31),
         &create_test_uri(&env),
         &None,
+        &create_test_commitment(&env, 1),
     );
     client.transfer(&from, &to, &None);
 
@@ -1246,6 +1264,7 @@ fn test_is_remint_approved_true_after_approval() {
         &create_test_hash(&env, 32),
         &create_test_uri(&env),
         &None,
+        &create_test_commitment(&env, 1),
     );
     client.burn(&user, &None);
     client.approve_remint(&user);
@@ -1271,6 +1290,7 @@ fn test_is_remint_approved_cleared_after_remint() {
         &BytesN::from_array(&env, &[1u8; 32]),
         &create_test_uri(&env),
         &None,
+        &create_test_commitment(&env, 1),
     );
     client.burn(&user, &None);
     client.approve_remint(&user);
@@ -1427,6 +1447,7 @@ fn test_new_admin_can_act_after_transfer() {
         &create_test_hash(&env, 40),
         &create_test_uri(&env),
         &None,
+        &create_test_commitment(&env, 1),
     );
     assert_eq!(client.get_score(&user), 500);
 }
@@ -1475,6 +1496,7 @@ fn test_remint_requires_approval() {
         &BytesN::from_array(&env, &[1u8; 32]),
         &create_test_uri(&env),
         &None,
+        &create_test_commitment(&env, 1),
     );
     client.burn(&user, &None);
 
@@ -1517,6 +1539,7 @@ fn test_remint_approval_is_single_use() {
         &BytesN::from_array(&env, &[1u8; 32]),
         &create_test_uri(&env),
         &None,
+        &create_test_commitment(&env, 1),
     );
     client.burn(&user, &None);
     client.approve_remint(&user);
@@ -1566,6 +1589,7 @@ fn test_remint_approval_consumed_after_use() {
         &BytesN::from_array(&env, &[1u8; 32]),
         &create_test_uri(&env),
         &None,
+        &create_test_commitment(&env, 1),
     );
     client.burn(&user, &None);
     client.approve_remint(&user);
@@ -1602,6 +1626,7 @@ fn test_first_time_mint_does_not_require_approval() {
         &BytesN::from_array(&env, &[1u8; 32]),
         &create_test_uri(&env),
         &None,
+        &create_test_commitment(&env, 1),
     );
     assert_eq!(client.get_score(&user), 600);
 }
@@ -1623,6 +1648,7 @@ fn test_admin_remint_requires_approval() {
         &BytesN::from_array(&env, &[1u8; 32]),
         &create_test_uri(&env),
         &None,
+        &create_test_commitment(&env, 1),
     );
     client.burn(&user, &None);
 
@@ -1653,6 +1679,7 @@ fn test_admin_remint_succeeds_with_approval() {
         &BytesN::from_array(&env, &[1u8; 32]),
         &create_test_uri(&env),
         &None,
+        &create_test_commitment(&env, 1),
     );
     client.burn(&user, &None);
     client.approve_remint(&user);
@@ -1706,6 +1733,7 @@ fn test_mint_rejects_burned_user_and_redirects_to_admin_remint() {
         &BytesN::from_array(&env, &[1u8; 32]),
         &create_test_uri(&env),
         &None,
+        &create_test_commitment(&env, 1),
     );
     client.burn(&user, &None);
 
@@ -1717,6 +1745,7 @@ fn test_mint_rejects_burned_user_and_redirects_to_admin_remint() {
         &BytesN::from_array(&env, &[1u8; 32]),
         &create_test_uri(&env),
         &None,
+        &create_test_commitment(&env, 1),
     );
     assert_eq!(result, Err(Ok(NftError::BurnedRequiresApproval)));
 }
@@ -1738,6 +1767,7 @@ fn test_admin_remint_clears_seized_flag() {
         &BytesN::from_array(&env, &[1u8; 32]),
         &create_test_uri(&env),
         &None,
+        &create_test_commitment(&env, 1),
     );
     client.seize_collateral(&user, &None);
 
@@ -1809,6 +1839,7 @@ fn test_score_bounds_enforced() {
         &create_test_hash(&env, 1),
         &create_test_uri(&env),
         &None,
+        &create_test_commitment(&env, 1),
     );
     assert_eq!(client.get_score(&user), 200); // Mint doesn't enforce MIN, only MAX
 
@@ -1820,6 +1851,7 @@ fn test_score_bounds_enforced() {
         &create_test_hash(&env, 2),
         &create_test_uri(&env),
         &None,
+        &create_test_commitment(&env, 1),
     );
     assert_eq!(client.get_score(&user2), 850); // Capped at MAX_SCORE
 }
@@ -1842,6 +1874,7 @@ fn test_update_score_within_bounds() {
         &create_test_hash(&env, 1),
         &create_test_uri(&env),
         &None,
+        &create_test_commitment(&env, 1),
     );
 
     // Update within bounds
@@ -1871,6 +1904,7 @@ fn test_apply_score_delta_clamps_at_max() {
         &create_test_hash(&env, 1),
         &create_test_uri(&env),
         &None,
+        &create_test_commitment(&env, 1),
     );
 
     // Apply delta that would exceed max
@@ -1900,6 +1934,7 @@ fn test_lock_and_unlock_nft() {
         &create_test_hash(&env, 1),
         &create_test_uri(&env),
         &None,
+        &create_test_commitment(&env, 1),
     );
 
     // Seize (lock) collateral
@@ -1929,6 +1964,7 @@ fn test_burn_removes_nft() {
         &create_test_hash(&env, 1),
         &create_test_uri(&env),
         &None,
+        &create_test_commitment(&env, 1),
     );
 
     assert!(client.get_metadata(&user).is_some());
@@ -1960,6 +1996,7 @@ fn test_seize_collateral_by_authorized_only() {
         &create_test_hash(&env, 1),
         &create_test_uri(&env),
         &None,
+        &create_test_commitment(&env, 1),
     );
 
     // Admin can seize
@@ -1974,6 +2011,7 @@ fn test_seize_collateral_by_authorized_only() {
         &create_test_hash(&env, 2),
         &create_test_uri(&env),
         &None,
+        &create_test_commitment(&env, 1),
     );
     client.seize_collateral(&user2, &Some(authorized_minter));
     assert!(client.is_seized(&user2));
@@ -1997,6 +2035,7 @@ fn test_score_history_max_50_entries() {
         &create_test_hash(&env, 1),
         &create_test_uri(&env),
         &None,
+        &create_test_commitment(&env, 1),
     );
 
     // Add 60 score updates (exceeds MAX_SCORE_HISTORY_ENTRIES of 50)
@@ -2051,6 +2090,7 @@ fn test_mint_rejects_non_32_byte_commitment() {
         &create_test_uri(&env),
         &commitment,
         &None,
+        &create_test_commitment(&env, 1),
     );
     // With BytesN<32>, the commitment is always valid length
     assert!(result.is_ok());
@@ -2079,6 +2119,7 @@ fn test_mint_stores_commitment_and_emits_event() {
         &create_test_uri(&env),
         &commitment,
         &None,
+        &create_test_commitment(&env, 1),
     );
 
     // Verify commitment is stored
@@ -2135,6 +2176,7 @@ fn test_admin_remint_stores_new_commitment() {
         &create_test_uri(&env),
         &initial_commitment,
         &None,
+        &create_test_commitment(&env, 1),
     );
 
     // Burn
@@ -2195,6 +2237,7 @@ fn test_admin_remint_rejects_bad_commitment() {
         &create_test_hash(&env, 2),
         &create_test_uri(&env),
         &new_commitment,
+        &create_test_commitment(&env, 1),
     );
     assert!(result.is_ok());
 

@@ -1,7 +1,7 @@
 use super::*;
 use soroban_sdk::{
     testutils::Address as _, testutils::Events as _, testutils::Ledger as _, Address, BytesN, Env,
-    FromVal, IntoVal, String, Symbol,
+    FromVal, String, Symbol,
 };
 
 fn create_test_hash(env: &Env, value: u8) -> BytesN<32> {
@@ -2084,17 +2084,10 @@ fn test_mint_rejects_non_32_byte_commitment() {
 
     client.initialize(&admin);
 
-    // Create a 16-byte value (but wrapped as 32-byte commitment with padding)
-    let mut short_bytes = [0u8; 32];
-    short_bytes[0] = 0;
-    // Actually we want to test that non-32-byte input is rejected
-    // Since BytesN<32> is always 32 bytes, we test via the commitment validation
-    // The contract checks recipient_commitment.len() != 32
-    // With BytesN<32>, len() is always 32, so we test the path by using a valid 32-byte commitment
-    // and verifying the getter works. The malformed check is for non-BytesN inputs.
+    // BytesN<32> always has length 32, so the runtime length check cannot reject
+    // a typed commitment. Verify a valid 32-byte commitment mints successfully.
     let commitment = create_test_commitment(&env, 1);
 
-    env.mock_auths(&[]);
     let result = client.try_mint(
         &user,
         &500,
@@ -2103,7 +2096,6 @@ fn test_mint_rejects_non_32_byte_commitment() {
         &commitment,
         &None,
     );
-    // With BytesN<32>, the commitment is always valid length
     assert!(result.is_ok());
 }
 
@@ -2132,22 +2124,17 @@ fn test_mint_stores_commitment_and_emits_event() {
         &None,
     );
 
+    // Capture mint event before subsequent calls replace the host event buffer.
+    let events = env.events().all();
+    let mint_event = events.get(events.len() - 1).unwrap();
+    let topic_0 = Symbol::from_val(&env, &mint_event.1.get(0).unwrap());
+    assert_eq!(topic_0, Symbol::new(&env, "Mint"));
+    let data = <(u32, BytesN<32>)>::from_val(&env, &mint_event.2);
+    assert_eq!(data, (500u32, commitment.clone()));
+
     // Verify commitment is stored
     let stored = client.get_recipient_commitment(&user);
     assert_eq!(stored, commitment);
-
-    // Verify event contains commitment (not plaintext)
-    let events = env.events().all();
-    let mint_event = events
-        .iter()
-        .find(|e| {
-            let topic: Symbol = e.1.get(0).unwrap().into_val(&env);
-            topic == Symbol::new(&env, "Mint")
-        })
-        .unwrap();
-    // Event data should contain the commitment
-    let data: (u32, BytesN<32>) = mint_event.2.clone().into_val(&env);
-    assert_eq!(data, (500u32, commitment));
 }
 
 #[test]

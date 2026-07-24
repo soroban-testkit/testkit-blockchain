@@ -1,5 +1,5 @@
 import crypto from 'node:crypto';
-import { pool } from './databaseService.js';
+import { pool } from '../db/connection.js';
 
 const ALGORITHM = 'aes-256-gcm';
 const IV_LENGTH = 12;
@@ -103,7 +103,7 @@ export function maskValue(value: string, field: 'email' | 'phone' | 'name'): str
   if (field === 'email') {
     const [local, domain] = value.split('@');
     if (!domain) return '***';
-    const maskedLocal = local.length > 0 ? local[0] + '***' : '***';
+    const maskedLocal = local && local.length > 0 ? local[0] + '***' : '***';
     const domainParts = domain.split('.');
     const maskedDomain =
       domainParts.length > 1 ? domainParts[0]![0] + '***.' + domainParts.slice(1).join('.') : '***';

@@ -40,7 +40,7 @@ function isPrivateHost(hostname: string): boolean {
 
   // Private IPv4 ranges (RFC 1918)
   if (/^10\./.test(host)) return true;
-  if (/^172\.(1[7-9]|2\d|3[01])\./.test(host)) return true;
+  if (/^172\.(1[6-9]|2\d|3[01])\./.test(host)) return true;
   if (/^192\.168\./.test(host)) return true;
 
   // AWS / GCP metadata endpoints

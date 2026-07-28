@@ -22,6 +22,10 @@ services:
     environment:
       - DATABASE_URL=postgres://postgres:postgres@db:5432/remitlend
       - REDIS_URL=redis://redis:6379
+      - PII_KEK_ID=${PII_KEK_ID}
+      - PII_KMS_ENDPOINT=${PII_KMS_ENDPOINT}
+      - PII_KEK_REGION=${PII_KEK_REGION}
+      - LOG_REDACTION=strict
     ports:
       - "3001:3001"
     depends_on:

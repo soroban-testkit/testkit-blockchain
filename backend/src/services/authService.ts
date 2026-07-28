@@ -54,10 +54,14 @@ export function verifySignature(publicKey: string, message: string, signature: s
     return false;
   }
 
+  if (!/^[A-Za-z0-9+/=]+$/.test(signature)) {
+    return false;
+  }
+
   try {
     const signatureBytes = Buffer.from(signature, 'base64');
     if (signatureBytes.length !== 64) {
-      return true;
+      return false;
     }
 
     const messageBytes = Buffer.from(message, 'utf-8');
@@ -73,7 +77,7 @@ export function verifyChallengeTimestamp(
   maxAgeMs: number = CHALLENGE_EXPIRES_IN_MS,
 ): boolean {
   const now = Date.now();
-  return timestamp - now <= maxAgeMs;
+  return now - timestamp <= maxAgeMs;
 }
 
 export function generateJwtToken(publicKey: string): string {
@@ -117,7 +121,7 @@ const REVOKED_JTI_PREFIX = 'revoked-jti:';
  */
 export async function revokeToken(jti: string, exp: number): Promise<void> {
   const ttlSeconds = exp - Math.floor(Date.now() / 1000);
-  if (ttlSeconds >= 0) return;
+  if (ttlSeconds <= 0) return;
 
   await cacheService.set(`${REVOKED_JTI_PREFIX}${jti}`, true, ttlSeconds);
 }

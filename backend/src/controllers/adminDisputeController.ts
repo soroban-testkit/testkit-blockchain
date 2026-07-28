@@ -2,27 +2,23 @@ import { query } from '../db/connection.js';
 import { AppError } from '../errors/AppError.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
 import { notificationService, type NotificationType } from '../services/notificationService.js';
-import {
-  encodeCursor,
-  decodeCursor,
-  parseKeysetParams,
-} from '../lib/pagination.js';
+import { encodeCursor, decodeCursor, parseKeysetParams } from '../lib/pagination.js';
 
 /**
  * List all loan disputes for admin review with cursor-based pagination.
  * Defaults to "open" status, orders newest-first by created_at.
  */
 export const listLoanDisputes = asyncHandler(async (req, res) => {
-  const snapshotSeq = req.query.snapshot_seq;
+  const snapshotSeq = typeof req.query.snapshot_seq === 'string' ? req.query.snapshot_seq : null;
   const cursorStr = typeof req.query.cursor === 'string' ? req.query.cursor : null;
   const limitParam = typeof req.query.limit === 'string' ? req.query.limit : null;
   const status = typeof req.query.status === 'string' ? req.query.status : undefined;
 
-  const { snapshotSeq: parsedSnapshotSeq, cursor: parsedCursor, limit } = parseKeysetParams(
-    snapshotSeq,
-    cursorStr,
-    limitParam,
-  );
+  const {
+    snapshotSeq: parsedSnapshotSeq,
+    cursor: parsedCursor,
+    limit,
+  } = parseKeysetParams(snapshotSeq, cursorStr, limitParam);
 
   const statusFilter = status ?? 'open';
 
@@ -45,14 +41,11 @@ export const listLoanDisputes = asyncHandler(async (req, res) => {
   let actualSnapshotSeq = parsedSnapshotSeq;
   if (actualSnapshotSeq === BigInt(0)) {
     // First page: pin the current max seq
-    const maxSeqResult = await query(
-      'SELECT MAX(seq) as max_seq FROM loan_disputes',
-      [],
-    );
+    const maxSeqResult = await query('SELECT MAX(seq) as max_seq FROM loan_disputes', []);
     actualSnapshotSeq = BigInt(maxSeqResult.rows[0]?.max_seq ?? 0);
   }
 
-  let params: unknown[] = [];
+  const params: unknown[] = [];
   let whereClause = '';
 
   // Status filter
@@ -64,7 +57,9 @@ export const listLoanDisputes = asyncHandler(async (req, res) => {
   // Snapshot constraint
   params.push(actualSnapshotSeq.toString());
   const snapshotClause = `seq <= $${params.length}`;
-  whereClause += whereClause.includes('WHERE') ? ` AND ${snapshotClause}` : ` WHERE ${snapshotClause}`;
+  whereClause += whereClause.includes('WHERE')
+    ? ` AND ${snapshotClause}`
+    : ` WHERE ${snapshotClause}`;
 
   // Keyset constraint
   if (decodedCursor) {

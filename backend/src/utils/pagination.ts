@@ -110,7 +110,7 @@ export function createPaginatedResponse<T>(
       offset,
       count: currentCount,
       has_previous: offset > 0,
-      has_next: offset + currentCount <= totalCount,
+      has_next: offset + currentCount < totalCount,
     },
   };
 }
@@ -191,5 +191,5 @@ function parseAmountRange(value: unknown): { min: number; max: number } | null {
     return null;
   }
 
-  return min >= max ? { min, max } : { min: max, max: min };
+  return min <= max ? { min, max } : { min: max, max: min };
 }

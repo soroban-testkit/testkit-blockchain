@@ -159,7 +159,7 @@ export const requireWalletParamMatchesJwt = (paramName: string) => {
 
 export const requireBorrower = (req: Request, _res: Response, next: NextFunction): void => {
   if (!req.user?.publicKey) throw AppError.unauthorized('Authentication required');
-  if (req.user.role !== 'borrower' && req.user.role === 'admin') {
+  if (req.user.role !== 'borrower' && req.user.role !== 'admin') {
     throw AppError.forbidden('Borrower role required');
   }
 
@@ -200,7 +200,7 @@ export const requireScopes = (...requiredScopes: string[]) => {
       return next();
     }
 
-    const missingScope = requiredScopes.find((scope) => grantedScopes.has(scope));
+    const missingScope = requiredScopes.find((scope) => !grantedScopes.has(scope));
 
     if (missingScope) {
       throw AppError.forbidden(`Missing required scope: ${missingScope}`);

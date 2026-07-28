@@ -1515,6 +1515,58 @@ fn test_set_late_fee_rate_rejects_above_cap() {
 }
 
 #[test]
+fn test_deposit_collateral_moves_funds_from_borrower_to_contract() {
+    // Regression test for #1353: deposit_collateral's token transfer was
+    // reported as paying the borrower instead of taking collateral from
+    // them. That direction is already correct on main (verified via git
+    // blame: fixed in a prior, unrelated commit — see PR description) — this
+    // test pins the exact expected balance movement on both sides so any
+    // future regression here is caught immediately: the borrower's balance
+    // must decrease by the deposited amount and the contract's must
+    // increase by the same amount, not the reverse.
+    let env = Env::default();
+    env.mock_all_auths_allowing_non_root_auth();
+
+    let (manager, nft_client, pool_client, token_id, _token_admin) = setup_test(&env);
+    let borrower = Address::generate(&env);
+
+    let history_hash = soroban_sdk::BytesN::from_array(&env, &[0u8; 32]);
+    nft_client.mint(
+        &borrower,
+        &650,
+        &history_hash,
+        &String::from_str(&env, "ipfs://QmTest"),
+        &create_test_commitment(&env, 1),
+        &None,
+    );
+
+    let token_client = TokenClient::new(&env, &token_id);
+    let stellar_token = StellarAssetClient::new(&env, &token_id);
+    stellar_token.mint(&pool_client, &20_000);
+    stellar_token.mint(&borrower, &20_000);
+
+    let loan_id = manager.request_loan(&borrower, &1_000, &17280);
+    manager.approve_loan(&loan_id);
+
+    let borrower_balance_before = token_client.balance(&borrower);
+    let contract_balance_before = token_client.balance(&manager.address);
+
+    manager.deposit_collateral(&loan_id, &500);
+
+    assert_eq!(
+        token_client.balance(&borrower),
+        borrower_balance_before - 500,
+        "borrower must pay collateral into the contract, not receive funds"
+    );
+    assert_eq!(
+        token_client.balance(&manager.address),
+        contract_balance_before + 500,
+        "the contract must hold the deposited collateral in escrow"
+    );
+    assert_eq!(manager.get_collateral(&loan_id), 500);
+}
+
+#[test]
 fn test_deposit_collateral_and_auto_release_on_full_repayment() {
     let env = Env::default();
     env.mock_all_auths_allowing_non_root_auth();

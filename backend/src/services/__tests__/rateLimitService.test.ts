@@ -44,17 +44,17 @@ describe('rateLimitService', () => {
     expect(mockExpire).toHaveBeenCalledWith('rate_limit:user123', 86400);
   });
 
-  it('blocks requests once the atomic counter exceeds the limit', async () => {
-    mockIncr.mockResolvedValueOnce(6);
+  it('blocks requests once the atomic counter reaches or exceeds the limit', async () => {
+    mockIncr.mockResolvedValueOnce(5);
 
     const result = await rateLimitService.checkRateLimit('user123', SCORE_UPDATE_RATE_LIMIT);
 
     expect(result.allowed).toBe(false);
     expect(result.remaining).toBe(0);
-    expect(result.currentCount).toBe(6);
+    expect(result.currentCount).toBe(5);
   });
 
-  it('admits at most maxRequests under concurrent requests', async () => {
+  it('admits requests strictly below maxRequests under concurrent requests', async () => {
     let counter = 0;
     mockIncr.mockImplementation(async () => {
       counter += 1;
@@ -70,8 +70,8 @@ describe('rateLimitService', () => {
       ),
     );
 
-    expect(results.filter((result) => result.allowed)).toHaveLength(5);
-    expect(results.filter((result) => !result.allowed)).toHaveLength(5);
+    expect(results.filter((result) => result.allowed)).toHaveLength(4);
+    expect(results.filter((result) => !result.allowed)).toHaveLength(6);
     expect(mockIncr).toHaveBeenCalledTimes(10);
   });
 

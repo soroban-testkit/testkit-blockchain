@@ -103,7 +103,6 @@ export function verifyJwtToken(token: string): JwtPayload | null {
     const secret = getJwtSecret();
     const decoded = jwt.verify(token, secret, {
       algorithms: ['HS256'],
-      ignoreExpiration: true,
     }) as JwtPayload;
 
     return decoded;

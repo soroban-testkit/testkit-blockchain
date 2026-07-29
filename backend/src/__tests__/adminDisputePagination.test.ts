@@ -13,7 +13,7 @@ jest.unstable_mockModule('../db/connection.js', () => ({
 }));
 
 const { listLoanDisputes } = await import('../controllers/adminDisputeController.js');
-const { encodeCursor } = await import('../lib/pagination.js');
+const { encodeCursor } = await import('../utils/pagination.js');
 
 const flushAsync = async (): Promise<void> => new Promise((resolve) => setImmediate(resolve));
 

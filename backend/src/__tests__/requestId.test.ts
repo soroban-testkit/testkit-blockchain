@@ -55,8 +55,15 @@ describe('Request ID middleware', () => {
   it('generates a unique x-request-id for every request in a concurrent burst', async () => {
     const BURST_SIZE = 200;
 
+    // Burst against a minimal app mounting only the middleware under test —
+    // going through the full app would trip the global rate limiter
+    // (100 req/15 min) long before exercising ID uniqueness.
+    const burstApp = express();
+    burstApp.use(requestIdMiddleware);
+    burstApp.get('/', (_req, res) => res.sendStatus(200));
+
     const responses = await Promise.all(
-      Array.from({ length: BURST_SIZE }, () => request(app).get('/')),
+      Array.from({ length: BURST_SIZE }, () => request(burstApp).get('/')),
     );
 
     const requestIds = responses.map((response) => {

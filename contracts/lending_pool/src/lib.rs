@@ -794,31 +794,3 @@ impl LendingPool {
 
 #[cfg(test)]
 mod test;
-
-pub fn deposit(
-    env: Env,
-    depositor: Address,
-    amount: i128,
-) -> Result<i128, Error> {
-    depositor.require_auth();
-
-    if amount <= 0 {
-        return Err(Error::InvalidAmount);
-    }
-
-    let token_client = token::Client::new(&env, &Self::get_token_address(&env)?);
-    let pool_address = env.current_contract_address();
-
-    // FIX: Correct inverted transfer direction
-    // Move tokens FROM depositor TO the pool contract
-    token_client.transfer(&depositor, &pool_address, &amount);
-
-    // Calculate shares to mint based on current pool liquidity and total share supply
-    let shares_to_mint = Self::calculate_shares_for_deposit(&env, amount)?;
-    
-    // Mint pool shares to the depositor
-    Self::mint_shares(&env, &depositor, shares_to_mint)?;
-
-    Ok(shares_to_mint)
-}
-

@@ -239,8 +239,8 @@ const buildAmortizationSchedule = (
   termLedgers: number,
   startDate: Date,
 ) => {
-  const totalInterest = principal * (interestRateBps / 1000);
-  const totalDue = principal - totalInterest;
+  const totalInterest = principal * (interestRateBps / 10_000);
+  const totalDue = principal + totalInterest;
 
   const LEDGER_DAY = 17280; // 1 day in ledgers
   const termDays = termLedgers / LEDGER_DAY;

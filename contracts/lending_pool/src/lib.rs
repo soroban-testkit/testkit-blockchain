@@ -219,9 +219,14 @@ impl LendingPool {
         if cur_total_shares == 0 || total_assets_before == 0 {
             amount
         } else {
-            amount
+            let numerator = amount
                 .checked_mul(cur_total_shares)
-                .and_then(|v| v.checked_div(total_assets_before))
+                .expect("share mint overflow");
+            // Floor: minting fewer shares than the exact exchange rate would
+            // imply protects existing holders from dilution by rounding in
+            // the protocol's favor, matching `money::round_div`'s Floor mode
+            // used identically for withdrawal-side redemption below.
+            money::round_div(numerator, total_assets_before, money::RoundingMode::Floor)
                 .expect("share mint overflow")
         }
     }
@@ -232,9 +237,13 @@ impl LendingPool {
     /// includes any yield that has accumulated since the shares were minted.
     /// Total assets includes both idle balance and outstanding loans.
     fn calc_assets_to_redeem(shares: i128, total_assets: i128, cur_total_shares: i128) -> i128 {
-        shares
+        let numerator = shares
             .checked_mul(total_assets)
-            .and_then(|v| v.checked_div(cur_total_shares))
+            .expect("share redeem overflow");
+        // Floor: redeeming slightly fewer assets than the exact exchange
+        // rate implies leaves the residual in the pool for remaining
+        // depositors rather than paying it out from thin air.
+        money::round_div(numerator, cur_total_shares, money::RoundingMode::Floor)
             .expect("share redeem overflow")
     }
 
@@ -590,9 +599,10 @@ impl LendingPool {
             return Self::SHARE_PRICE_SCALE;
         }
 
-        Self::total_pool_assets(&env, &token)
+        let numerator = Self::total_pool_assets(&env, &token)
             .checked_mul(Self::SHARE_PRICE_SCALE)
-            .and_then(|v| v.checked_div(total_shares))
+            .expect("share price overflow");
+        money::round_div(numerator, total_shares, money::RoundingMode::Floor)
             .expect("share price overflow")
     }
 
@@ -670,7 +680,9 @@ impl LendingPool {
         // Utilisation: portion of tracked principal currently out on loan.
         let utilization_bps = if total_deposits > 0 && pool_token_balance < total_deposits {
             let borrowed = total_deposits - pool_token_balance;
-            ((borrowed * 10_000) / total_deposits) as u32
+            let numerator = borrowed.checked_mul(10_000).expect("utilisation overflow");
+            money::round_div(numerator, total_deposits, money::RoundingMode::Floor)
+                .expect("utilisation overflow") as u32
         } else {
             0
         };
@@ -794,31 +806,3 @@ impl LendingPool {
 
 #[cfg(test)]
 mod test;
-
-pub fn deposit(
-    env: Env,
-    depositor: Address,
-    amount: i128,
-) -> Result<i128, Error> {
-    depositor.require_auth();
-
-    if amount <= 0 {
-        return Err(Error::InvalidAmount);
-    }
-
-    let token_client = token::Client::new(&env, &Self::get_token_address(&env)?);
-    let pool_address = env.current_contract_address();
-
-    // FIX: Correct inverted transfer direction
-    // Move tokens FROM depositor TO the pool contract
-    token_client.transfer(&depositor, &pool_address, &amount);
-
-    // Calculate shares to mint based on current pool liquidity and total share supply
-    let shares_to_mint = Self::calculate_shares_for_deposit(&env, amount)?;
-    
-    // Mint pool shares to the depositor
-    Self::mint_shares(&env, &depositor, shares_to_mint)?;
-
-    Ok(shares_to_mint)
-}
-

@@ -1617,3 +1617,30 @@ fn test_adjust_outstanding_zero_delta_is_a_no_op() {
 
     assert_eq!(pool_client.get_total_outstanding(&token), 1_000);
 }
+
+#[test]
+fn test_deposit_transfers_from_depositor_to_pool() {
+    let env = Env::default();
+    let client = LendingPoolClient::new(&env, &env.register_contract(None, LendingPool));
+
+    let depositor = Address::generate(&env);
+    let token_admin = Address::generate(&env);
+    let token = create_token_contract(&env, &token_admin);
+
+    setup_lending_pool(&env, &client, &token.address);
+    mint_tokens(&env, &token, &depositor, 1_000);
+
+    // Execute deposit of 500 tokens
+    let deposit_amount = 500;
+    let shares = client.deposit(&depositor, &deposit_amount);
+
+    // Assert depositor balance decreased by 500
+    assert_eq!(token.balance(&depositor), 500);
+
+    // Assert pool balance increased by 500
+    assert_eq!(token.balance(&env.current_contract_address()), 500);
+
+    // Assert shares were minted to depositor
+    assert!(shares > 0);
+    assert_eq!(client.share_balance_of(&depositor), shares);
+}

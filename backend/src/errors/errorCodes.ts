@@ -263,6 +263,15 @@ export const ERROR_CODE_REGISTRY: Record<ErrorCode, ErrorCodeMetadata> = {
     suggestedAction: 'Please try again later',
   },
 
+  // Service Unavailable
+  [ErrorCode.SERVICE_UNAVAILABLE]: {
+    code: ErrorCode.SERVICE_UNAVAILABLE,
+    message: 'Service temporarily unavailable',
+    httpStatus: 503,
+    description: 'The service is temporarily unavailable, e.g. due to a contract pause',
+    suggestedAction: 'Please try again later',
+  },
+
   // Business Logic Errors
   [ErrorCode.INSUFFICIENT_BALANCE]: {
     code: ErrorCode.INSUFFICIENT_BALANCE,

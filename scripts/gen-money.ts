@@ -143,8 +143,23 @@ export const ALLOCATION_STRATEGY = ${q(policy.allocation)} as const;
 `;
 }
 
+function readFileIfExists(targetPath: string): string | null {
+  // Read directly and handle ENOENT, rather than `existsSync` followed by a
+  // separate `readFileSync` — the latter is a check-then-use race (the file
+  // could be created/removed between the two calls) that CodeQL flags as a
+  // TOCTOU file system race condition.
+  try {
+    return fs.readFileSync(targetPath, 'utf8');
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+      return null;
+    }
+    throw err;
+  }
+}
+
 function writeIfChanged(targetPath: string, content: string): boolean {
-  const existing = fs.existsSync(targetPath) ? fs.readFileSync(targetPath, 'utf8') : null;
+  const existing = readFileIfExists(targetPath);
   if (existing === content) {
     return false;
   }

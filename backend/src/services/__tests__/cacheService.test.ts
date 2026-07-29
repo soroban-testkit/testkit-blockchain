@@ -2,7 +2,8 @@ import { describe, it, expect, jest, beforeEach } from '@jest/globals';
 
 const mockConnect = jest.fn<() => Promise<void>>();
 const mockOn = jest.fn();
-const mockEval = jest.fn<(script: string, options: { keys: string[]; arguments: string[] }) => Promise<unknown>>();
+const mockEval =
+  jest.fn<(script: string, options: { keys: string[]; arguments: string[] }) => Promise<unknown>>();
 
 jest.unstable_mockModule('redis', () => ({
   createClient: () => ({
@@ -27,7 +28,10 @@ describe('cacheService.deleteIfMatch', () => {
 
     expect(result).toBe(true);
     expect(mockEval).toHaveBeenCalledTimes(1);
-    const [script, options] = mockEval.mock.calls[0] as [string, { keys: string[]; arguments: string[] }];
+    const [script, options] = mockEval.mock.calls[0] as [
+      string,
+      { keys: string[]; arguments: string[] },
+    ];
     expect(script).toContain('GET');
     expect(script).toContain('DEL');
     expect(options.keys).toEqual(['lock:test']);

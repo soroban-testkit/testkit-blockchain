@@ -6,7 +6,6 @@ const createMockRes = (): Response =>
   ({ status: jest.fn().mockReturnThis(), json: jest.fn().mockReturnThis() }) as unknown as Response;
 
 describe('asyncHandler', () => {
-
   it('forwards Error rejections as-is to next', async () => {
     const error = new Error('db failed');
     const handler = asyncHandler(async () => {

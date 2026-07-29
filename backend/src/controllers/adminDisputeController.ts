@@ -45,7 +45,7 @@ export const listLoanDisputes = asyncHandler(async (req, res) => {
     actualSnapshotSeq = BigInt(maxSeqResult.rows[0]?.max_seq ?? 0);
   }
 
-  let params: unknown[] = [];
+  const params: unknown[] = [];
   let whereClause = '';
 
   // Status filter

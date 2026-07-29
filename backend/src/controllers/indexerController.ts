@@ -275,7 +275,7 @@ export const getBorrowerEvents = async (req: Request, res: Response) => {
     );
 
     // Build keyset clause for pagination
-    let params = [...filterParams];
+    const params = [...filterParams];
     let whereClause = filterClause;
 
     // Pin snapshot on first request or use provided one
@@ -403,7 +403,7 @@ export const getLoanEvents = async (req: Request, res: Response) => {
     );
 
     // Build keyset clause for pagination
-    let params = [...filterParams];
+    const params = [...filterParams];
     let whereClause = filterClause;
 
     // Pin snapshot on first request or use provided one
@@ -513,7 +513,7 @@ export const getRecentEvents = async (req: Request, res: Response) => {
     const { params: filterParams, whereClause: filterClause } = buildEventFilters(req, [], '');
 
     // Build keyset clause for pagination
-    let params = [...filterParams];
+    const params = [...filterParams];
     let whereClause = filterClause;
 
     // Pin snapshot on first request or use provided one

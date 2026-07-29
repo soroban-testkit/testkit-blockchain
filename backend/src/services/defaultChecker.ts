@@ -13,6 +13,67 @@ import { createSorobanRpcServer, getStellarNetworkPassphrase } from '../config/s
 
 import { cacheService } from './cacheService.js';
 import { jobMetricsService } from './jobMetricsService.js';
+import { fromStroops } from '../money/decimal.js';
+
+/**
+ * Owed-vs-paid reconciliation for a single loan, computed entirely in
+ * `bigint` stroops (see `backend/src/money/decimal.ts`). `owedStroops` is
+ * the originally approved principal; `paidStroops` is every `LoanRepaid`
+ * amount summed to date. `driftStroops` is `owedStroops - paidStroops`
+ * clamped at zero once the loan is fully repaid — a nonzero value here
+ * after a `LoanRepaid`/`LoanDefaulted` terminal event indicates the kind of
+ * cross-layer rounding drift issue #1378 closes.
+ */
+export interface LoanReconciliation {
+  loanId: number;
+  owedStroops: bigint;
+  paidStroops: bigint;
+  driftStroops: bigint;
+  owedDisplay: string;
+  paidDisplay: string;
+}
+
+/**
+ * Sums the `LoanApproved` principal and every `LoanRepaid` amount recorded
+ * for `loanId` in `contract_events`, in exact integer stroops. Every
+ * comparison here is `bigint` arithmetic — never `Number` — so the result
+ * agrees with the on-chain pool balance to the stroop, regardless of how
+ * large the amount is.
+ */
+export async function reconcileLoanStroops(loanId: number): Promise<LoanReconciliation> {
+  const result = await query(
+    `
+    SELECT event_type, amount
+    FROM contract_events
+    WHERE loan_id = $1
+      AND event_type IN ('LoanApproved', 'LoanRepaid')
+      AND amount IS NOT NULL
+    `,
+    [loanId],
+  );
+
+  let owedStroops = 0n;
+  let paidStroops = 0n;
+  for (const row of result.rows as Array<{ event_type: string; amount: string }>) {
+    const amount = BigInt(row.amount);
+    if (row.event_type === 'LoanApproved') {
+      owedStroops += amount;
+    } else {
+      paidStroops += amount;
+    }
+  }
+
+  const driftStroops = owedStroops > paidStroops ? owedStroops - paidStroops : 0n;
+
+  return {
+    loanId,
+    owedStroops,
+    paidStroops,
+    driftStroops,
+    owedDisplay: fromStroops(owedStroops),
+    paidDisplay: fromStroops(paidStroops),
+  };
+}
 
 /**
  * Mirrors `LoanManager::DEFAULT_TERM_LEDGERS` in `contracts/loan_manager/src/lib.rs`.

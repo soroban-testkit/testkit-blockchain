@@ -4,7 +4,8 @@ import type { Request, Response } from 'express';
 type MockQueryResult = { rows: Record<string, unknown>[] };
 
 const mockQuery = jest.fn<(text: string, params?: unknown[]) => Promise<MockQueryResult>>();
-const mockGetScoreConfig = jest.fn<() => { repaymentDelta: number; defaultPenalty: number; latePenalty: number }>();
+const mockGetScoreConfig =
+  jest.fn<() => { repaymentDelta: number; defaultPenalty: number; latePenalty: number }>();
 
 jest.unstable_mockModule('../db/connection.js', () => ({
   query: mockQuery,
@@ -42,9 +43,7 @@ describe('simulatePayment', () => {
     const { req, res, json } = mockReqRes();
     await simulatePayment(req, res);
 
-    expect(json).toHaveBeenCalledWith(
-      expect.objectContaining({ newScore: 525 }),
-    );
+    expect(json).toHaveBeenCalledWith(expect.objectContaining({ newScore: 525 }));
   });
 
   it('returns 500 + 15 = 515 with the default delta', async () => {
@@ -53,9 +52,7 @@ describe('simulatePayment', () => {
     const { req, res, json } = mockReqRes();
     await simulatePayment(req, res);
 
-    expect(json).toHaveBeenCalledWith(
-      expect.objectContaining({ newScore: 515 }),
-    );
+    expect(json).toHaveBeenCalledWith(expect.objectContaining({ newScore: 515 }));
   });
 
   it('clamps the new score at 850', async () => {
@@ -64,9 +61,7 @@ describe('simulatePayment', () => {
     const { req, res, json } = mockReqRes();
     await simulatePayment(req, res);
 
-    expect(json).toHaveBeenCalledWith(
-      expect.objectContaining({ newScore: 850 }),
-    );
+    expect(json).toHaveBeenCalledWith(expect.objectContaining({ newScore: 850 }));
   });
 
   it('defaults to score 500 when no score record exists', async () => {
@@ -75,8 +70,6 @@ describe('simulatePayment', () => {
     const { req, res, json } = mockReqRes();
     await simulatePayment(req, res);
 
-    expect(json).toHaveBeenCalledWith(
-      expect.objectContaining({ newScore: 515 }),
-    );
+    expect(json).toHaveBeenCalledWith(expect.objectContaining({ newScore: 515 }));
   });
 });

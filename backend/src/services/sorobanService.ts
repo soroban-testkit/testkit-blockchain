@@ -1288,11 +1288,11 @@ class SorobanService {
 
   async updateUserScoresBulk(userIds: string[], delta: number) {
     for (const id of userIds) {
-        await this.userRepository.update(id, {
-            score: () => `score + ${delta}`,
-        });
+      await this.userRepository.update(id, {
+        score: () => `score + ${delta}`,
+      });
     }
-}
+  }
 }
 
 export const sorobanService = new SorobanService();

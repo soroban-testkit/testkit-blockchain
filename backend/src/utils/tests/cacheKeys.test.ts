@@ -19,14 +19,20 @@ describe('CacheKeys format stability', () => {
   });
 
   it('pendingRepayTx', () => {
-    expect(CacheKeys.pendingRepayTx('GBORROWER789', 42, 2500)).toBe('pending_repay_tx:GBORROWER789:42:2500');
+    expect(CacheKeys.pendingRepayTx('GBORROWER789', 42, 2500)).toBe(
+      'pending_repay_tx:GBORROWER789:42:2500',
+    );
   });
 
   it('pendingDepositTx', () => {
-    expect(CacheKeys.pendingDepositTx('GDEPOSITOR111', 'USDC', 10000)).toBe('pending_deposit_tx:GDEPOSITOR111:USDC:10000');
+    expect(CacheKeys.pendingDepositTx('GDEPOSITOR111', 'USDC', 10000)).toBe(
+      'pending_deposit_tx:GDEPOSITOR111:USDC:10000',
+    );
   });
 
   it('pendingWithdrawTx', () => {
-    expect(CacheKeys.pendingWithdrawTx('GDEPOSITOR111', 'USDC', 5000)).toBe('pending_withdraw_tx:GDEPOSITOR111:USDC:5000');
+    expect(CacheKeys.pendingWithdrawTx('GDEPOSITOR111', 'USDC', 5000)).toBe(
+      'pending_withdraw_tx:GDEPOSITOR111:USDC:5000',
+    );
   });
 });

@@ -5,11 +5,7 @@ import { remittanceService } from '../services/remittanceService.js';
 import { sorobanService } from '../services/sorobanService.js';
 import { notificationService } from '../services/notificationService.js';
 import { AppError } from '../errors/AppError.js';
-import {
-  encodeCursor,
-  decodeCursor,
-  parseKeysetParams,
-} from '../lib/pagination.js';
+import { encodeCursor, decodeCursor, parseKeysetParams } from '../utils/pagination.js';
 import logger from '../utils/logger.js';
 
 /**
@@ -69,11 +65,11 @@ export const getRemittances = asyncHandler(async (req: Request, res: Response) =
   const cursorStr = typeof req.query.cursor === 'string' ? req.query.cursor : null;
   const limitParam = typeof req.query.limit === 'string' ? req.query.limit : null;
 
-  const { snapshotSeq: parsedSnapshotSeq, cursor: parsedCursor, limit } = parseKeysetParams(
-    snapshotSeq,
-    cursorStr,
-    limitParam,
-  );
+  const {
+    snapshotSeq: parsedSnapshotSeq,
+    cursor: parsedCursor,
+    limit,
+  } = parseKeysetParams(snapshotSeq, cursorStr, limitParam);
 
   // Decode cursor if provided
   let decodedCursor = null;
@@ -124,10 +120,7 @@ export const getRemittances = asyncHandler(async (req: Request, res: Response) =
   let actualSnapshotSeq = parsedSnapshotSeq;
   if (actualSnapshotSeq === BigInt(0)) {
     // First page: pin the current max seq
-    const maxSeqResult = await query(
-      'SELECT MAX(seq) as max_seq FROM remittances',
-      [],
-    );
+    const maxSeqResult = await query('SELECT MAX(seq) as max_seq FROM remittances', []);
     actualSnapshotSeq = BigInt(maxSeqResult.rows[0]?.max_seq ?? 0);
   }
 

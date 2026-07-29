@@ -2,14 +2,14 @@ import { query } from '../db/connection.js';
 import { AppError } from '../errors/AppError.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
 import { notificationService, type NotificationType } from '../services/notificationService.js';
-import { encodeCursor, decodeCursor, parseKeysetParams } from '../lib/pagination.js';
+import { encodeCursor, decodeCursor, parseKeysetParams } from '../utils/pagination.js';
 
 /**
  * List all loan disputes for admin review with cursor-based pagination.
  * Defaults to "open" status, orders newest-first by created_at.
  */
 export const listLoanDisputes = asyncHandler(async (req, res) => {
-  const snapshotSeq = typeof req.query.snapshot_seq === 'string' ? req.query.snapshot_seq : null;
+  const snapshotSeq = req.query.snapshot_seq;
   const cursorStr = typeof req.query.cursor === 'string' ? req.query.cursor : null;
   const limitParam = typeof req.query.limit === 'string' ? req.query.limit : null;
   const status = typeof req.query.status === 'string' ? req.query.status : undefined;

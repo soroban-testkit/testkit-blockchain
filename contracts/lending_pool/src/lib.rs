@@ -270,9 +270,14 @@ impl LendingPool {
         let assets_den = total_managed_assets_before
             .checked_add(Self::VIRTUAL_ASSETS)
             .expect("virtual assets overflow");
-        amount
+        let numerator = amount
             .checked_mul(shares_num)
-            .and_then(|v| v.checked_div(assets_den))
+            .expect("share mint overflow");
+        // Floor: minting fewer shares than the exact exchange rate would
+        // imply protects existing holders from dilution by rounding in
+        // the protocol's favor, matching `money::round_div`'s Floor mode
+        // used identically for withdrawal-side redemption below.
+        money::round_div(numerator, assets_den, money::RoundingMode::Floor)
             .expect("share mint overflow")
     }
 
@@ -293,9 +298,13 @@ impl LendingPool {
         let shares_den = cur_total_shares
             .checked_add(Self::VIRTUAL_SHARES)
             .expect("virtual shares overflow");
-        shares
+        let numerator = shares
             .checked_mul(assets_num)
-            .and_then(|v| v.checked_div(shares_den))
+            .expect("share redeem overflow");
+        // Floor: redeeming slightly fewer assets than the exact exchange
+        // rate implies leaves the residual in the pool for remaining
+        // depositors rather than paying it out from thin air.
+        money::round_div(numerator, shares_den, money::RoundingMode::Floor)
             .expect("share redeem overflow")
     }
 
@@ -783,9 +792,10 @@ impl LendingPool {
         let shares_den = total_shares
             .checked_add(Self::VIRTUAL_SHARES)
             .expect("virtual shares overflow");
-        assets_num
+        let numerator = assets_num
             .checked_mul(Self::SHARE_PRICE_SCALE)
-            .and_then(|v| v.checked_div(shares_den))
+            .expect("share price overflow");
+        money::round_div(numerator, shares_den, money::RoundingMode::Floor)
             .expect("share price overflow")
     }
 
@@ -873,7 +883,9 @@ impl LendingPool {
         // Utilisation: portion of tracked principal currently out on loan.
         let utilization_bps = if total_deposits > 0 && pool_token_balance < total_deposits {
             let borrowed = total_deposits - pool_token_balance;
-            ((borrowed * 10_000) / total_deposits) as u32
+            let numerator = borrowed.checked_mul(10_000).expect("utilisation overflow");
+            money::round_div(numerator, total_deposits, money::RoundingMode::Floor)
+                .expect("utilisation overflow") as u32
         } else {
             0
         };

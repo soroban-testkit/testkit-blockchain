@@ -15,6 +15,7 @@ import { updateUserScoresBulk } from './scoresService.js';
 import { AppError } from '../errors/AppError.js';
 import { recordIndexerLedgers } from '../middleware/metrics.js';
 import { setPauseState } from '../middleware/pauseGuard.js';
+import { fromStroops } from '../money/decimal.js';
 
 const EVENT_TYPE_ALIASES: Record<string, WebhookEventType> = {
   Mint: 'NFTMinted',
@@ -706,7 +707,14 @@ export class EventIndexer {
         eventType: event.eventType,
         ...(event.loanId !== undefined ? { loanId: event.loanId } : {}),
         address: event.address,
-        ...(event.amount !== undefined ? { amount: event.amount } : {}),
+        // Carry both the raw stroop string (exact, for settlement/tx logic)
+        // and a display string derived from the same money policy used
+        // everywhere else, so SSE consumers never have to re-derive a
+        // display amount themselves (which is how the frontend previously
+        // ended up doing `Number(stroops) / 1e7` with its own rounding).
+        ...(event.amount !== undefined
+          ? { amount: event.amount, amountDisplay: fromStroops(BigInt(event.amount)) }
+          : {}),
         ledger: event.ledger,
         ledgerClosedAt: event.ledgerClosedAt.toISOString(),
         txHash: event.txHash,
@@ -1094,12 +1102,25 @@ export class EventIndexer {
     return native;
   }
 
+  /**
+   * Decode a stroop-denominated `i128` event field to its exact integer
+   * string representation.
+   *
+   * This is the money-policy boundary between the chain and the rest of the
+   * backend (see `backend/src/money/decimal.ts`): the value is converted to
+   * `bigint` and back to a string without ever passing through `Number`, so
+   * amounts beyond `Number.MAX_SAFE_INTEGER` (any XLM balance above ~90M
+   * stroops, i.e. ~9 XLM) cannot silently lose precision here.
+   */
   private decodeAmount(value: xdr.ScVal): string {
     const native = scValToNative(value);
-    if (typeof native !== 'bigint' && typeof native !== 'number') {
-      throw new Error(`Expected numeric amount, got ${typeof native}: ${String(native)}`);
+    if (typeof native === 'bigint') {
+      return native.toString();
     }
-    return native.toString();
+    if (typeof native === 'number' && Number.isInteger(native)) {
+      return BigInt(native).toString();
+    }
+    throw new Error(`Expected integer stroop amount, got ${typeof native}: ${String(native)}`);
   }
 
   private decodeLoanId(value: xdr.ScVal): number | undefined {

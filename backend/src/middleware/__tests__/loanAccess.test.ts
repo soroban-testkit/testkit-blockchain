@@ -47,10 +47,7 @@ describe('requireLoanOwner (#1365 IDOR)', () => {
 
     expect(error).toBeUndefined();
     expect(next).toHaveBeenCalledWith();
-    expect(mockQuery).toHaveBeenCalledWith(
-      expect.stringContaining('loan_events'),
-      ['loan-1'],
-    );
+    expect(mockQuery).toHaveBeenCalledWith(expect.stringContaining('loan_events'), ['loan-1']);
   });
 
   it('rejects a different caller with 403 — compares loan owner to caller, not caller to itself', async () => {

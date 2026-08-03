@@ -18,8 +18,7 @@ describe('Security Issues - Critical Fixes', () => {
       const keypair = Keypair.random();
 
       // Create a token that's already expired
-      const expiredToken =
-        'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE2MDAwMDAwMDB9.invalid';
+      const expiredToken = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE2MDAwMDAwMDB9.invalid';
 
       const result = authService.verifyJwtToken(expiredToken);
 
@@ -132,7 +131,11 @@ describe('Security Issues - Critical Fixes', () => {
       const signature = keypair.sign(Buffer.from(message, 'utf-8')).toString('base64');
 
       // Verify with different message
-      const result = authService.verifySignature(keypair.publicKey(), 'different message', signature);
+      const result = authService.verifySignature(
+        keypair.publicKey(),
+        'different message',
+        signature,
+      );
 
       expect(result).toBe(false);
     });

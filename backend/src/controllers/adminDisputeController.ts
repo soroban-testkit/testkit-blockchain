@@ -9,7 +9,7 @@ import { encodeCursor, decodeCursor, parseKeysetParams } from '../utils/paginati
  * Defaults to "open" status, orders newest-first by created_at.
  */
 export const listLoanDisputes = asyncHandler(async (req, res) => {
-  const snapshotSeq = req.query.snapshot_seq;
+  const snapshotSeq = typeof req.query.snapshot_seq === 'string' ? req.query.snapshot_seq : null;
   const cursorStr = typeof req.query.cursor === 'string' ? req.query.cursor : null;
   const limitParam = typeof req.query.limit === 'string' ? req.query.limit : null;
   const status = typeof req.query.status === 'string' ? req.query.status : undefined;
@@ -45,7 +45,7 @@ export const listLoanDisputes = asyncHandler(async (req, res) => {
     actualSnapshotSeq = BigInt(maxSeqResult.rows[0]?.max_seq ?? 0);
   }
 
-  let params: unknown[] = [];
+  const params: unknown[] = [];
   let whereClause = '';
 
   // Status filter

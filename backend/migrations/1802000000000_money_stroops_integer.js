@@ -51,11 +51,34 @@ const MONEY_COLUMNS = [
   },
 ];
 
+// The backward-compat `loan_events` view (1788000000018_unified-contract-events)
+// selects `contract_events.amount`, and PostgreSQL refuses to retype a column a
+// view depends on. Drop the view around the ALTER and recreate it verbatim.
+const CREATE_LOAN_EVENTS_VIEW = `
+  CREATE VIEW loan_events AS
+  SELECT
+    id,
+    event_id,
+    event_type,
+    loan_id,
+    address AS borrower,
+    amount,
+    ledger,
+    ledger_closed_at,
+    tx_hash,
+    contract_id,
+    topics,
+    value,
+    created_at
+  FROM contract_events;
+`;
+
 /**
  * @param pgm {import('node-pg-migrate').MigrationBuilder}
  * @returns {void}
  */
 export const up = (pgm) => {
+  pgm.sql('DROP VIEW IF EXISTS loan_events;');
   for (const { table, column, constraint } of MONEY_COLUMNS) {
     // Round any pre-existing fractional values down to whole stroops before
     // the CHECK is added, so historical rows (if any ever slipped in with a
@@ -70,6 +93,7 @@ export const up = (pgm) => {
       check: `"${column}" IS NULL OR "${column}" = trunc("${column}")`,
     });
   }
+  pgm.sql(CREATE_LOAN_EVENTS_VIEW);
 };
 
 /**
@@ -77,8 +101,10 @@ export const up = (pgm) => {
  * @returns {void}
  */
 export const down = (pgm) => {
+  pgm.sql('DROP VIEW IF EXISTS loan_events;');
   for (const { table, column, constraint } of [...MONEY_COLUMNS].reverse()) {
     pgm.dropConstraint(table, constraint);
     pgm.alterColumn(table, column, { type: 'numeric' });
   }
+  pgm.sql(CREATE_LOAN_EVENTS_VIEW);
 };

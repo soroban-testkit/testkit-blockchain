@@ -270,9 +270,7 @@ impl LendingPool {
         let assets_den = total_managed_assets_before
             .checked_add(Self::VIRTUAL_ASSETS)
             .expect("virtual assets overflow");
-        let numerator = amount
-            .checked_mul(shares_num)
-            .expect("share mint overflow");
+        let numerator = amount.checked_mul(shares_num).expect("share mint overflow");
         // Floor: minting fewer shares than the exact exchange rate would
         // imply protects existing holders from dilution by rounding in
         // the protocol's favor, matching `money::round_div`'s Floor mode

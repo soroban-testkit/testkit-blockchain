@@ -2,7 +2,8 @@ import { describe, it, expect, jest, beforeEach } from '@jest/globals';
 
 const mockConnect = jest.fn<() => Promise<void>>();
 const mockOn = jest.fn();
-const mockEval = jest.fn<(script: string, options: { keys: string[]; arguments: string[] }) => Promise<unknown>>();
+const mockEval =
+  jest.fn<(script: string, options: { keys: string[]; arguments: string[] }) => Promise<unknown>>();
 const mockTtl = jest.fn<(key: string) => Promise<number>>();
 const mockGet = jest.fn<(key: string) => Promise<string | null>>();
 const mockDel = jest.fn<(key: string) => Promise<number>>();
@@ -58,7 +59,10 @@ describe('rateLimitService', () => {
   it('blocks requests once the atomic counter reaches or exceeds the limit', async () => {
     mockEval.mockResolvedValueOnce([5, 60]);
 
-    const result = await rateLimitService.checkRateLimit('user123', { maxRequests: 5, windowSeconds: 60 });
+    const result = await rateLimitService.checkRateLimit('user123', {
+      maxRequests: 5,
+      windowSeconds: 60,
+    });
 
     expect(result.allowed).toBe(false);
     expect(result.remaining).toBe(0);

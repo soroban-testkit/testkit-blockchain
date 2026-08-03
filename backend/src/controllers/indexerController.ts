@@ -2,7 +2,6 @@ import type { Request, Response } from 'express';
 import { xdr } from '@stellar/stellar-sdk';
 import { query } from '../db/connection.js';
 import { EventIndexer, type SorobanRawEvent } from '../services/eventIndexer.js';
-import { cacheService } from '../services/cacheService.js';
 import {
   SUPPORTED_WEBHOOK_EVENT_TYPES,
   webhookService,
@@ -10,15 +9,12 @@ import {
 } from '../services/webhookService.js';
 import {
   createCursorPaginatedResponse,
+  decodeCursor,
+  encodeCursor,
   parseCursorQueryParams,
+  parseKeysetParams,
   parseQueryParams,
 } from '../utils/pagination.js';
-import {
-  encodeCursor,
-  decodeCursor,
-  buildKeysetClause,
-  parseKeysetParams,
-} from '../lib/pagination.js';
 import { parseCappedLimit } from '../utils/queryHelpers.js';
 import logger from '../utils/logger.js';
 
@@ -86,20 +82,6 @@ const buildEventFilters = (req: Request, baseParams: unknown[], initialWhereClau
 
   return { params, whereClause };
 };
-
-const buildEventsCacheKey = (scope: string, resourceId: string | number, req: Request) =>
-  [
-    'events',
-    scope,
-    String(resourceId),
-    `limit:${req.query.limit ?? 'default'}`,
-    `cursor:${req.query.cursor ?? 'default'}`,
-    `offset:${req.query.offset ?? 'default'}`,
-    `sort:${req.query.sort ?? 'default'}`,
-    `status:${req.query.status ?? req.query.eventType ?? 'all'}`,
-    `date:${req.query.date_range ?? 'all'}`,
-    `amount:${req.query.amount_range ?? 'all'}`,
-  ].join(':');
 
 type QuarantineEventRow = {
   id: number;
@@ -253,15 +235,15 @@ export const getBorrowerEvents = async (req: Request, res: Response) => {
     }
 
     // Parse keyset pagination params
-    const snapshotSeq = req.query.snapshot_seq;
+    const snapshotSeq = typeof req.query.snapshot_seq === 'string' ? req.query.snapshot_seq : null;
     const cursorStr = typeof req.query.cursor === 'string' ? req.query.cursor : null;
     const limitParam = typeof req.query.limit === 'string' ? req.query.limit : null;
 
-    const { snapshotSeq: parsedSnapshotSeq, cursor: parsedCursor, limit } = parseKeysetParams(
-      snapshotSeq,
-      cursorStr,
-      limitParam,
-    );
+    const {
+      snapshotSeq: parsedSnapshotSeq,
+      cursor: parsedCursor,
+      limit,
+    } = parseKeysetParams(snapshotSeq, cursorStr, limitParam);
 
     // Decode cursor if provided
     let decodedCursor = null;
@@ -277,24 +259,23 @@ export const getBorrowerEvents = async (req: Request, res: Response) => {
     );
 
     // Build keyset clause for pagination
-    let params = [...filterParams];
+    const params = [...filterParams];
     let whereClause = filterClause;
 
     // Pin snapshot on first request or use provided one
     let actualSnapshotSeq = parsedSnapshotSeq;
     if (actualSnapshotSeq === BigInt(0)) {
       // First page: pin the current max seq
-      const maxSeqResult = await query(
-        'SELECT MAX(seq) as max_seq FROM contract_events',
-        [],
-      );
+      const maxSeqResult = await query('SELECT MAX(seq) as max_seq FROM contract_events', []);
       actualSnapshotSeq = BigInt(maxSeqResult.rows[0]?.max_seq ?? 0);
     }
 
     // Add snapshot constraint
     params.push(actualSnapshotSeq.toString());
     const snapshotClause = `seq <= $${params.length}`;
-    whereClause += whereClause.includes('WHERE') ? ` AND ${snapshotClause}` : ` WHERE ${snapshotClause}`;
+    whereClause += whereClause.includes('WHERE')
+      ? ` AND ${snapshotClause}`
+      : ` WHERE ${snapshotClause}`;
 
     // Add keyset constraint
     if (decodedCursor) {
@@ -335,7 +316,10 @@ export const getBorrowerEvents = async (req: Request, res: Response) => {
     const countParams = [...filterParams];
     countParams.push(actualSnapshotSeq.toString());
     const countWhereClause =
-      filterClause + (filterClause.includes('WHERE') ? ` AND seq <= $${countParams.length}` : ` WHERE seq <= $${countParams.length}`);
+      filterClause +
+      (filterClause.includes('WHERE')
+        ? ` AND seq <= $${countParams.length}`
+        : ` WHERE seq <= $${countParams.length}`);
 
     const totalResult = await query(
       `SELECT COUNT(*) as count FROM contract_events ${countWhereClause}`,
@@ -343,7 +327,7 @@ export const getBorrowerEvents = async (req: Request, res: Response) => {
     );
     const totalAtSnapshot = Number.parseInt(totalResult.rows[0].count, 10);
 
-    res.json({
+    return res.json({
       success: true,
       data: {
         address: borrower,
@@ -372,7 +356,7 @@ export const getLoanEvents = async (req: Request, res: Response) => {
   try {
     const loanIdParam = req.params.loanId;
     const loanId = Array.isArray(loanIdParam) ? loanIdParam[0] : loanIdParam;
-    const snapshotSeq = req.query.snapshot_seq;
+    const snapshotSeq = typeof req.query.snapshot_seq === 'string' ? req.query.snapshot_seq : null;
     const cursorStr = typeof req.query.cursor === 'string' ? req.query.cursor : null;
     const limitParam = typeof req.query.limit === 'string' ? req.query.limit : null;
 
@@ -383,11 +367,11 @@ export const getLoanEvents = async (req: Request, res: Response) => {
       });
     }
 
-    const { snapshotSeq: parsedSnapshotSeq, cursor: parsedCursor, limit } = parseKeysetParams(
-      snapshotSeq,
-      cursorStr,
-      limitParam,
-    );
+    const {
+      snapshotSeq: parsedSnapshotSeq,
+      cursor: parsedCursor,
+      limit,
+    } = parseKeysetParams(snapshotSeq, cursorStr, limitParam);
 
     // Decode cursor if provided
     let decodedCursor = null;
@@ -403,24 +387,23 @@ export const getLoanEvents = async (req: Request, res: Response) => {
     );
 
     // Build keyset clause for pagination
-    let params = [...filterParams];
+    const params = [...filterParams];
     let whereClause = filterClause;
 
     // Pin snapshot on first request or use provided one
     let actualSnapshotSeq = parsedSnapshotSeq;
     if (actualSnapshotSeq === BigInt(0)) {
       // First page: pin the current max seq
-      const maxSeqResult = await query(
-        'SELECT MAX(seq) as max_seq FROM contract_events',
-        [],
-      );
+      const maxSeqResult = await query('SELECT MAX(seq) as max_seq FROM contract_events', []);
       actualSnapshotSeq = BigInt(maxSeqResult.rows[0]?.max_seq ?? 0);
     }
 
     // Add snapshot constraint
     params.push(actualSnapshotSeq.toString());
     const snapshotClause = `seq <= $${params.length}`;
-    whereClause += whereClause.includes('WHERE') ? ` AND ${snapshotClause}` : ` WHERE ${snapshotClause}`;
+    whereClause += whereClause.includes('WHERE')
+      ? ` AND ${snapshotClause}`
+      : ` WHERE ${snapshotClause}`;
 
     // Add keyset constraint
     if (decodedCursor) {
@@ -456,7 +439,10 @@ export const getLoanEvents = async (req: Request, res: Response) => {
     const countParams = [...filterParams];
     countParams.push(actualSnapshotSeq.toString());
     const countWhereClause =
-      filterClause + (filterClause.includes('WHERE') ? ` AND seq <= $${countParams.length}` : ` WHERE seq <= $${countParams.length}`);
+      filterClause +
+      (filterClause.includes('WHERE')
+        ? ` AND seq <= $${countParams.length}`
+        : ` WHERE seq <= $${countParams.length}`);
 
     const totalResult = await query(
       `SELECT COUNT(*) as count FROM contract_events ${countWhereClause}`,
@@ -464,7 +450,7 @@ export const getLoanEvents = async (req: Request, res: Response) => {
     );
     const totalAtSnapshot = Number.parseInt(totalResult.rows[0].count, 10);
 
-    res.json({
+    return res.json({
       success: true,
       data: {
         loanId: Number.parseInt(loanId, 10),
@@ -491,15 +477,15 @@ export const getLoanEvents = async (req: Request, res: Response) => {
  */
 export const getRecentEvents = async (req: Request, res: Response) => {
   try {
-    const snapshotSeq = req.query.snapshot_seq;
+    const snapshotSeq = typeof req.query.snapshot_seq === 'string' ? req.query.snapshot_seq : null;
     const cursorStr = typeof req.query.cursor === 'string' ? req.query.cursor : null;
     const limitParam = typeof req.query.limit === 'string' ? req.query.limit : null;
 
-    const { snapshotSeq: parsedSnapshotSeq, cursor: parsedCursor, limit } = parseKeysetParams(
-      snapshotSeq,
-      cursorStr,
-      limitParam,
-    );
+    const {
+      snapshotSeq: parsedSnapshotSeq,
+      cursor: parsedCursor,
+      limit,
+    } = parseKeysetParams(snapshotSeq, cursorStr, limitParam);
 
     // Decode cursor if provided
     let decodedCursor = null;
@@ -511,24 +497,23 @@ export const getRecentEvents = async (req: Request, res: Response) => {
     const { params: filterParams, whereClause: filterClause } = buildEventFilters(req, [], '');
 
     // Build keyset clause for pagination
-    let params = [...filterParams];
+    const params = [...filterParams];
     let whereClause = filterClause;
 
     // Pin snapshot on first request or use provided one
     let actualSnapshotSeq = parsedSnapshotSeq;
     if (actualSnapshotSeq === BigInt(0)) {
       // First page: pin the current max seq
-      const maxSeqResult = await query(
-        'SELECT MAX(seq) as max_seq FROM contract_events',
-        [],
-      );
+      const maxSeqResult = await query('SELECT MAX(seq) as max_seq FROM contract_events', []);
       actualSnapshotSeq = BigInt(maxSeqResult.rows[0]?.max_seq ?? 0);
     }
 
     // Add snapshot constraint
     params.push(actualSnapshotSeq.toString());
     const snapshotClause = `seq <= $${params.length}`;
-    whereClause += whereClause.includes('WHERE') ? ` AND ${snapshotClause}` : ` WHERE ${snapshotClause}`;
+    whereClause += whereClause.includes('WHERE')
+      ? ` AND ${snapshotClause}`
+      : ` WHERE ${snapshotClause}`;
 
     // Add keyset constraint
     if (decodedCursor) {
@@ -564,7 +549,10 @@ export const getRecentEvents = async (req: Request, res: Response) => {
     const countParams = [...filterParams];
     countParams.push(actualSnapshotSeq.toString());
     const countWhereClause =
-      filterClause + (filterClause.includes('WHERE') ? ` AND seq <= $${countParams.length}` : ` WHERE seq <= $${countParams.length}`);
+      filterClause +
+      (filterClause.includes('WHERE')
+        ? ` AND seq <= $${countParams.length}`
+        : ` WHERE seq <= $${countParams.length}`);
 
     const totalResult = await query(
       `SELECT COUNT(*) as count FROM contract_events ${countWhereClause}`,
@@ -653,8 +641,8 @@ export const createWebhookSubscription = async (req: Request, res: Response) => 
 
     const normalizedEventTypes = Array.isArray(eventTypes)
       ? eventTypes.filter((eventType): eventType is WebhookEventType =>
-        SUPPORTED_WEBHOOK_EVENT_TYPES.includes(eventType as WebhookEventType),
-      )
+          SUPPORTED_WEBHOOK_EVENT_TYPES.includes(eventType as WebhookEventType),
+        )
       : [];
 
     if (normalizedEventTypes.length === 0) {
@@ -667,14 +655,14 @@ export const createWebhookSubscription = async (req: Request, res: Response) => 
     const subscription = await webhookService.registerSubscription(
       secret
         ? {
-          callbackUrl,
-          eventTypes: normalizedEventTypes,
-          secret,
-        }
+            callbackUrl,
+            eventTypes: normalizedEventTypes,
+            secret,
+          }
         : {
-          callbackUrl,
-          eventTypes: normalizedEventTypes,
-        },
+            callbackUrl,
+            eventTypes: normalizedEventTypes,
+          },
     );
 
     return res.status(201).json({
@@ -882,19 +870,19 @@ export const reprocessQuarantinedEvents = async (req: Request, res: Response) =>
     const rowsResult =
       parsedIds && parsedIds.length > 0
         ? await query(
-          `SELECT id, event_id, ledger, tx_hash, contract_id, raw_xdr, error_message, quarantined_at
+            `SELECT id, event_id, ledger, tx_hash, contract_id, raw_xdr, error_message, quarantined_at
            FROM quarantine_events
            WHERE id = ANY($1::int[])
            ORDER BY id ASC`,
-          [parsedIds],
-        )
+            [parsedIds],
+          )
         : await query(
-          `SELECT id, event_id, ledger, tx_hash, contract_id, raw_xdr, error_message, quarantined_at
+            `SELECT id, event_id, ledger, tx_hash, contract_id, raw_xdr, error_message, quarantined_at
            FROM quarantine_events
            ORDER BY id ASC
            LIMIT $1`,
-          [parsedLimit],
-        );
+            [parsedLimit],
+          );
 
     const rows = rowsResult.rows as QuarantineEventRow[];
 

@@ -156,13 +156,10 @@ return 0
   async deleteIfMatch(key: string, expectedValue: string): Promise<boolean> {
     try {
       await this.ensureConnected();
-      const result = await this.client!.eval(
-        CacheService.COMPARE_AND_DELETE_SCRIPT,
-        {
-          keys: [key],
-          arguments: [JSON.stringify(expectedValue)],
-        },
-      );
+      const result = await this.client!.eval(CacheService.COMPARE_AND_DELETE_SCRIPT, {
+        keys: [key],
+        arguments: [JSON.stringify(expectedValue)],
+      });
       return result === 1;
     } catch (error) {
       if (process.env.NODE_ENV !== 'test') {

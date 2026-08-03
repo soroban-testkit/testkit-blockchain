@@ -165,7 +165,11 @@ class CrossContractReconciler {
     return row?.ledger == null ? null : Number(row.ledger);
   }
 
-  private async markReconciled(id: number, scoreLedger: number | null, applied: boolean): Promise<void> {
+  private async markReconciled(
+    id: number,
+    scoreLedger: number | null,
+    applied: boolean,
+  ): Promise<void> {
     await query(
       `/* update */
       UPDATE cross_contract_reconciliation
@@ -247,10 +251,12 @@ class CrossContractReconciler {
               const onChainScore = await sorobanService.getOnChainCreditScore(row.borrower);
               corrections.set(row.borrower, onChainScore);
             } catch (err) {
-              logger.withContext().error('cross_contract_reconciliation.autocorrect.lookup_failed', {
-                borrower: row.borrower,
-                error: err,
-              });
+              logger
+                .withContext()
+                .error('cross_contract_reconciliation.autocorrect.lookup_failed', {
+                  borrower: row.borrower,
+                  error: err,
+                });
             }
           }
         } else {

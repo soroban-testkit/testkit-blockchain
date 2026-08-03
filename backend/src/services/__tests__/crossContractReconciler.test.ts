@@ -36,7 +36,8 @@ function routeQueries(opts: {
   const { backfilled = 0, unresolved = [], matchByBorrower = {} } = opts;
   mockQuery.mockImplementation(async (sql: string, params?: unknown[]) => {
     if (sql.includes('/* backfill */')) return { rows: [], rowCount: backfilled };
-    if (sql.includes('/* fetch-unresolved */')) return { rows: unresolved, rowCount: unresolved.length };
+    if (sql.includes('/* fetch-unresolved */'))
+      return { rows: unresolved, rowCount: unresolved.length };
     if (sql.includes('/* match-score */')) {
       const borrower = String(params?.[0] ?? '');
       const ledger = matchByBorrower[borrower];

@@ -34,7 +34,7 @@ import {
   stopCrossContractReconciler,
 } from './services/crossContractReconciler.js';
 import { sorobanService } from './services/sorobanService.js';
-import { validateLoanConfig } from './config/loanConfig.js';
+import { validateLoanConfigOnStartup } from './config/loanConfig.js';
 import { startLoanDueCheckCron, stopLoanDueCheckCron } from './cron/loanCheckCron.js';
 // Imported the score decay scheduler initialization wrapper
 import { startScoreDecayScheduler } from './cron/scoreDecayJob.js';
@@ -45,9 +45,11 @@ const port = process.env.PORT || 3001;
 // Maintain a mutable handle to invoke clean scheduler closures on process stops
 let scoreDecaySchedulerHandle: { stop: () => void } | null = null;
 
-// Validate score delta and loan config on startup before accepting traffic
+// Validate loan config on startup before accepting traffic
+validateLoanConfigOnStartup();
+
+// Validate score delta config on startup before accepting traffic
 try {
-  validateLoanConfig();
   sorobanService.validateScoreConfig();
 } catch (err) {
   logger.error('Startup configuration is invalid, aborting startup.', { err });

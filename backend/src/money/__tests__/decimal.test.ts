@@ -3,6 +3,7 @@ import {
   toStroops,
   fromStroops,
   splitProRata,
+  roundToCents,
   RoundingMode,
   MoneyError,
   STROOP_SCALE,
@@ -166,5 +167,19 @@ describe('splitProRata', () => {
   it('rejects negative totals or weights', () => {
     expect(() => splitProRata(-1n, [1n])).toThrow(MoneyError);
     expect(() => splitProRata(1n, [-1n])).toThrow(MoneyError);
+  });
+});
+
+describe('roundToCents', () => {
+  it('rounds via half-even rounding mode (bankers rounding)', () => {
+    expect(roundToCents(0.125)).toBe(0.12);
+    expect(roundToCents(0.135)).toBe(0.14);
+    expect(roundToCents(10.005)).toBe(10.0);
+    expect(roundToCents(10.015)).toBe(10.02);
+  });
+
+  it('handles negative numbers symmetrically', () => {
+    expect(roundToCents(-0.125)).toBe(-0.12);
+    expect(roundToCents(-0.135)).toBe(-0.14);
   });
 });

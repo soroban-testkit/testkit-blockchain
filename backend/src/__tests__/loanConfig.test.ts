@@ -1,3 +1,4 @@
+import { jest } from '@jest/globals';
 import { validateLoanConfig, validateLoanConfigOnStartup } from '../config/loanConfig.js';
 
 describe('Loan config startup validation', () => {

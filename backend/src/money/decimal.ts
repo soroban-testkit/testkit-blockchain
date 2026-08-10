@@ -155,6 +155,17 @@ export function fromStroops(value: bigint): string {
 }
 
 /**
+ * Round a numeric amount to 2 decimal places (cents) using the policy's
+ * default half-even rounding mode.
+ */
+export function roundToCents(value: number, mode: RoundingMode = DEFAULT_MODE): number {
+  if (!Number.isFinite(value)) return value;
+  const stroops = toStroops(value.toFixed(7), mode);
+  const cents = roundDiv(stroops, 100_000n, mode);
+  return Number(cents) / 100;
+}
+
+/**
  * Split `total` stroops across `weights` proportionally using the
  * largest-remainder method, guaranteeing the returned parts sum *exactly*
  * to `total`. Mirrors `money::split_pro_rata` in the contract crate:

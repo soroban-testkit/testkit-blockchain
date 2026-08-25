@@ -976,11 +976,7 @@ impl RemittanceNFT {
         // leaves Burned(to) set, so a burned address would otherwise pass
         // straight through and end up simultaneously Burned and
         // credit-bearing.
-        if env
-            .storage()
-            .persistent()
-            .has(&DataKey::Burned(to.clone()))
-        {
+        if env.storage().persistent().has(&DataKey::Burned(to.clone())) {
             return Err(NftError::BurnedRequiresApproval);
         }
 

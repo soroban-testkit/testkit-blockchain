@@ -1094,6 +1094,76 @@ fn test_transfer_rejects_destination_with_existing_state() {
 }
 
 #[test]
+fn test_transfer_rejects_burned_destination() {
+    // Regression test: transfer only checked has_any_remittance_state(to),
+    // which looks at Metadata/Score only. burn_internal() removes those two
+    // keys but leaves Burned(to) set, so a burned destination previously
+    // sailed straight through transfer's only gate and came out the other
+    // side simultaneously Burned and freshly credit-bearing — a credit
+    // -integrity bypass for a defaulted party who hit the burn threshold.
+    // transfer must apply the same BurnedRequiresApproval gate mint() does.
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let admin = Address::generate(&env);
+    let from = Address::generate(&env);
+    let to = Address::generate(&env);
+
+    let contract_id = env.register(RemittanceNFT, ());
+    let client = RemittanceNFTClient::new(&env, &contract_id);
+
+    client.initialize(&admin);
+
+    // `to` gets an NFT, then defaults enough times to be auto-burned.
+    client.set_default_burn_threshold(&1);
+    client.mint(
+        &to,
+        &500,
+        &create_test_hash(&env, 30),
+        &create_test_uri(&env),
+        &create_test_commitment(&env, 1),
+        &None,
+    );
+    client.record_default(&to, &None);
+    assert!(client.get_metadata(&to).is_none());
+
+    // `from` has a clean, active NFT to attempt to transfer.
+    client.mint(
+        &from,
+        &500,
+        &create_test_hash(&env, 31),
+        &create_test_uri(&env),
+        &create_test_commitment(&env, 1),
+        &None,
+    );
+
+    // Burned destination must hard-fail, not silently receive fresh metadata.
+    let result = client.try_transfer(&from, &to, &None);
+    assert_eq!(result, Err(Ok(NftError::BurnedRequiresApproval)));
+
+    // `from`'s state must be untouched since the transfer did not proceed.
+    assert!(client.get_metadata(&from).is_some());
+
+    // `to` must still be exactly Burned and nothing else — never both
+    // Burned and credit-bearing.
+    assert!(client.get_metadata(&to).is_none());
+    assert_eq!(client.get_score(&to), 0);
+
+    // Confirm the sanctioned recovery path still works: approve_remint +
+    // admin_remint clears Burned and restores credit-bearing state in one
+    // atomic, audited step.
+    client.approve_remint(&to);
+    client.admin_remint(
+        &to,
+        &500,
+        &create_test_hash(&env, 32),
+        &create_test_uri(&env),
+        &create_test_commitment(&env, 1),
+    );
+    assert!(client.get_metadata(&to).is_some());
+}
+
+#[test]
 #[should_panic]
 fn test_transfer_rejects_unauthorized_minter() {
     let env = Env::default();

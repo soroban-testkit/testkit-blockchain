@@ -15,7 +15,12 @@ describe('Seed remittance validation', () => {
   });
 
   it('should fail validation when fields have wrong types', () => {
-    const invalidRecord = { user_id: 'user_001', amount: '500', month: 'January', status: 'Completed' };
+    const invalidRecord = {
+      user_id: 'user_001',
+      amount: '500',
+      month: 'January',
+      status: 'Completed',
+    };
     expect(() => seedRemittanceSchema.parse(invalidRecord)).toThrow();
   });
 

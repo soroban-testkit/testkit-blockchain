@@ -25,14 +25,6 @@ export const getNotifications = asyncHandler(async (req: Request, res: Response)
   const from = req.query.from as string | undefined;
   const to = req.query.to as string | undefined;
 
-  // Validate date formats
-  if (from && Number.isNaN(Date.parse(from))) {
-    throw AppError.badRequest("Invalid 'from' date format");
-  }
-  if (to && Number.isNaN(Date.parse(to))) {
-    throw AppError.badRequest("Invalid 'to' date format");
-  }
-
   const [notifications, unreadCount] = await Promise.all([
     notificationService.getNotificationsForUser(userId, limit, type, status, from, to),
     notificationService.getUnreadCount(userId),

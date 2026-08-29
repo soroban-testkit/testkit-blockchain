@@ -1,4 +1,4 @@
-import { seedRemittances } from '../remittance.js';
+import { seedRemittances } from '../remittance';
 import { seedRemittanceSchema } from '../../schemas/remittanceSchemas.js';
 
 describe('Seed remittance validation', () => {

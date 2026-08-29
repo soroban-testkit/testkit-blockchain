@@ -1155,7 +1155,7 @@ impl LoanManager {
     ///
     /// Requires admin authorization and the loan manager, lending pool, and NFT
     /// contract to be unpaused. The target loan must be [`LoanStatus::Pending`];
-    /// approval records the default term, due date, interest/late-fee ledgers,
+    /// approval records the requested term, due date, interest/late-fee ledgers,
     /// and total outstanding balance before transferring funds from the lending
     /// pool to the borrower.
     ///
@@ -1195,7 +1195,10 @@ impl LoanManager {
             .instance()
             .get(&DataKey::Token)
             .expect("token not set");
-        let term_ledgers = Self::read_default_term(&env);
+        let term_ledgers = loan.term_ledgers;
+        if term_ledgers == 0 {
+            return Err(LoanError::InvalidTerm);
+        }
 
         // Cross-contract READ for liquidity check — still in the CHECKS phase.
         let pool_client = PoolClient::new(&env, &lending_pool);

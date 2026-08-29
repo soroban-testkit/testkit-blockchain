@@ -659,6 +659,46 @@ fn test_admin_transfer_via_propose_accept() {
 }
 
 #[test]
+fn test_approved_loan_preserves_requested_term_boundaries() {
+    let env = Env::default();
+    env.mock_all_auths_allowing_non_root_auth();
+
+    let (manager, nft_client, pool_client, token_id, _token_admin) = setup_test(&env);
+    let borrower = Address::generate(&env);
+
+    let min_term = 1u32;
+    let max_term = 100_000u32;
+    manager.set_min_term_ledgers(&min_term);
+    manager.set_max_term_ledgers(&max_term);
+
+    let history_hash = soroban_sdk::BytesN::from_array(&env, &[0u8; 32]);
+    nft_client.mint(
+        &borrower,
+        &600,
+        &history_hash,
+        &String::from_str(&env, "ipfs://QmTest"),
+        &create_test_commitment(&env, 1),
+        &None,
+    );
+
+    let stellar_token = StellarAssetClient::new(&env, &token_id);
+    stellar_token.mint(&pool_client, &10_000_000);
+
+    for requested_term in [min_term, max_term] {
+        let loan_id = manager.request_loan(&borrower, &1_000, &requested_term);
+        let pending_loan = manager.get_loan(&loan_id);
+        assert_eq!(pending_loan.term_ledgers, requested_term);
+
+        let approval_ledger = env.ledger().sequence();
+        manager.approve_loan(&loan_id);
+
+        let approved_loan = manager.get_loan(&loan_id);
+        assert_eq!(approved_loan.term_ledgers, requested_term);
+        assert_eq!(approved_loan.due_date, approval_ledger + requested_term);
+    }
+}
+
+#[test]
 fn test_configurable_interest_rate_and_default_term() {
     let env = Env::default();
     env.mock_all_auths_allowing_non_root_auth();

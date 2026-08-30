@@ -655,10 +655,13 @@ export const getLoanAmortizationSchedule = asyncHandler(async (req: Request, res
  * POST /api/loans/request
  */
 export const requestLoan = asyncHandler(async (req: Request, res: Response) => {
-  const { amount, borrowerPublicKey } = req.body as {
+  const { amount, borrowerPublicKey, term } = req.body as {
     amount: number;
     borrowerPublicKey: string;
+    term?: number;
   };
+
+  const termLedgers = term ?? DEFAULT_TERM_LEDGERS;
 
   if (borrowerPublicKey !== req.user?.publicKey) {
     throw AppError.forbidden(
@@ -684,8 +687,8 @@ export const requestLoan = asyncHandler(async (req: Request, res: Response) => {
     }
   }
 
-  // Idempotency: return existing unsigned tx if recently built for this borrower/amount
-  const cacheKey = `pending_loan_tx:${borrowerPublicKey}:${amount}`;
+  // Idempotency: return existing unsigned tx if recently built for this borrower/amount/term
+  const cacheKey = `pending_loan_tx:${borrowerPublicKey}:${amount}:${termLedgers}`;
   const cachedTx = await cacheService.get<{
     unsignedTxXdr: string;
     networkPassphrase: string;
@@ -695,6 +698,7 @@ export const requestLoan = asyncHandler(async (req: Request, res: Response) => {
     logger.withContext().info('Returning cached unsigned loan request tx', {
       borrower: borrowerPublicKey,
       amount,
+      termLedgers,
     });
     res.json({
       success: true,
@@ -704,7 +708,7 @@ export const requestLoan = asyncHandler(async (req: Request, res: Response) => {
     return;
   }
 
-  const result = await sorobanService.buildRequestLoanTx(borrowerPublicKey, amount);
+  const result = await sorobanService.buildRequestLoanTx(borrowerPublicKey, amount, termLedgers);
 
   // Cache for 60 seconds to prevent sequence number collisions from rapid requests
   await cacheService.set(cacheKey, result, 60);
@@ -715,6 +719,7 @@ export const requestLoan = asyncHandler(async (req: Request, res: Response) => {
   logger.withContext().info('Loan request transaction built', {
     borrower: borrowerPublicKey,
     amount,
+    termLedgers,
   });
 
   res.json({

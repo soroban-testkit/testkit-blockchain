@@ -195,12 +195,13 @@ class SorobanService {
   }
 
   /**
-   * Builds an unsigned Soroban `request_loan(borrower, amount)` transaction.
+   * Builds an unsigned Soroban `request_loan(borrower, amount, term)` transaction.
    * Returns base64 XDR for the frontend to sign with the user's wallet.
    */
   async buildRequestLoanTx(
     borrowerPublicKey: string,
     amount: number,
+    termLedgers: number,
   ): Promise<{ unsignedTxXdr: string; networkPassphrase: string }> {
     const server = this.getRpcServer();
     const contractId = this.getLoanManagerContractId();
@@ -212,6 +213,7 @@ class SorobanService {
       type: 'address',
     });
     const amountScVal = nativeToScVal(BigInt(amount), { type: 'i128' });
+    const termScVal = nativeToScVal(termLedgers, { type: 'u32' });
 
     const tx = new TransactionBuilder(account, {
       fee: BASE_FEE,
@@ -221,7 +223,7 @@ class SorobanService {
         Operation.invokeContractFunction({
           contract: contractId,
           function: 'request_loan',
-          args: [borrowerScVal, amountScVal],
+          args: [borrowerScVal, amountScVal, termScVal],
         }),
       )
       .setTimeout(30)
@@ -233,6 +235,7 @@ class SorobanService {
     logger.withContext().info('Built request_loan transaction', {
       borrower: borrowerPublicKey,
       amount,
+      termLedgers,
     });
 
     return { unsignedTxXdr, networkPassphrase: passphrase };

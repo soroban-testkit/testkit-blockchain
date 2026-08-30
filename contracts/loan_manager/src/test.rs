@@ -28,6 +28,26 @@ impl MockRateOracle {
     }
 }
 
+// Mock RateOracle that always panics, simulating a reverting/incompatible
+// oracle (#1128) so we can verify request_loan falls back to the default
+// rate instead of trapping. Nested in its own module because `contractimpl`
+// generates module-scoped items keyed by function name, which would
+// otherwise collide with `MockRateOracle::get_rate` above.
+mod mock_panicking_rate_oracle {
+    use soroban_sdk::{contract, contractimpl, Address, Env};
+
+    #[contract]
+    pub struct MockPanickingRateOracle;
+
+    #[contractimpl]
+    impl MockPanickingRateOracle {
+        pub fn get_rate(_env: Env, _borrower: Address, _amount: i128, _score: u32) -> u32 {
+            panic!("oracle unavailable");
+        }
+    }
+}
+use mock_panicking_rate_oracle::MockPanickingRateOracle;
+
 fn setup_test<'a>(
     env: &Env,
 ) -> (
@@ -2563,6 +2583,40 @@ fn test_oracle_rate_within_bounds_accepted() {
 
     // Should use the oracle rate (800 BPS), not the default (1200 BPS)
     assert_eq!(loan.interest_rate_bps, 800);
+}
+
+#[test]
+fn test_panicking_oracle_falls_back_to_default_rate() {
+    let env = Env::default();
+    env.mock_all_auths_allowing_non_root_auth();
+
+    let (manager, nft_client, pool_client, token_id, _admin) = setup_test(&env);
+    let borrower = Address::generate(&env);
+
+    // Setup
+    let history_hash = soroban_sdk::BytesN::from_array(&env, &[0u8; 32]);
+    nft_client.mint(
+        &borrower,
+        &600,
+        &history_hash,
+        &String::from_str(&env, "ipfs://QmTest"),
+        &create_test_commitment(&env, 1),
+        &None,
+    );
+    let stellar_token = StellarAssetClient::new(&env, &token_id);
+    stellar_token.mint(&pool_client, &10_000);
+
+    // Deploy a mock oracle that always panics, simulating a reverting or
+    // otherwise incompatible oracle contract (#1128).
+    let oracle_id = env.register(MockPanickingRateOracle, ());
+    manager.set_rate_oracle(&oracle_id);
+
+    // request_loan must not trap even though the oracle invocation fails —
+    // it should fall back to the configured default interest rate.
+    let loan_id = manager.request_loan(&borrower, &1000, &17280);
+    let loan = manager.get_loan(&loan_id);
+
+    assert_eq!(loan.interest_rate_bps, 1200);
 }
 
 #[test]

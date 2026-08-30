@@ -241,6 +241,12 @@ impl LoanManager {
         }
     }
 
+    // Falls back to the configured default rate (rather than trapping
+    // request_loan/refinance) both when the oracle invocation itself fails -
+    // e.g. the oracle contract reverts, panics, or returns an undecodable
+    // value (#1128) - and when a successfully returned oracle rate is out of
+    // bounds (#631): a compromised or stale oracle cannot grant free loans
+    // (rate=0) or cause instant defaults (extreme rate).
     fn compute_interest_rate(env: &Env, borrower: &Address, amount: i128, score: u32) -> u32 {
         if let Some(oracle_addr) = env
             .storage()
@@ -248,18 +254,19 @@ impl LoanManager {
             .get::<_, Address>(&DataKey::RateOracle)
         {
             let client = RateOracleClient::new(env, &oracle_addr);
-            let oracle_rate = client.get_rate(borrower, &amount, &score);
 
-            // Bounds-check the oracle response (#631): a compromised or stale oracle
-            // cannot grant free loans (rate=0) or cause instant defaults (extreme rate).
-            // Falls back to the configured default rate rather than reverting the tx.
-            let min_rate = Self::min_rate_bps(env);
-            let max_rate = Self::max_rate_bps(env);
+            match client.try_get_rate(borrower, &amount, &score) {
+                Ok(Ok(oracle_rate)) => {
+                    let min_rate = Self::min_rate_bps(env);
+                    let max_rate = Self::max_rate_bps(env);
 
-            if oracle_rate < min_rate || oracle_rate > max_rate {
-                Self::read_interest_rate(env)
-            } else {
-                oracle_rate
+                    if oracle_rate < min_rate || oracle_rate > max_rate {
+                        Self::read_interest_rate(env)
+                    } else {
+                        oracle_rate
+                    }
+                }
+                _ => Self::read_interest_rate(env),
             }
         } else {
             Self::read_interest_rate(env)

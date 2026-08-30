@@ -443,9 +443,7 @@ export class EventIndexer {
           fetchedEvents: 0,
           insertedEvents: 0,
         };
-        throw AppError.badRequest(
-          `Invalid ledger range: endLedger (${endLedger}) cannot be less than startLedger (${startLedger})`,
-        );
+
       }
 
       try {

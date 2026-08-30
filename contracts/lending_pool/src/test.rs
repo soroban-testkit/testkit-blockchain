@@ -1972,3 +1972,47 @@ fn test_round_trip_deposit_then_redeem_is_never_profitable() {
         pool_client.withdraw(&provider, &token_id, &shares, &0);
     }
 }
+
+#[test]
+fn test_utilization_accurate_when_yield_distributed() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let token_admin = Address::generate(&env);
+    let (token_id, stellar_asset_client, token_client) = create_token_contract(&env, &token_admin);
+
+    let pool_id = env.register(LendingPool, ());
+    let pool_client = LendingPoolClient::new(&env, &pool_id);
+    pool_client.initialize(&token_admin);
+
+    let provider = Address::generate(&env);
+    let borrower = Address::generate(&env);
+    let yield_distributor = Address::generate(&env);
+
+    stellar_asset_client.mint(&provider, &10_000);
+    pool_client.deposit(&provider, &token_id, &10_000, &0);
+
+    // Borrow 4,000 tokens out on loan
+    token_client.transfer(&pool_id, &borrower, &4_000);
+    pool_client.adjust_outstanding(&token_id, &4_000);
+
+    let stats_before = pool_client.get_pool_stats(&token_id);
+    // 4,000 / 10,000 = 40% (4,000 bps)
+    assert_eq!(stats_before.utilization_bps, 4_000);
+    assert_eq!(stats_before.pool_token_balance, 6_000);
+
+    // Distribute 5,000 yield into the pool (e.g. protocol yield / loan interest)
+    // Now pool_token_balance becomes 6,000 + 5,000 = 11,000 > total_deposits (10,000)
+    // total_managed_assets becomes 15,000
+    stellar_asset_client.mint(&yield_distributor, &5_000);
+    pool_client.distribute_yield(&yield_distributor, &token_id, &5_000);
+
+    let stats_after = pool_client.get_pool_stats(&token_id);
+    assert_eq!(stats_after.pool_token_balance, 11_000);
+    assert_eq!(stats_after.total_deposits, 10_000);
+    assert_eq!(stats_after.total_managed_assets, 15_000);
+    // 4,000 outstanding / 15,000 total managed assets = 2,666 bps (26.66%)
+    assert_eq!(stats_after.utilization_bps, 2_666);
+    assert!(stats_after.utilization_bps > 0);
+}
+

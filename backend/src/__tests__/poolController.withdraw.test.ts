@@ -1,7 +1,7 @@
 import { jest, describe, it, expect, beforeEach } from '@jest/globals';
 import type { NextFunction, Request, Response } from 'express';
 
-const mockBuildEmergencyWithdrawTx =
+const mockBuildWithdrawTx =
   jest.fn<
     (
       providerPublicKey: string,
@@ -13,7 +13,7 @@ const mockBuildEmergencyWithdrawTx =
 
 jest.unstable_mockModule('../services/sorobanService.js', () => ({
   sorobanService: {
-    buildEmergencyWithdrawTx: mockBuildEmergencyWithdrawTx,
+    buildWithdrawTx: mockBuildWithdrawTx,
     getSharePrice: jest.fn(),
   },
 }));
@@ -27,10 +27,12 @@ jest.unstable_mockModule('../services/cacheService.js', () => ({
   cacheService: {
     get: jest.fn<(...args: unknown[]) => Promise<null>>().mockResolvedValue(null),
     set: jest.fn<(...args: unknown[]) => Promise<void>>().mockResolvedValue(undefined),
+    del: jest.fn<(...args: unknown[]) => Promise<void>>().mockResolvedValue(undefined),
+    delete: jest.fn<(...args: unknown[]) => Promise<void>>().mockResolvedValue(undefined),
   },
 }));
 
-const { emergencyWithdrawFromPool } = await import('../controllers/poolController.js');
+const { withdrawFromPool } = await import('../controllers/poolController.js');
 
 const flushAsync = async (): Promise<void> => new Promise((resolve) => setImmediate(resolve));
 
@@ -40,14 +42,14 @@ const createMockResponse = (): Response =>
     json: jest.fn().mockReturnThis(),
   }) as unknown as Response;
 
-describe('emergencyWithdrawFromPool', () => {
+describe('withdrawFromPool', () => {
   beforeEach(() => {
     jest.clearAllMocks();
   });
 
-  it('builds an unsigned emergency withdraw transaction with default minAssetsOut (0)', async () => {
-    mockBuildEmergencyWithdrawTx.mockResolvedValue({
-      unsignedTxXdr: 'AAAAAgAAAAtlbWVyZ2VuY3lfd2l0aGRyYXc=',
+  it('builds an unsigned withdraw transaction with default minAssetsOut (0)', async () => {
+    mockBuildWithdrawTx.mockResolvedValue({
+      unsignedTxXdr: 'AAAAAgAAAAt3aXRoZHJhdw==',
       networkPassphrase: 'Test SDF Network ; September 2015',
     });
 
@@ -55,27 +57,27 @@ describe('emergencyWithdrawFromPool', () => {
       body: {
         depositorPublicKey: 'GDEPOSITOR123',
         token: 'GTOKEN456',
-        shares: 500,
+        amount: 500,
       },
       user: { publicKey: 'GDEPOSITOR123' },
     } as unknown as Request;
     const res = createMockResponse();
     const next = jest.fn<(err?: unknown) => void>();
 
-    emergencyWithdrawFromPool(req, res, next as unknown as NextFunction);
+    withdrawFromPool(req, res, next as unknown as NextFunction);
     await flushAsync();
 
-    expect(mockBuildEmergencyWithdrawTx).toHaveBeenCalledWith('GDEPOSITOR123', 'GTOKEN456', 500, 0);
+    expect(mockBuildWithdrawTx).toHaveBeenCalledWith('GDEPOSITOR123', 'GTOKEN456', 500, 0);
     expect(res.json).toHaveBeenCalledWith({
       success: true,
-      unsignedTxXdr: 'AAAAAgAAAAtlbWVyZ2VuY3lfd2l0aGRyYXc=',
+      unsignedTxXdr: 'AAAAAgAAAAt3aXRoZHJhdw==',
       networkPassphrase: 'Test SDF Network ; September 2015',
     });
   });
 
-  it('builds an unsigned emergency withdraw transaction with explicit minAssetsOut', async () => {
-    mockBuildEmergencyWithdrawTx.mockResolvedValue({
-      unsignedTxXdr: 'AAAAAgAAAAtlbWVyZ2VuY3lfd2l0aGRyYXc=',
+  it('builds an unsigned withdraw transaction with explicit minAssetsOut', async () => {
+    mockBuildWithdrawTx.mockResolvedValue({
+      unsignedTxXdr: 'AAAAAgAAAAt3aXRoZHJhdw==',
       networkPassphrase: 'Test SDF Network ; September 2015',
     });
 
@@ -83,26 +85,21 @@ describe('emergencyWithdrawFromPool', () => {
       body: {
         depositorPublicKey: 'GDEPOSITOR123',
         token: 'GTOKEN456',
-        shares: 500,
-        minAssetsOut: 450,
+        amount: 500,
+        minAssetsOut: 480,
       },
       user: { publicKey: 'GDEPOSITOR123' },
     } as unknown as Request;
     const res = createMockResponse();
     const next = jest.fn<(err?: unknown) => void>();
 
-    emergencyWithdrawFromPool(req, res, next as unknown as NextFunction);
+    withdrawFromPool(req, res, next as unknown as NextFunction);
     await flushAsync();
 
-    expect(mockBuildEmergencyWithdrawTx).toHaveBeenCalledWith(
-      'GDEPOSITOR123',
-      'GTOKEN456',
-      500,
-      450,
-    );
+    expect(mockBuildWithdrawTx).toHaveBeenCalledWith('GDEPOSITOR123', 'GTOKEN456', 500, 480);
     expect(res.json).toHaveBeenCalledWith({
       success: true,
-      unsignedTxXdr: 'AAAAAgAAAAtlbWVyZ2VuY3lfd2l0aGRyYXc=',
+      unsignedTxXdr: 'AAAAAgAAAAt3aXRoZHJhdw==',
       networkPassphrase: 'Test SDF Network ; September 2015',
     });
   });
@@ -112,17 +109,17 @@ describe('emergencyWithdrawFromPool', () => {
       body: {
         depositorPublicKey: 'GWRONGKEY',
         token: 'GTOKEN456',
-        shares: 500,
+        amount: 500,
       },
       user: { publicKey: 'GDEPOSITOR123' },
     } as unknown as Request;
     const res = createMockResponse();
     const next = jest.fn<(err?: unknown) => void>();
 
-    emergencyWithdrawFromPool(req, res, next as unknown as NextFunction);
+    withdrawFromPool(req, res, next as unknown as NextFunction);
     await flushAsync();
 
-    expect(mockBuildEmergencyWithdrawTx).not.toHaveBeenCalled();
+    expect(mockBuildWithdrawTx).not.toHaveBeenCalled();
     expect(next).toHaveBeenCalledWith(expect.objectContaining({ statusCode: 403 }));
   });
 
@@ -134,10 +131,10 @@ describe('emergencyWithdrawFromPool', () => {
     const res = createMockResponse();
     const next = jest.fn<(err?: unknown) => void>();
 
-    emergencyWithdrawFromPool(req, res, next as unknown as NextFunction);
+    withdrawFromPool(req, res, next as unknown as NextFunction);
     await flushAsync();
 
-    expect(mockBuildEmergencyWithdrawTx).not.toHaveBeenCalled();
+    expect(mockBuildWithdrawTx).not.toHaveBeenCalled();
     expect(next).toHaveBeenCalledWith(expect.objectContaining({ statusCode: 400 }));
   });
 });

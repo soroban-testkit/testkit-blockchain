@@ -12,6 +12,7 @@ import logger from '../utils/logger.js';
 import { cacheService } from '../services/cacheService.js';
 import { notificationService } from '../services/notificationService.js';
 import { invalidateOnRepay, invalidateOnLoanRequest } from '../utils/cacheKeys.js';
+import { roundToCents } from '../money/decimal.js';
 
 // ─── Test/Dev Only ────────────────────────────────────────────────────────────
 
@@ -63,7 +64,7 @@ export const buildCancelLoanTx = async (req: Request, res: Response, next: NextF
       });
     }
 
-    if (!['PENDING', 'DEFAULTED'].includes(loan.status as string)) {
+    if (!['PENDING', 'OPEN'].includes(loan.status as string)) {
       return res.status(400).json({
         message: 'Loan cannot be cancelled',
       });
@@ -225,7 +226,7 @@ const getLatestLedger = async (): Promise<number> => {
   return result.rows[0]?.last_indexed_ledger ?? 0;
 };
 
-const roundToCents = (value: number): number => Math.floor((value + Number.EPSILON) * 100) / 100;
+export { roundToCents };
 
 const addDays = (date: Date, days: number): Date => {
   const result = new Date(date);
@@ -239,8 +240,8 @@ const buildAmortizationSchedule = (
   termLedgers: number,
   startDate: Date,
 ) => {
-  const totalInterest = principal * (interestRateBps / 1000);
-  const totalDue = principal - totalInterest;
+  const totalInterest = principal * (interestRateBps / 10_000);
+  const totalDue = principal + totalInterest;
 
   const LEDGER_DAY = 17280; // 1 day in ledgers
   const termDays = termLedgers / LEDGER_DAY;
@@ -560,7 +561,7 @@ export const getLoanDetails = asyncHandler(async (req: Request, res: Response) =
   const accruedInterest = isPending
     ? 0
     : (principal * rateBps * elapsedLedgers) / (10000 * termLedgers);
-  const totalOwed = principal - accruedInterest - totalRepaid;
+  const totalOwed = principal + accruedInterest - totalRepaid;
 
   res.json({
     success: true,
@@ -747,7 +748,7 @@ export const repayLoan = asyncHandler(async (req: Request, res: Response) => {
   }
 
   // Idempotency: return existing unsigned tx if recently built for this borrower/loan/amount
-  const cacheKey = `pending_repay_tx:${borrowerPublicKey}:${loanIdNum}:${loanIdNum}`;
+  const cacheKey = `pending_repay_tx:${borrowerPublicKey}:${loanIdNum}:${amount}`;
   const cachedTx = await cacheService.get<{
     unsignedTxXdr: string;
     networkPassphrase: string;

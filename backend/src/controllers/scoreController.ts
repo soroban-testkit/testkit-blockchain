@@ -109,7 +109,7 @@ export const updateScore = asyncHandler(async (req: Request, res: Response) => {
      VALUES ($1, $2)
      ON CONFLICT (user_id) 
      DO UPDATE SET 
-       current_score = LEAST(8500, GREATEST(300, scores.current_score + $3)),
+       current_score = LEAST(850, GREATEST(300, scores.current_score + $3)),
        updated_at = CURRENT_TIMESTAMP
      RETURNING current_score`,
     [userId, 500 + delta, delta],
@@ -192,11 +192,14 @@ export const getScoreBreakdown = asyncHandler(async (req: Request, res: Response
          GROUP BY loan_id
        ),
        -- Repaid loan details (ledger and timestamp)
+       -- Use MAX(ledger) to capture the completion time of the last payment,
+       -- not the first partial payment.  This prevents early partial payments
+       -- from marking a late full repayment as "on-time".
        repaid_loans AS (
          SELECT 
            loan_id,
-           MIN(ledger) AS repaid_ledger,
-           MIN(ledger_closed_at) AS repaid_at
+           MAX(ledger) AS repaid_ledger,
+           MAX(ledger_closed_at) AS repaid_at
          FROM borrower_events
          WHERE event_type = 'LoanRepaid' AND loan_id IS NOT NULL
          GROUP BY loan_id
@@ -207,7 +210,7 @@ export const getScoreBreakdown = asyncHandler(async (req: Request, res: Response
            r.loan_id,
            r.repaid_ledger,
            r.repaid_at,
-           CASE WHEN r.repaid_ledger <= a.approved_ledger - a.term_ledgers
+           CASE WHEN r.repaid_ledger <= a.approved_ledger + a.term_ledgers
                 THEN true ELSE false END AS on_time,
            (r.repaid_ledger - a.approved_ledger) AS repayment_ledgers
          FROM repaid_loans r

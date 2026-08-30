@@ -26,6 +26,8 @@ pub enum NftError {
     BelowMinimum = 17,
     InvalidMetadataUri = 18,
     MinterLimitReached = 19,
+    CommitmentMalformed = 20,
+    CommitmentMissing = 21,
 }
 
 #[contracttype]
@@ -62,6 +64,7 @@ pub enum DataKey {
     Paused,
     ProposedAdmin,
     MinRepaymentAmount,
+    RecipientCommitment(Address),
 }
 
 #[contract]
@@ -314,6 +317,10 @@ impl RemittanceNFT {
                 .storage()
                 .persistent()
                 .has(&DataKey::Score(user.clone()))
+            || env
+                .storage()
+                .persistent()
+                .has(&DataKey::RecipientCommitment(user.clone()))
     }
 
     fn burn_internal(env: &Env, user: &Address) {
@@ -335,6 +342,9 @@ impl RemittanceNFT {
         env.storage()
             .persistent()
             .remove(&DataKey::TransferCooldown(user.clone()));
+        env.storage()
+            .persistent()
+            .remove(&DataKey::RecipientCommitment(user.clone()));
 
         let burned_key = DataKey::Burned(user.clone());
         env.storage().persistent().set(&burned_key, &true);
@@ -482,10 +492,16 @@ impl RemittanceNFT {
         initial_score: u32,
         history_hash: BytesN<32>,
         metadata_uri: String,
+        recipient_commitment: BytesN<32>,
         minter: Option<Address>,
     ) -> Result<(), NftError> {
         let _admin_direct_mint = minter.is_none();
         Self::require_admin_or_authorized_minter(&env, minter)?;
+
+        // Validate commitment is exactly 32 bytes (SHA-256 output)
+        if recipient_commitment.len() != 32 {
+            return Err(NftError::CommitmentMalformed);
+        }
 
         // Validate metadata URI format
         Self::validate_metadata_uri(&env, &metadata_uri)?;
@@ -510,10 +526,19 @@ impl RemittanceNFT {
             metadata_uri,
         };
 
+        // Store recipient commitment (no plaintext PII on-chain)
+        let commitment_key = DataKey::RecipientCommitment(user.clone());
+        env.storage()
+            .persistent()
+            .set(&commitment_key, &recipient_commitment);
+        Self::bump_persistent_ttl(&env, &commitment_key);
+
         env.storage().persistent().set(&metadata_key, &metadata);
         Self::bump_persistent_ttl(&env, &metadata_key);
-        env.events()
-            .publish((symbol_short!("Mint"), user), initial_score);
+        env.events().publish(
+            (symbol_short!("Mint"), user),
+            (initial_score, recipient_commitment),
+        );
 
         Ok(())
     }
@@ -535,10 +560,16 @@ impl RemittanceNFT {
         initial_score: u32,
         history_hash: BytesN<32>,
         metadata_uri: String,
+        recipient_commitment: BytesN<32>,
     ) -> Result<(), NftError> {
         // Admin-only — no minter bypass allowed for remints.
         Self::admin(&env).require_auth();
         Self::assert_not_paused(&env)?;
+
+        // Validate commitment is exactly 32 bytes
+        if recipient_commitment.len() != 32 {
+            return Err(NftError::CommitmentMalformed);
+        }
 
         // Validate metadata URI format
         Self::validate_metadata_uri(&env, &metadata_uri)?;
@@ -588,9 +619,18 @@ impl RemittanceNFT {
         env.storage().persistent().set(&metadata_key, &metadata);
         Self::bump_persistent_ttl(&env, &metadata_key);
 
+        // Store recipient commitment (no plaintext PII on-chain)
+        let commitment_key = DataKey::RecipientCommitment(user.clone());
+        env.storage()
+            .persistent()
+            .set(&commitment_key, &recipient_commitment);
+        Self::bump_persistent_ttl(&env, &commitment_key);
+
         // Emit a distinct AdminRemint event — auditably separate from Mint events.
-        env.events()
-            .publish((symbol_short!("AdmRemint"), user.clone()), initial_score);
+        env.events().publish(
+            (symbol_short!("AdmRemint"), user.clone()),
+            (initial_score, recipient_commitment),
+        );
 
         Ok(())
     }
@@ -977,6 +1017,20 @@ impl RemittanceNFT {
             env.storage().persistent().remove(&from_seized_key);
         }
 
+        let from_commitment_key = DataKey::RecipientCommitment(from.clone());
+        if let Some(commitment) = env
+            .storage()
+            .persistent()
+            .get::<DataKey, BytesN<32>>(&from_commitment_key)
+        {
+            let to_commitment_key = DataKey::RecipientCommitment(to.clone());
+            env.storage()
+                .persistent()
+                .set(&to_commitment_key, &commitment);
+            Self::bump_persistent_ttl(&env, &to_commitment_key);
+            env.storage().persistent().remove(&from_commitment_key);
+        }
+
         env.storage()
             .persistent()
             .remove(&DataKey::RemintApproval(from.clone()));
@@ -1096,6 +1150,16 @@ impl RemittanceNFT {
             Self::bump_persistent_ttl(&env, &key);
         }
         approved
+    }
+
+    /// Get the recipient commitment for a user.
+    /// Returns the 32-byte SHA-256 commitment (preimage || salt) stored at mint.
+    pub fn get_recipient_commitment(env: Env, user: Address) -> Result<BytesN<32>, NftError> {
+        let key = DataKey::RecipientCommitment(user);
+        env.storage()
+            .persistent()
+            .get(&key)
+            .ok_or(NftError::CommitmentMissing)
     }
 
     pub fn is_paused(env: Env) -> bool {

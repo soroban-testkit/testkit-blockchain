@@ -330,6 +330,12 @@ describe('GET /api/loans/:loanId', () => {
     expect(response.body.success).toBe(true);
     expect(response.body.loanId).toBe('123');
     expect(response.body.summary.principal).toBe(1000);
+    expect(response.body.summary.accruedInterest).toBeGreaterThan(0);
+    expect(response.body.summary.totalOwed).toBe(
+      response.body.summary.principal +
+        response.body.summary.accruedInterest -
+        response.body.summary.totalRepaid,
+    );
   });
 
   it('should return 403 when the loan belongs to another borrower', async () => {
@@ -382,7 +388,12 @@ describe('GET /api/loans/:loanId/amortization-schedule', () => {
       principal: 1000,
       interestRateBps: 1200,
       termLedgers: 518400,
+      totalInterest: 120,
+      totalDue: 1120,
     });
+    expect(response.body.amortization.totalDue).toBe(
+      response.body.amortization.principal + response.body.amortization.totalInterest,
+    );
     expect(Array.isArray(response.body.amortization.schedule)).toBe(true);
     expect(response.body.amortization.schedule.length).toBeGreaterThan(0);
   });
@@ -457,9 +468,17 @@ describe('POST /api/loans/amortization-preview', () => {
       principal: 1000,
       interestRateBps: 1200,
       termLedgers: 1036800,
+      totalInterest: 120,
+      totalDue: 1120,
     });
     expect(Array.isArray(response.body.amortization.schedule)).toBe(true);
     expect(response.body.amortization.schedule.length).toBe(2);
+    expect(
+      response.body.amortization.schedule.reduce(
+        (sum: number, period: { interestPortion: number }) => sum + period.interestPortion,
+        0,
+      ),
+    ).toBe(120);
   });
 
   it('should reject invalid termDays', async () => {

@@ -644,15 +644,6 @@ impl LoanManager {
             .and_then(|value| value.checked_div(10_000))
             .and_then(|value| value.checked_div(term_ledgers))
             .expect("late fee overflow");
-        let late_fee_denominator = 10_000i128
-            .checked_mul(Self::DEFAULT_TERM_LEDGERS as i128)
-            .expect("late fee overflow");
-        let incremental_fee = money::round_div(
-            late_fee_numerator,
-            late_fee_denominator,
-            money::RoundingMode::Floor,
-        )
-        .expect("late fee overflow");
 
         // Global debt cap: Total outstanding (principal + interest + late fees)
         // cannot exceed original_principal * MAX_PENALTY_MULTIPLIER.
@@ -1050,7 +1041,8 @@ impl LoanManager {
     /// Returns [`LoanError::ContractPaused`], [`LoanError::PoolPaused`], or
     /// [`LoanError::NftPaused`] when pause checks fail; [`LoanError::InvalidAmount`]
     /// for non-positive amounts or amounts over the configured maximum;
-    /// [`LoanError::InvalidTerm`] for a zero term; [`LoanError::NotInitialized`]
+    /// [`LoanError::InvalidTerm`] for a zero term or one outside the configured
+    /// min/max term bounds; [`LoanError::NotInitialized`]
     /// when the NFT contract is missing; [`LoanError::InsufficientScore`] when
     /// the borrower's NFT score is too low; [`LoanError::SeizedBorrower`] when
     /// the borrower is flagged as seized; and [`LoanError::MaxLoansReached`]
@@ -1074,6 +1066,20 @@ impl LoanManager {
         }
 
         if term == 0 {
+            return Err(LoanError::InvalidTerm);
+        }
+
+        let min_term: u32 = env
+            .storage()
+            .instance()
+            .get(&DataKey::MinTermLedgers)
+            .unwrap_or(0);
+        let max_term: u32 = env
+            .storage()
+            .instance()
+            .get(&DataKey::MaxTermLedgers)
+            .unwrap_or(u32::MAX);
+        if term < min_term || term > max_term {
             return Err(LoanError::InvalidTerm);
         }
 

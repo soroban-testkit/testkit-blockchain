@@ -699,6 +699,45 @@ fn test_approved_loan_preserves_requested_term_boundaries() {
 }
 
 #[test]
+fn test_request_loan_rejects_term_outside_configured_bounds() {
+    let env = Env::default();
+    env.mock_all_auths_allowing_non_root_auth();
+
+    let (manager, nft_client, pool_client, token_id, _token_admin) = setup_test(&env);
+    let borrower = Address::generate(&env);
+
+    let min_term = 1000u32;
+    let max_term = 50_000u32;
+    manager.set_min_term_ledgers(&min_term);
+    manager.set_max_term_ledgers(&max_term);
+
+    let history_hash = soroban_sdk::BytesN::from_array(&env, &[0u8; 32]);
+    nft_client.mint(
+        &borrower,
+        &600,
+        &history_hash,
+        &String::from_str(&env, "ipfs://QmTest"),
+        &create_test_commitment(&env, 1),
+        &None,
+    );
+
+    let stellar_token = StellarAssetClient::new(&env, &token_id);
+    stellar_token.mint(&pool_client, &10_000_000);
+
+    // Below the configured minimum.
+    let below = manager.try_request_loan(&borrower, &1_000, &(min_term - 1));
+    assert_eq!(below, Err(Ok(LoanError::InvalidTerm)));
+
+    // Above the configured maximum.
+    let above = manager.try_request_loan(&borrower, &1_000, &(max_term + 1));
+    assert_eq!(above, Err(Ok(LoanError::InvalidTerm)));
+
+    // Exactly on the bounds is still accepted.
+    let on_min = manager.try_request_loan(&borrower, &1_000, &min_term);
+    assert!(on_min.is_ok());
+}
+
+#[test]
 fn test_configurable_interest_rate_and_default_term() {
     let env = Env::default();
     env.mock_all_auths_allowing_non_root_auth();

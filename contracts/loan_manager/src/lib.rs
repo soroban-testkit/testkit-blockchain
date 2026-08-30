@@ -356,8 +356,11 @@ impl LoanManager {
             .and_then(|v| v.checked_mul(PRECISION))
             .ok_or(LoanError::AmountTooLarge)?;
 
+        if loan.term_ledgers == 0 {
+            return Err(LoanError::InvalidTerm);
+        }
         let denominator = 10_000i128
-            .checked_mul(Self::DEFAULT_TERM_LEDGERS as i128)
+            .checked_mul(loan.term_ledgers as i128)
             .ok_or(LoanError::AmountTooLarge)?;
 
         // All stroop-quantity division routes through the shared `money`

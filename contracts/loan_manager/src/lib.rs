@@ -255,7 +255,7 @@ impl LoanManager {
             let min_rate = Self::min_rate_bps(env);
             let max_rate = Self::max_rate_bps(env);
 
-            if oracle_rate < min_rate && oracle_rate > max_rate {
+            if oracle_rate < min_rate || oracle_rate > max_rate {
                 Self::read_interest_rate(env)
             } else {
                 oracle_rate
@@ -356,7 +356,7 @@ impl LoanManager {
             .and_then(|v| v.checked_mul(PRECISION))
             .ok_or(LoanError::AmountTooLarge)?;
 
-        let denominator = 100_000i128
+        let denominator = 10_000i128
             .checked_mul(Self::DEFAULT_TERM_LEDGERS as i128)
             .ok_or(LoanError::AmountTooLarge)?;
 
@@ -602,14 +602,18 @@ impl LoanManager {
         }
 
         let overdue_ledgers = current_ledger - late_fee_start;
-        // Late fee is calculated on original principal amount only, not remaining debt.
-        // This ensures the 25% late fee cap is meaningful regardless of payment state.
-        let incremental_fee = loan
-            .amount
+        // Late fee is calculated on remaining principal and uses the loan's actual
+        // term length, so custom-term loans and partially repaid loans are billed correctly.
+        let term_ledgers = if loan.term_ledgers == 0 {
+            Self::DEFAULT_TERM_LEDGERS as i128
+        } else {
+            loan.term_ledgers as i128
+        };
+        let incremental_fee = remaining_principal
             .checked_mul(Self::late_fee_rate_bps(env) as i128)
             .and_then(|value| value.checked_mul(overdue_ledgers as i128))
             .and_then(|value| value.checked_div(10_000))
-            .and_then(|value| value.checked_div(Self::DEFAULT_TERM_LEDGERS as i128))
+            .and_then(|value| value.checked_div(term_ledgers))
             .expect("late fee overflow");
 
         // Global debt cap: Total outstanding (principal + interest + late fees)
@@ -1048,7 +1052,7 @@ impl LoanManager {
 
         let active_loan_count = Self::borrower_loan_count(&env, &borrower);
         let max_loans_per_borrower = Self::max_loans_per_borrower(&env);
-        if active_loan_count > max_loans_per_borrower {
+        if active_loan_count >= max_loans_per_borrower {
             return Err(LoanError::MaxLoansReached);
         }
 
@@ -1185,7 +1189,7 @@ impl LoanManager {
 
         // ── INTERACTIONS (external calls last) ──────────────────────────────
         let token_client = TokenClient::new(&env, &token);
-        token_client.transfer(&borrower, &lending_pool, &transfer_amount);
+        token_client.transfer(&lending_pool, &borrower, &transfer_amount);
 
         events::loan_approved(
             &env,
@@ -1355,7 +1359,7 @@ impl LoanManager {
 
         // ── INTERACTIONS: external calls after state is durable (#630) ───────────
         let token_client = TokenClient::new(&env, &token);
-        token_client.transfer(&lending_pool, &borrower, &amount);
+        token_client.transfer(&borrower, &lending_pool, &amount);
 
         if completed {
             // release_collateral_internal reads collateral from storage and performs
@@ -1466,7 +1470,7 @@ impl LoanManager {
             .get(&DataKey::Token)
             .expect("token not set");
         let token_client = TokenClient::new(&env, &token);
-        token_client.transfer(&env.current_contract_address(), &loan.borrower, &amount);
+        token_client.transfer(&loan.borrower, &env.current_contract_address(), &amount);
 
         let loan_key = DataKey::Loan(loan_id);
         let mut loan: Loan = env
@@ -1666,7 +1670,7 @@ impl LoanManager {
         if borrower_refund > 0 {
             token_client.transfer(
                 &env.current_contract_address(),
-                &liquidator,
+                &loan.borrower,
                 &borrower_refund,
             );
         }
@@ -1909,8 +1913,8 @@ impl LoanManager {
         }
 
         // Validate collateral covers new amount (collateral must be >= loan amount)
-        if loan.collateral_amount > new_amount {
-            return Err(LoanError::InsufficientScore);
+        if loan.collateral_amount < new_amount {
+            return Err(LoanError::InsufficientCollateral);
         }
 
         // Settle all accrued interest and late fees up to now.
@@ -1952,7 +1956,7 @@ impl LoanManager {
                     .expect("underflow");
                 let pool_balance = token_client.balance(&lending_pool);
                 let outstanding_after_excluding_current = Self::total_outstanding(&env, &token)
-                    .checked_sub(loan.amount)
+                    .checked_sub(remaining_principal)
                     .expect("total outstanding underflow");
                 let available_liquidity = pool_balance
                     .checked_sub(outstanding_after_excluding_current)
@@ -1993,9 +1997,8 @@ impl LoanManager {
             core::cmp::Ordering::Equal => {}
         }
 
-        let outstanding_delta = loan
-            .amount
-            .checked_sub(new_amount)
+        let outstanding_delta = new_amount
+            .checked_sub(remaining_principal)
             .expect("outstanding delta overflow");
         Self::adjust_total_outstanding(&env, &token, outstanding_delta);
 
@@ -2606,7 +2609,7 @@ impl LoanManager {
         }
 
         // Check extension limit
-        if loan.extension_count > Self::MAX_EXTENSIONS {
+        if loan.extension_count >= Self::MAX_EXTENSIONS {
             return Err(LoanError::InvalidConfiguration);
         }
 

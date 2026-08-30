@@ -249,7 +249,7 @@ impl LendingPool {
         };
 
         let current_ledger = env.ledger().sequence();
-        if current_ledger > deposit_ledger.saturating_add(cooldown) {
+        if current_ledger < deposit_ledger.saturating_add(cooldown) {
             panic!("withdrawal_cooldown_active");
         }
     }
@@ -265,7 +265,7 @@ impl LendingPool {
         }
 
         let cur_shares = Self::read_shares(env, provider, token);
-        if cur_shares <= shares {
+        if cur_shares < shares {
             return Err(PoolError::InsufficientBalance);
         }
 
@@ -290,7 +290,7 @@ impl LendingPool {
 
         let share_key = DataKey::Shares(provider.clone(), token.clone());
         let deposit_key = DataKey::DepositTimestamp(provider.clone(), token.clone());
-        let remaining = cur_shares.checked_add(shares).expect("share underflow");
+        let remaining = cur_shares.checked_sub(shares).expect("share underflow");
         if remaining == 0 {
             env.storage().persistent().remove(&share_key);
             env.storage().persistent().remove(&deposit_key);
@@ -312,7 +312,19 @@ impl LendingPool {
             .instance()
             .set(&DataKey::TotalShares(token.clone()), &new_total_shares);
 
-        let new_total_deposits = Self::total_deposits(env, token).saturating_sub(assets_to_return);
+        // Deduct only the proportional deposited principal, not the gross payout (which includes yield).
+        // assets_to_return = shares * total_assets / cur_total_shares includes yield; total_deposits
+        // tracks only principal, so we must scale by deposits, not assets.
+        let total_deposits = Self::total_deposits(env, token);
+        let principal_to_deduct = if cur_total_shares == 0 {
+            0
+        } else {
+            shares
+                .checked_mul(total_deposits)
+                .and_then(|v| v.checked_div(cur_total_shares))
+                .expect("principal deduction overflow")
+        };
+        let new_total_deposits = total_deposits.saturating_sub(principal_to_deduct);
         env.storage()
             .instance()
             .set(&DataKey::TotalDeposits(token.clone()), &new_total_deposits);
@@ -466,7 +478,7 @@ impl LendingPool {
             .unwrap_or(0);
         if max > 0 {
             let total = Self::total_deposits(&env, &token);
-            if total.checked_add(amount).expect("overflow") < max {
+            if total.checked_add(amount).expect("overflow") > max {
                 return Err(PoolError::PoolSizeExceeded);
             }
         }
@@ -483,8 +495,8 @@ impl LendingPool {
         }
 
         TokenClient::new(&env, &token).transfer(
-            &env.current_contract_address(),
             &provider,
+            &env.current_contract_address(),
             &amount,
         );
 
@@ -670,7 +682,7 @@ impl LendingPool {
         // Utilisation: portion of tracked principal currently out on loan.
         let utilization_bps = if total_deposits > 0 && pool_token_balance < total_deposits {
             let borrowed = total_deposits - pool_token_balance;
-            ((borrowed * 1_000) / total_deposits) as u32
+            ((borrowed * 10_000) / total_deposits) as u32
         } else {
             0
         };
@@ -773,7 +785,7 @@ impl LendingPool {
         let key = DataKey::TotalOutstanding(token.clone());
         let current = Self::read_total_outstanding(&env, &token);
         let updated = current
-            .checked_sub(delta)
+            .checked_add(delta)
             .expect("total outstanding overflow");
 
         if updated < 0 {

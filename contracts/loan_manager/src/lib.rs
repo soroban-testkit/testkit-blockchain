@@ -644,15 +644,6 @@ impl LoanManager {
             .and_then(|value| value.checked_div(10_000))
             .and_then(|value| value.checked_div(term_ledgers))
             .expect("late fee overflow");
-        let late_fee_denominator = 10_000i128
-            .checked_mul(Self::DEFAULT_TERM_LEDGERS as i128)
-            .expect("late fee overflow");
-        let incremental_fee = money::round_div(
-            late_fee_numerator,
-            late_fee_denominator,
-            money::RoundingMode::Floor,
-        )
-        .expect("late fee overflow");
 
         // Global debt cap: Total outstanding (principal + interest + late fees)
         // cannot exceed original_principal * MAX_PENALTY_MULTIPLIER.
@@ -2027,13 +2018,11 @@ impl LoanManager {
                     .checked_sub(remaining_principal)
                     .expect("underflow");
                 let pool_balance = token_client.balance(&lending_pool);
-                let outstanding_after_excluding_current = Self::total_outstanding(&env, &token)
-                    .checked_sub(remaining_principal)
-                    .expect("total outstanding underflow");
-                let available_liquidity = pool_balance
-                    .checked_sub(outstanding_after_excluding_current)
-                    .unwrap_or(0);
-                if available_liquidity < additional {
+                // #1589: `pool_balance` is the live idle balance and already
+                // excludes disbursed principal, so it must not be reduced by
+                // outstanding debt (which would double-count it and could even
+                // underflow once other loans are repaid).
+                if pool_balance < additional {
                     return Err(LoanError::InsufficientPoolLiquidity);
                 }
                 token_client.transfer(&lending_pool, &loan.borrower, &additional);

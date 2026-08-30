@@ -28,6 +28,26 @@ impl MockRateOracle {
     }
 }
 
+// Mock RateOracle that always panics, simulating a reverting/incompatible
+// oracle (#1128) so we can verify request_loan falls back to the default
+// rate instead of trapping. Nested in its own module because `contractimpl`
+// generates module-scoped items keyed by function name, which would
+// otherwise collide with `MockRateOracle::get_rate` above.
+mod mock_panicking_rate_oracle {
+    use soroban_sdk::{contract, contractimpl, Address, Env};
+
+    #[contract]
+    pub struct MockPanickingRateOracle;
+
+    #[contractimpl]
+    impl MockPanickingRateOracle {
+        pub fn get_rate(_env: Env, _borrower: Address, _amount: i128, _score: u32) -> u32 {
+            panic!("oracle unavailable");
+        }
+    }
+}
+use mock_panicking_rate_oracle::MockPanickingRateOracle;
+
 fn setup_test<'a>(
     env: &Env,
 ) -> (
@@ -825,8 +845,8 @@ fn test_repayment_flow() {
     let completed = manager.get_loan(&loan_id);
     assert_eq!(completed.status, LoanStatus::Repaid);
 
-    // Score updates include both partial and final repayment contributions.
-    assert_eq!(nft_client.get_score(&borrower), 610);
+    // Tiny raw amounts do not cross the whole-token score threshold.
+    assert_eq!(nft_client.get_score(&borrower), 600);
 }
 
 #[test]
@@ -985,6 +1005,41 @@ fn test_small_repayment_does_not_change_score() {
     manager.repay(&borrower, &loan_id, &99);
 
     assert_eq!(nft_client.get_score(&borrower), 600);
+}
+
+#[test]
+fn test_stroop_repayment_score_uses_whole_token_scale() {
+    let env = Env::default();
+    env.mock_all_auths_allowing_non_root_auth();
+
+    let (manager, nft_client, pool_client, token_id, _token_admin) = setup_test(&env);
+    let borrower = Address::generate(&env);
+
+    let history_hash = soroban_sdk::BytesN::from_array(&env, &[0u8; 32]);
+    nft_client.mint(
+        &borrower,
+        &600,
+        &history_hash,
+        &String::from_str(&env, "ipfs://QmTest"),
+        &create_test_commitment(&env, 1),
+        &None,
+    );
+
+    let stellar_token = StellarAssetClient::new(&env, &token_id);
+    stellar_token.mint(&pool_client, &2_000_000_000);
+    stellar_token.mint(&borrower, &2_000_000_000);
+    manager.set_max_loan_amount(&1_000_000_000);
+    manager.set_min_repayment_amount(&1);
+
+    let small_loan_id = manager.request_loan(&borrower, &100_000_000, &17280);
+    manager.approve_loan(&small_loan_id);
+    manager.repay(&borrower, &small_loan_id, &100_000_000);
+    assert_eq!(nft_client.get_score(&borrower), 600);
+
+    let threshold_loan_id = manager.request_loan(&borrower, &1_000_000_000, &17280);
+    manager.approve_loan(&threshold_loan_id);
+    manager.repay(&borrower, &threshold_loan_id, &1_000_000_000);
+    assert_eq!(nft_client.get_score(&borrower), 601);
 }
 
 #[test]
@@ -2531,6 +2586,40 @@ fn test_oracle_rate_within_bounds_accepted() {
 }
 
 #[test]
+fn test_panicking_oracle_falls_back_to_default_rate() {
+    let env = Env::default();
+    env.mock_all_auths_allowing_non_root_auth();
+
+    let (manager, nft_client, pool_client, token_id, _admin) = setup_test(&env);
+    let borrower = Address::generate(&env);
+
+    // Setup
+    let history_hash = soroban_sdk::BytesN::from_array(&env, &[0u8; 32]);
+    nft_client.mint(
+        &borrower,
+        &600,
+        &history_hash,
+        &String::from_str(&env, "ipfs://QmTest"),
+        &create_test_commitment(&env, 1),
+        &None,
+    );
+    let stellar_token = StellarAssetClient::new(&env, &token_id);
+    stellar_token.mint(&pool_client, &10_000);
+
+    // Deploy a mock oracle that always panics, simulating a reverting or
+    // otherwise incompatible oracle contract (#1128).
+    let oracle_id = env.register(MockPanickingRateOracle, ());
+    manager.set_rate_oracle(&oracle_id);
+
+    // request_loan must not trap even though the oracle invocation fails —
+    // it should fall back to the configured default interest rate.
+    let loan_id = manager.request_loan(&borrower, &1000, &17280);
+    let loan = manager.get_loan(&loan_id);
+
+    assert_eq!(loan.interest_rate_bps, 1200);
+}
+
+#[test]
 fn test_set_min_rate_bps_success() {
     let env = Env::default();
     env.mock_all_auths_allowing_non_root_auth();
@@ -3997,3 +4086,49 @@ fn test_set_rate_oracle_emits_rate_oracle_updated_event() {
         "RateOracleUpdated event should be emitted"
     );
 }
+
+#[test]
+fn test_liquidate_decreases_score_and_records_default() {
+    let env = Env::default();
+    env.mock_all_auths_allowing_non_root_auth();
+
+    let (manager, nft_client, pool_client, token_id, _token_admin) = setup_test(&env);
+    let borrower = Address::generate(&env);
+    let liquidator = Address::generate(&env);
+
+    let history_hash = soroban_sdk::BytesN::from_array(&env, &[0u8; 32]);
+    nft_client.mint(
+        &borrower,
+        &600,
+        &history_hash,
+        &String::from_str(&env, "ipfs://QmTest"),
+        &create_test_commitment(&env, 1),
+        &None,
+    );
+
+    let stellar_token = soroban_sdk::token::StellarAssetClient::new(&env, &token_id);
+    stellar_token.mint(&pool_client, &10_000);
+
+    let loan_id = manager.request_loan(&borrower, &1000, &17280);
+    manager.approve_loan(&loan_id);
+
+    stellar_token.mint(&borrower, &500);
+    manager.deposit_collateral(&loan_id, &500);
+
+    assert_eq!(nft_client.get_score(&borrower), 600);
+    assert_eq!(nft_client.get_default_count(&borrower), 0);
+    assert!(!nft_client.is_seized(&borrower));
+
+    env.ledger().set_sequence_number(50_000);
+
+    manager.liquidate(&liquidator, &loan_id);
+
+    let loan = manager.get_loan(&loan_id);
+    assert_eq!(loan.status, LoanStatus::Liquidated);
+    assert_eq!(loan.collateral_amount, 0);
+
+    assert_eq!(nft_client.get_score(&borrower), 550);
+    assert_eq!(nft_client.get_default_count(&borrower), 1);
+    assert!(nft_client.is_seized(&borrower));
+}
+

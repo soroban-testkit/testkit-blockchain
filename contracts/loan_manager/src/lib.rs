@@ -162,6 +162,7 @@ impl LoanManager {
     const DEFAULT_SCORE_PENALTY_POINTS: u32 = 50;
     const NFT_MAX_SCORE: u32 = 850;
     const DEFAULT_MIN_REPAYMENT_AMOUNT: i128 = 100;
+    const STROOPS_PER_TOKEN: i128 = 10_000_000;
     const MAX_EXTENSIONS: u32 = 3;
     const EXTENSION_FEE_BPS: u32 = 100; // 1% of remaining principal
     /// Default minimum interest rate (configurable via set_rate_bounds). #631
@@ -240,6 +241,12 @@ impl LoanManager {
         }
     }
 
+    // Falls back to the configured default rate (rather than trapping
+    // request_loan/refinance) both when the oracle invocation itself fails -
+    // e.g. the oracle contract reverts, panics, or returns an undecodable
+    // value (#1128) - and when a successfully returned oracle rate is out of
+    // bounds (#631): a compromised or stale oracle cannot grant free loans
+    // (rate=0) or cause instant defaults (extreme rate).
     fn compute_interest_rate(env: &Env, borrower: &Address, amount: i128, score: u32) -> u32 {
         if let Some(oracle_addr) = env
             .storage()
@@ -247,18 +254,19 @@ impl LoanManager {
             .get::<_, Address>(&DataKey::RateOracle)
         {
             let client = RateOracleClient::new(env, &oracle_addr);
-            let oracle_rate = client.get_rate(borrower, &amount, &score);
 
-            // Bounds-check the oracle response (#631): a compromised or stale oracle
-            // cannot grant free loans (rate=0) or cause instant defaults (extreme rate).
-            // Falls back to the configured default rate rather than reverting the tx.
-            let min_rate = Self::min_rate_bps(env);
-            let max_rate = Self::max_rate_bps(env);
+            match client.try_get_rate(borrower, &amount, &score) {
+                Ok(Ok(oracle_rate)) => {
+                    let min_rate = Self::min_rate_bps(env);
+                    let max_rate = Self::max_rate_bps(env);
 
-            if oracle_rate < min_rate || oracle_rate > max_rate {
-                Self::read_interest_rate(env)
-            } else {
-                oracle_rate
+                    if oracle_rate < min_rate || oracle_rate > max_rate {
+                        Self::read_interest_rate(env)
+                    } else {
+                        oracle_rate
+                    }
+                }
+                _ => Self::read_interest_rate(env),
             }
         } else {
             Self::read_interest_rate(env)
@@ -638,14 +646,12 @@ impl LoanManager {
         } else {
             loan.term_ledgers as i128
         };
-        let incremental_fee = remaining_principal
+        let late_fee_numerator = remaining_principal
             .checked_mul(Self::late_fee_rate_bps(env) as i128)
             .and_then(|value| value.checked_mul(overdue_ledgers as i128))
-            .and_then(|value| value.checked_div(10_000))
-            .and_then(|value| value.checked_div(term_ledgers))
             .expect("late fee overflow");
         let late_fee_denominator = 10_000i128
-            .checked_mul(Self::DEFAULT_TERM_LEDGERS as i128)
+            .checked_mul(term_ledgers)
             .expect("late fee overflow");
         let incremental_fee = money::round_div(
             late_fee_numerator,
@@ -1435,7 +1441,7 @@ impl LoanManager {
                     // Use apply_score_delta rather than update_score so score adjustments
                     // work for any token denomination without hitting RemittanceNFT's
                     // anti-dust repayment floor (which assumes XLM stroops).
-                    let points_i128 = amount / 100;
+                    let points_i128 = amount / (100 * Self::STROOPS_PER_TOKEN);
                     let points_i32 = if points_i128 > i32::MAX as i128 {
                         i32::MAX
                     } else if points_i128 <= 0 {
@@ -1710,6 +1716,16 @@ impl LoanManager {
         env.storage().persistent().set(&loan_key, &loan);
         Self::bump_persistent_ttl(&env, &loan_key);
         Self::decrement_borrower_loan_count(&env, &loan.borrower);
+
+        let nft_contract = Self::nft_contract(&env);
+        let nft_client = NftClient::new(&env, &nft_contract);
+        nft_client.decrease_score(
+            &loan.borrower,
+            &Self::DEFAULT_SCORE_PENALTY_POINTS,
+            &Some(env.current_contract_address()),
+        );
+        nft_client.record_default(&loan.borrower, &Some(env.current_contract_address()));
+
         let lending_pool: Address = env
             .storage()
             .instance()

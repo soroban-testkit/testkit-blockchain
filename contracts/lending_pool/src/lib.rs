@@ -877,9 +877,18 @@ impl LendingPool {
         let total_deposits = Self::total_deposits(&env, &token);
         let total_shares = Self::total_shares(&env, &token);
         let pool_token_balance = Self::read_pool_balance(&env, &token);
+        let total_managed_assets = Self::total_managed_assets(&env, &token);
+        let total_outstanding = Self::read_total_outstanding(&env, &token);
 
-        // Utilisation: portion of tracked principal currently out on loan.
-        let utilization_bps = if total_deposits > 0 && pool_token_balance < total_deposits {
+        // Utilisation: portion of tracked principal/managed assets currently out on loan.
+        let utilization_bps = if total_managed_assets > 0 && total_outstanding > 0 {
+            let numerator = total_outstanding
+                .checked_mul(10_000)
+                .expect("utilisation overflow");
+            let bps = money::round_div(numerator, total_managed_assets, money::RoundingMode::Floor)
+                .expect("utilisation overflow") as u32;
+            core::cmp::min(bps, 10_000)
+        } else if total_deposits > 0 && pool_token_balance < total_deposits && total_outstanding == 0 {
             let borrowed = total_deposits - pool_token_balance;
             let numerator = borrowed.checked_mul(10_000).expect("utilisation overflow");
             money::round_div(numerator, total_deposits, money::RoundingMode::Floor)
@@ -895,7 +904,7 @@ impl LendingPool {
             depositor_count: Self::read_depositor_count(&env, &token),
             total_yield_distributed: Self::total_yield_distributed(&env, &token),
             utilization_bps,
-            total_managed_assets: Self::total_managed_assets(&env, &token),
+            total_managed_assets,
         }
     }
 

@@ -983,6 +983,10 @@ fn test_transfer_moves_identity_state_to_new_wallet() {
     assert_eq!(client.get_default_count(&old_wallet), 0);
     assert!(!client.is_seized(&old_wallet));
     assert_eq!(client.get_score_history(&old_wallet, &0, &10).len(), 0);
+    assert_eq!(
+        client.try_get_recipient_commitment(&old_wallet),
+        Err(Ok(NftError::CommitmentMissing))
+    );
 
     let metadata = client.get_metadata(&new_wallet).unwrap();
     assert_eq!(metadata.score, 503);
@@ -990,6 +994,50 @@ fn test_transfer_moves_identity_state_to_new_wallet() {
     assert_eq!(client.get_default_count(&new_wallet), 1);
     assert!(client.is_seized(&new_wallet));
     assert_eq!(client.get_score_history(&new_wallet, &0, &10).len(), 1);
+    assert_eq!(
+        client.get_recipient_commitment(&new_wallet),
+        create_test_commitment(&env, 1)
+    );
+}
+
+#[test]
+fn test_transfer_migrates_recipient_commitment() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let admin = Address::generate(&env);
+    let sender = Address::generate(&env);
+    let recipient = Address::generate(&env);
+
+    let contract_id = env.register(RemittanceNFT, ());
+    let client = RemittanceNFTClient::new(&env, &contract_id);
+
+    client.initialize(&admin);
+    let commitment = create_test_commitment(&env, 42);
+    client.mint(
+        &sender,
+        &600,
+        &create_test_hash(&env, 1),
+        &create_test_uri(&env),
+        &commitment,
+        &None,
+    );
+
+    assert_eq!(client.get_recipient_commitment(&sender), commitment);
+    assert_eq!(
+        client.try_get_recipient_commitment(&recipient),
+        Err(Ok(NftError::CommitmentMissing))
+    );
+
+    client.transfer(&sender, &recipient, &None);
+
+    // Sender's commitment is removed
+    assert_eq!(
+        client.try_get_recipient_commitment(&sender),
+        Err(Ok(NftError::CommitmentMissing))
+    );
+    // Recipient now has the valid commitment
+    assert_eq!(client.get_recipient_commitment(&recipient), commitment);
 }
 
 #[test]

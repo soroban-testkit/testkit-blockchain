@@ -313,6 +313,10 @@ impl RemittanceNFT {
                 .storage()
                 .persistent()
                 .has(&DataKey::Score(user.clone()))
+            || env
+                .storage()
+                .persistent()
+                .has(&DataKey::RecipientCommitment(user.clone()))
     }
 
     fn burn_internal(env: &Env, user: &Address) {
@@ -334,6 +338,9 @@ impl RemittanceNFT {
         env.storage()
             .persistent()
             .remove(&DataKey::TransferCooldown(user.clone()));
+        env.storage()
+            .persistent()
+            .remove(&DataKey::RecipientCommitment(user.clone()));
 
         let burned_key = DataKey::Burned(user.clone());
         env.storage().persistent().set(&burned_key, &true);
@@ -1007,6 +1014,20 @@ impl RemittanceNFT {
             env.storage().persistent().set(&to_seized_key, &true);
             Self::bump_persistent_ttl(&env, &to_seized_key);
             env.storage().persistent().remove(&from_seized_key);
+        }
+
+        let from_commitment_key = DataKey::RecipientCommitment(from.clone());
+        if let Some(commitment) = env
+            .storage()
+            .persistent()
+            .get::<DataKey, BytesN<32>>(&from_commitment_key)
+        {
+            let to_commitment_key = DataKey::RecipientCommitment(to.clone());
+            env.storage()
+                .persistent()
+                .set(&to_commitment_key, &commitment);
+            Self::bump_persistent_ttl(&env, &to_commitment_key);
+            env.storage().persistent().remove(&from_commitment_key);
         }
 
         env.storage()

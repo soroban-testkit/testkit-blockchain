@@ -888,10 +888,7 @@ impl LendingPool {
             let bps = money::round_div(numerator, total_managed_assets, money::RoundingMode::Floor)
                 .expect("utilisation overflow") as u32;
             core::cmp::min(bps, 10_000)
-        } else if total_deposits > 0
-            && pool_token_balance < total_deposits
-            && total_outstanding == 0
-        {
+        } else if total_deposits > 0 && pool_token_balance < total_deposits && total_outstanding == 0 {
             let borrowed = total_deposits - pool_token_balance;
             let numerator = borrowed.checked_mul(10_000).expect("utilisation overflow");
             money::round_div(numerator, total_deposits, money::RoundingMode::Floor)

@@ -52,6 +52,36 @@ export function generateChallenge(publicKey: string): ChallengeMessage {
   };
 }
 
+const NONCE_KEY_PREFIX = 'auth:nonce:';
+
+/**
+ * Persists an issued challenge nonce server-side, bound to the public key it
+ * was issued for, so `consumeChallengeNonce` can later enforce that each
+ * nonce authenticates at most one login (see #1068). TTL matches the
+ * challenge validity window: a nonce past its expiry is unusable even if it
+ * was never explicitly consumed.
+ */
+export async function storeChallengeNonce(nonce: string, publicKey: string): Promise<void> {
+  await cacheService.set(`${NONCE_KEY_PREFIX}${nonce}`, publicKey, CHALLENGE_EXPIRES_IN_MS / 1000);
+}
+
+/**
+ * Atomically consumes a challenge nonce: the check (does it exist, was it
+ * issued for this public key) and the invalidation (so it can never be used
+ * again) happen in a single fenced compare-and-delete, so two concurrent
+ * logins that replay the same signed message cannot both succeed.
+ *
+ * @returns true if the nonce existed, was issued for `publicKey`, and has now
+ *          been invalidated; false if it was unknown, expired, already used,
+ *          or issued for a different public key. In every false case the
+ *          nonce is left untouched (a mismatched public key cannot burn a
+ *          nonce it wasn't issued), matching `cacheService.deleteIfMatch`'s
+ *          fenced compare-and-delete semantics.
+ */
+export async function consumeChallengeNonce(nonce: string, publicKey: string): Promise<boolean> {
+  return cacheService.deleteIfMatch(`${NONCE_KEY_PREFIX}${nonce}`, publicKey);
+}
+
 export function verifySignature(publicKey: string, message: string, signature: string): boolean {
   if (!StrKey.isValidEd25519PublicKey(publicKey)) {
     return false;

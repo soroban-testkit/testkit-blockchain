@@ -27,6 +27,8 @@ import {
   verifyChallengeTimestamp,
   generateJwtToken,
   revokeToken,
+  storeChallengeNonce,
+  consumeChallengeNonce,
 } from '../services/authService.js';
 import logger from '../utils/logger.js';
 
@@ -40,7 +42,7 @@ const logAuthFailure = (req: Request, publicKey: string | undefined, reason: str
   });
 };
 
-export const requestChallenge = (req: Request, res: Response): void => {
+export const requestChallenge = asyncHandler(async (req: Request, res: Response) => {
   const { publicKey } = req.body;
 
   if (!publicKey || typeof publicKey !== 'string') {
@@ -63,13 +65,19 @@ export const requestChallenge = (req: Request, res: Response): void => {
     throw error;
   }
 
+  // Persist the issued nonce server-side so `login` can consume it exactly
+  // once (see #1068). Stored *after* the message is built but before the
+  // response is sent, so a nonce is never handed out without a backing
+  // record to consume.
+  await storeChallengeNonce(challenge.nonce, publicKey);
+
   res.status(200).json({
     success: true,
     data: challenge,
   });
-};
+});
 
-export const login = (req: Request, res: Response): void => {
+export const login = asyncHandler(async (req: Request, res: Response) => {
   const { publicKey, message, signature } = req.body;
 
   if (!publicKey || typeof publicKey !== 'string') {
@@ -88,7 +96,8 @@ export const login = (req: Request, res: Response): void => {
   }
 
   const timestampMatch = message.match(/Timestamp: (\d+)/);
-  if (!timestampMatch) {
+  const nonceMatch = message.match(/Nonce: ([0-9a-f]+)/);
+  if (!timestampMatch || !nonceMatch) {
     logAuthFailure(req, publicKey, 'invalid_challenge_format');
     throw AppError.badRequest('Invalid challenge message format', ErrorCode.INVALID_CHALLENGE);
   }
@@ -103,6 +112,22 @@ export const login = (req: Request, res: Response): void => {
   if (!isValidSignature) {
     logAuthFailure(req, publicKey, 'invalid_signature');
     throw AppError.unauthorized('Invalid signature', ErrorCode.INVALID_SIGNATURE);
+  }
+
+  // Consume the nonce only after the signature has been verified: this
+  // keeps an attacker who has merely observed the (public) nonce, but
+  // cannot forge a valid signature, from being able to burn a legitimate
+  // user's nonce (a griefing DoS). The consume step itself is atomic, so
+  // two concurrent replays of the same valid (publicKey, message,
+  // signature) triple cannot both succeed — see #1068.
+  const nonce = nonceMatch[1]!;
+  const nonceConsumed = await consumeChallengeNonce(nonce, publicKey);
+  if (!nonceConsumed) {
+    logAuthFailure(req, publicKey, 'nonce_invalid_or_reused');
+    throw AppError.unauthorized(
+      'Challenge nonce is unknown, expired, or already used',
+      ErrorCode.NONCE_ALREADY_USED,
+    );
   }
 
   const token = generateJwtToken(publicKey);
@@ -125,7 +150,7 @@ export const login = (req: Request, res: Response): void => {
       publicKey,
     },
   });
-};
+});
 
 export async function listAuditLogs(
   req: Request,

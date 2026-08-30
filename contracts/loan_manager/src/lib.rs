@@ -356,11 +356,13 @@ impl LoanManager {
             .and_then(|v| v.checked_mul(PRECISION))
             .ok_or(LoanError::AmountTooLarge)?;
 
-        if loan.term_ledgers == 0 {
-            return Err(LoanError::InvalidTerm);
-        }
+        let term_ledgers = if loan.term_ledgers == 0 {
+            Self::read_default_term(env) as i128
+        } else {
+            loan.term_ledgers as i128
+        };
         let denominator = 10_000i128
-            .checked_mul(loan.term_ledgers as i128)
+            .checked_mul(term_ledgers)
             .ok_or(LoanError::AmountTooLarge)?;
 
         // All stroop-quantity division routes through the shared `money`
@@ -634,7 +636,7 @@ impl LoanManager {
         // Late fee is calculated on remaining principal and uses the loan's actual
         // term length, so custom-term loans and partially repaid loans are billed correctly.
         let term_ledgers = if loan.term_ledgers == 0 {
-            Self::DEFAULT_TERM_LEDGERS as i128
+            Self::read_default_term(env) as i128
         } else {
             loan.term_ledgers as i128
         };
@@ -644,15 +646,6 @@ impl LoanManager {
             .and_then(|value| value.checked_div(10_000))
             .and_then(|value| value.checked_div(term_ledgers))
             .expect("late fee overflow");
-        let late_fee_denominator = 10_000i128
-            .checked_mul(Self::DEFAULT_TERM_LEDGERS as i128)
-            .expect("late fee overflow");
-        let incremental_fee = money::round_div(
-            late_fee_numerator,
-            late_fee_denominator,
-            money::RoundingMode::Floor,
-        )
-        .expect("late fee overflow");
 
         // Global debt cap: Total outstanding (principal + interest + late fees)
         // cannot exceed original_principal * MAX_PENALTY_MULTIPLIER.

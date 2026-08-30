@@ -970,6 +970,16 @@ impl RemittanceNFT {
 
         let metadata = Self::get_or_migrate_metadata(&env, &from).ok_or(NftError::NftNotFound)?;
 
+        // A previously burned destination must go through the same
+        // remint-approval gate mint()/admin_remint() enforce. Without this,
+        // a defaulted account can regain a clean credit identity simply by
+        // receiving a transfer, since burn_internal() clears every field
+        // has_any_remittance_state() checks except the Burned flag itself
+        // (see #1059).
+        if env.storage().persistent().has(&DataKey::Burned(to.clone())) {
+            return Err(NftError::BurnedRequiresApproval);
+        }
+
         if Self::has_any_remittance_state(&env, &to) {
             return Err(NftError::DestinationOccupied);
         }

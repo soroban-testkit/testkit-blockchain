@@ -86,7 +86,7 @@ impl RemittanceNFT {
     pub const MAX_AUTHORIZED_MINTERS: u32 = 32;
     const DEFAULT_MIN_REPAYMENT_AMOUNT: i128 = 0;
     /// Stroop scale (10^7) — token amounts are denominated in stroops.
-    const STROOP_SCALE: i128 = 10_000_000;
+    pub const STROOP_SCALE: i128 = 10_000_000;
     /// Points denominator: 1 point per 100 tokens (100 * STROOP_SCALE stroops).
     const POINTS_DENOMINATOR: i128 = 100 * Self::STROOP_SCALE; // 1_000_000_000 stroops = $100
     /// Minimum repayment amount accepted by update_score() (1 point worth in stroops).

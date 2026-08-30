@@ -32,13 +32,19 @@ function routeQueries(opts: {
   backfilled?: number;
   unresolved?: Record<string, unknown>[];
   matchByBorrower?: Record<string, number>;
+  matchByTxHash?: Record<string, number>;
 }) {
-  const { backfilled = 0, unresolved = [], matchByBorrower = {} } = opts;
+  const { backfilled = 0, unresolved = [], matchByBorrower = {}, matchByTxHash = {} } = opts;
   mockQuery.mockImplementation(async (sql: string, params?: unknown[]) => {
     if (sql.includes('/* backfill */')) return { rows: [], rowCount: backfilled };
     if (sql.includes('/* fetch-unresolved */'))
       return { rows: unresolved, rowCount: unresolved.length };
     if (sql.includes('/* match-score */')) {
+      if (sql.includes('tx_hash = $3')) {
+        const txHash = String(params?.[2] ?? '');
+        const ledger = matchByTxHash[txHash] ?? matchByBorrower[String(params?.[0] ?? '')];
+        return ledger != null ? { rows: [{ ledger }], rowCount: 1 } : { rows: [], rowCount: 0 };
+      }
       const borrower = String(params?.[0] ?? '');
       const ledger = matchByBorrower[borrower];
       return ledger != null ? { rows: [{ ledger }], rowCount: 1 } : { rows: [], rowCount: 0 };
@@ -56,6 +62,7 @@ function row(over: Partial<Record<string, unknown>>): Record<string, unknown> {
     borrower: 'GB...ABC',
     operation: 'repay',
     disbursement_ledger: 1000,
+    disbursement_tx_hash: 'tx-repay-1',
     expected_score_delta: 5,
     attempts: 0,
     state: 'pending',
@@ -100,14 +107,38 @@ describe('crossContractReconciler.run', () => {
     expect(mockQuery.mock.calls.some(([sql]) => sql.includes('/* match-score */'))).toBe(false);
   });
 
-  it('reconciles a repay row when a matching on-chain score event exists', async () => {
+  it('reconciles a repay row when a matching on-chain score event exists with same tx_hash', async () => {
     routeQueries({
-      unresolved: [row({ borrower: 'GB...ABC', disbursement_ledger: 1000 })],
-      matchByBorrower: { 'GB...ABC': 1002 },
+      unresolved: [
+        row({
+          borrower: 'GB...ABC',
+          disbursement_ledger: 1000,
+          disbursement_tx_hash: 'tx-match-1',
+        }),
+      ],
+      matchByTxHash: { 'tx-match-1': 1000 },
     });
     const result = await crossContractReconciler.run();
     expect(result.reconciledCount).toBe(1);
     expect(result.halfAppliedCount).toBe(0);
+  });
+
+  it('does not match unrelated subsequent score events on different tx_hashes', async () => {
+    routeQueries({
+      unresolved: [
+        row({
+          borrower: 'GB...ABC',
+          disbursement_ledger: 1000,
+          disbursement_tx_hash: 'tx-dropped-repay',
+        }),
+      ],
+      // matchByTxHash only has the later repayment's tx_hash
+      matchByTxHash: { 'tx-later-repay': 1050 },
+    });
+    const result = await crossContractReconciler.run();
+    // Dropped repay must NOT be reconciled
+    expect(result.reconciledCount).toBe(0);
+    expect(result.stillPendingCount).toBe(1);
   });
 
   it('flags half_applied when no score event matched after enough attempts', async () => {

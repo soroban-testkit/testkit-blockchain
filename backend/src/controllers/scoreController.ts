@@ -192,11 +192,14 @@ export const getScoreBreakdown = asyncHandler(async (req: Request, res: Response
          GROUP BY loan_id
        ),
        -- Repaid loan details (ledger and timestamp)
+       -- Use MAX(ledger) to capture the completion time of the last payment,
+       -- not the first partial payment.  This prevents early partial payments
+       -- from marking a late full repayment as "on-time".
        repaid_loans AS (
          SELECT 
            loan_id,
-           MIN(ledger) AS repaid_ledger,
-           MIN(ledger_closed_at) AS repaid_at
+           MAX(ledger) AS repaid_ledger,
+           MAX(ledger_closed_at) AS repaid_at
          FROM borrower_events
          WHERE event_type = 'LoanRepaid' AND loan_id IS NOT NULL
          GROUP BY loan_id

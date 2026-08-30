@@ -69,7 +69,7 @@ fn test_score_lifecycle() {
     assert_eq!(metadata.history_hash, history_hash);
 
     // Update score (repayment of 250 -> 2 points) - admin updates
-    client.update_score(&user, &250, &None);
+    client.update_score(&user, &2_500_000_000, &None);
     assert_eq!(client.get_score(&user), 502);
 
     // Verify metadata updated
@@ -77,7 +77,7 @@ fn test_score_lifecycle() {
     assert_eq!(metadata.score, 502);
 
     // Update score (repayment of 1000 -> 10 points) - admin updates
-    client.update_score(&user, &1000, &None);
+    client.update_score(&user, &10_000_000_000, &None);
     assert_eq!(client.get_score(&user), 512);
 
     // Verify metadata updated
@@ -317,7 +317,7 @@ fn test_update_score_without_nft() {
     client.initialize(&admin);
 
     // Try to update score for user without NFT
-    client.update_score(&user, &100, &None);
+    client.update_score(&user, &1_000_000_000, &None);
 }
 
 #[test]
@@ -360,7 +360,7 @@ fn test_backward_compatibility_migration() {
     });
 
     // Update score should work on migrated data
-    client.update_score(&user, &500, &None);
+    client.update_score(&user, &5_000_000_000, &None);
     assert_eq!(client.get_score(&user), 755); // 750 + 5 points (500/100)
 
     // Verify metadata still exists and is updated
@@ -389,7 +389,7 @@ fn test_update_score_migrates_legacy_data() {
     });
 
     // update_score should migrate legacy data and then update
-    client.update_score(&user, &200, &None);
+    client.update_score(&user, &2_000_000_000, &None);
 
     // Score should be 602 (600 + 2 points from 200/100)
     assert_eq!(client.get_score(&user), 602);
@@ -691,7 +691,7 @@ fn test_score_update_is_isolated_to_owner() {
         &None,
     );
 
-    client.update_score(&alice, &900, &None);
+    client.update_score(&alice, &9_000_000_000, &None);
 
     assert_eq!(client.get_score(&alice), 109);
     assert_eq!(client.get_score(&bob), 200);
@@ -814,7 +814,7 @@ fn test_score_history_tracks_and_caps_recent_updates() {
     // Add 52 updates — exceeds MAX_SCORE_HISTORY_ENTRIES (50)
     for sequence in 1..=52u32 {
         env.ledger().set_sequence_number(sequence);
-        client.update_score(&user, &100, &None);
+        client.update_score(&user, &1_000_000_000, &None);
     }
 
     // Total history must be capped at MAX_SCORE_HISTORY_ENTRIES
@@ -973,7 +973,7 @@ fn test_transfer_moves_identity_state_to_new_wallet() {
         &create_test_commitment(&env, 1),
         &None,
     );
-    client.update_score(&old_wallet, &300, &None);
+    client.update_score(&old_wallet, &3_000_000_000, &None);
     client.record_default(&old_wallet, &None);
 
     client.transfer(&old_wallet, &new_wallet, &None);
@@ -983,6 +983,10 @@ fn test_transfer_moves_identity_state_to_new_wallet() {
     assert_eq!(client.get_default_count(&old_wallet), 0);
     assert!(!client.is_seized(&old_wallet));
     assert_eq!(client.get_score_history(&old_wallet, &0, &10).len(), 0);
+    assert_eq!(
+        client.try_get_recipient_commitment(&old_wallet),
+        Err(Ok(NftError::CommitmentMissing))
+    );
 
     let metadata = client.get_metadata(&new_wallet).unwrap();
     assert_eq!(metadata.score, 503);
@@ -990,6 +994,50 @@ fn test_transfer_moves_identity_state_to_new_wallet() {
     assert_eq!(client.get_default_count(&new_wallet), 1);
     assert!(client.is_seized(&new_wallet));
     assert_eq!(client.get_score_history(&new_wallet, &0, &10).len(), 1);
+    assert_eq!(
+        client.get_recipient_commitment(&new_wallet),
+        create_test_commitment(&env, 1)
+    );
+}
+
+#[test]
+fn test_transfer_migrates_recipient_commitment() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let admin = Address::generate(&env);
+    let sender = Address::generate(&env);
+    let recipient = Address::generate(&env);
+
+    let contract_id = env.register(RemittanceNFT, ());
+    let client = RemittanceNFTClient::new(&env, &contract_id);
+
+    client.initialize(&admin);
+    let commitment = create_test_commitment(&env, 42);
+    client.mint(
+        &sender,
+        &600,
+        &create_test_hash(&env, 1),
+        &create_test_uri(&env),
+        &commitment,
+        &None,
+    );
+
+    assert_eq!(client.get_recipient_commitment(&sender), commitment);
+    assert_eq!(
+        client.try_get_recipient_commitment(&recipient),
+        Err(Ok(NftError::CommitmentMissing))
+    );
+
+    client.transfer(&sender, &recipient, &None);
+
+    // Sender's commitment is removed
+    assert_eq!(
+        client.try_get_recipient_commitment(&sender),
+        Err(Ok(NftError::CommitmentMissing))
+    );
+    // Recipient now has the valid commitment
+    assert_eq!(client.get_recipient_commitment(&recipient), commitment);
 }
 
 #[test]
@@ -1148,7 +1196,7 @@ fn test_score_cap_at_850() {
 
     // Test update_score cap
     // Current score is 850. Add large repayment.
-    client.update_score(&user, &100000, &None);
+    client.update_score(&user, &1_000_000_000_000, &None);
     assert_eq!(client.get_score(&user), 850);
 }
 
@@ -1178,7 +1226,7 @@ fn test_score_overflow_handling() {
     // Very large repayment that would overflow u32 if converted to points (e.g., u32::MAX * 100 + 1)
     // repayment_amount is i128, so it can be very large.
     // points = repayment_amount / 100
-    let huge_repayment: i128 = (u32::MAX as i128) * 100 + 100;
+    let huge_repayment: i128 = (u32::MAX as i128) * 1_000_000_000 + 1_000_000_000;
     client.update_score(&user, &huge_repayment, &None);
 
     // Should be capped at 850
@@ -1929,11 +1977,11 @@ fn test_update_score_within_bounds() {
     );
 
     // Update within bounds
-    client.update_score(&user, &1000, &None);
+    client.update_score(&user, &10_000_000_000, &None);
     assert_eq!(client.get_score(&user), 510); // 500 + 10 points
 
     // Update that would exceed max
-    client.update_score(&user, &100000, &None);
+    client.update_score(&user, &1_000_000_000_000, &None);
     assert_eq!(client.get_score(&user), 850); // Capped at MAX_SCORE
 }
 
@@ -2092,7 +2140,7 @@ fn test_score_history_max_50_entries() {
     // Add 60 score updates (exceeds MAX_SCORE_HISTORY_ENTRIES of 50)
     for sequence in 1..=60u32 {
         env.ledger().set_sequence_number(sequence);
-        client.update_score(&user, &100, &None);
+        client.update_score(&user, &1_000_000_000, &None);
     }
 
     // Verify history is capped at 50 entries

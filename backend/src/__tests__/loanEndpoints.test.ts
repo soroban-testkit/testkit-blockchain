@@ -303,7 +303,7 @@ describe('GET /api/loans/:loanId', () => {
         rows: [
           {
             event_type: 'LoanRequested',
-            amount: '1000',
+            amount: '10000000000',
             ledger: 10,
             ledger_closed_at: '2025-01-01T00:00:00.000Z',
             tx_hash: 'request-tx',
@@ -329,13 +329,62 @@ describe('GET /api/loans/:loanId', () => {
     expect(response.status).toBe(200);
     expect(response.body.success).toBe(true);
     expect(response.body.loanId).toBe('123');
-    expect(response.body.summary.principal).toBe(1000);
+    expect(response.body.summary.principal).toBe(10000000000);
     expect(response.body.summary.accruedInterest).toBeGreaterThan(0);
     expect(response.body.summary.totalOwed).toBe(
       response.body.summary.principal +
         response.body.summary.accruedInterest -
         response.body.summary.totalRepaid,
     );
+  });
+
+  it('should accrue interest against the remaining principal after partial repayments (issue #1600)', async () => {
+    mockedQuery
+      .mockResolvedValueOnce({ rows: [{ address: TEST_BORROWER }] }) // address check
+      .mockResolvedValueOnce({
+        rows: [
+          {
+            event_type: 'LoanRequested',
+            amount: '10000000000',
+            ledger: 10,
+            ledger_closed_at: '2025-01-01T00:00:00.000Z',
+            tx_hash: 'request-tx',
+            interest_rate_bps: null,
+            term_ledgers: null,
+          },
+          {
+            event_type: 'LoanApproved',
+            amount: null,
+            ledger: 20,
+            ledger_closed_at: '2025-01-02T00:00:00.000Z',
+            tx_hash: 'approve-tx',
+            interest_rate_bps: 1200,
+            term_ledgers: 17280,
+          },
+          {
+            event_type: 'LoanRepaid',
+            amount: '5000000000',
+            ledger: 25,
+            ledger_closed_at: '2025-01-03T00:00:00.000Z',
+            tx_hash: 'repay-tx',
+            interest_rate_bps: null,
+            term_ledgers: null,
+          },
+        ],
+      }) // loan events
+      .mockResolvedValueOnce({ rows: [{ last_indexed_ledger: 30 }] }) // getLatestLedger
+      .mockResolvedValueOnce({ rows: [] }); // loan_disputes (no open disputes)
+
+    const response = await request(app).get('/api/loans/123').set(bearer(TEST_BORROWER));
+
+    expect(response.status).toBe(200);
+    expect(response.body.summary.principal).toBe(10000000000);
+    expect(response.body.summary.totalRepaid).toBe(5000000000);
+    // Half the principal repaid -> interest accrues on the remaining 5e9 stroops
+    // over 10 elapsed ledgers, not on the full 1e10 original principal.
+    expect(response.body.summary.accruedInterest).toBe(347222);
+    expect(response.body.summary.totalOwed).toBe(5000000000 + 347222);
+    expect(response.body.summary.status).toBe('active');
   });
 
   it('should return 403 when the loan belongs to another borrower', async () => {

@@ -638,14 +638,12 @@ impl LoanManager {
         } else {
             loan.term_ledgers as i128
         };
-        let incremental_fee = remaining_principal
+        let late_fee_numerator = remaining_principal
             .checked_mul(Self::late_fee_rate_bps(env) as i128)
             .and_then(|value| value.checked_mul(overdue_ledgers as i128))
-            .and_then(|value| value.checked_div(10_000))
-            .and_then(|value| value.checked_div(term_ledgers))
             .expect("late fee overflow");
         let late_fee_denominator = 10_000i128
-            .checked_mul(Self::DEFAULT_TERM_LEDGERS as i128)
+            .checked_mul(term_ledgers)
             .expect("late fee overflow");
         let incremental_fee = money::round_div(
             late_fee_numerator,
@@ -1160,19 +1158,13 @@ impl LoanManager {
         Ok(loan_counter)
     }
 
-    /// Approve a pending loan and transfer principal to the borrower.
-    ///
-    /// Requires admin authorization and the loan manager, lending pool, and NFT
-    /// contract to be unpaused. The target loan must be [`LoanStatus::Pending`];
-    /// approval records the requested term, due date, interest/late-fee ledgers,
-    /// and total outstanding balance before transferring funds from the lending
-    /// pool to the borrower.
-    ///
     /// Returns [`LoanError::ContractPaused`], [`LoanError::PoolPaused`], or
     /// [`LoanError::NftPaused`] when pause checks fail; [`LoanError::LoanNotFound`]
     /// when `loan_id` is unknown; [`LoanError::LoanNotPending`] when the loan is
-    /// not pending; and [`LoanError::InsufficientPoolLiquidity`] when available
-    /// pool liquidity is below the loan amount.
+    /// not pending; [`LoanError::NotInitialized`] when the NFT contract is missing;
+    /// [`LoanError::SeizedBorrower`] when the borrower has been seized since the
+    /// loan was requested; and [`LoanError::InsufficientPoolLiquidity`] when
+    /// available pool liquidity is below the loan amount.
     pub fn approve_loan(env: Env, loan_id: u32) -> Result<(), LoanError> {
         use soroban_sdk::token::TokenClient;
 
@@ -1191,6 +1183,18 @@ impl LoanManager {
 
         if loan.status != LoanStatus::Pending {
             return Err(LoanError::LoanNotPending);
+        }
+        // Re-check the borrower hasn't been seized between request_loan and approve_loan.
+        // request_loan/deposit_collateral/refinance_loan all perform this same check;
+        // approve_loan is the point where funds actually leave the pool, so it must too.
+        let nft_contract: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::NftContract)
+            .ok_or(LoanError::NotInitialized)?;
+        let nft_client = NftClient::new(&env, &nft_contract);
+        if nft_client.is_seized(&loan.borrower) {
+            return Err(LoanError::SeizedBorrower);
         }
 
         // Read all instance-level config before any state mutations.

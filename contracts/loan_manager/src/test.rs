@@ -3997,3 +3997,42 @@ fn test_set_rate_oracle_emits_rate_oracle_updated_event() {
         "RateOracleUpdated event should be emitted"
     );
 }
+
+#[test]
+#[should_panic]
+fn test_approve_loan_rejects_borrower_seized_after_request() {
+    let env = Env::default();
+    env.mock_all_auths_allowing_non_root_auth();
+
+    let (manager, nft_client, pool_client, token_id, _token_admin) = setup_test(&env);
+    let borrower = Address::generate(&env);
+
+    let history_hash = soroban_sdk::BytesN::from_array(&env, &[0u8; 32]);
+    nft_client.mint(
+        &borrower,
+        &600,
+        &history_hash,
+        &String::from_str(&env, "ipfs://QmTest"),
+        &create_test_commitment(&env, 1),
+        &None,
+    );
+
+    let stellar_token = StellarAssetClient::new(&env, &token_id);
+    stellar_token.mint(&pool_client, &10000);
+
+    let pending_loan_id = manager.request_loan(&borrower, &500, &17280);
+
+    let doomed_loan_id = manager.request_loan(&borrower, &500, &17280);
+    manager.approve_loan(&doomed_loan_id);
+
+    let due_date = manager.get_loan(&doomed_loan_id).due_date;
+    let default_window = manager.get_default_window_ledgers();
+    env.ledger()
+        .set_sequence_number(due_date + default_window + 1);
+    manager.check_default(&doomed_loan_id);
+
+    assert!(nft_client.is_seized(&borrower));
+
+    manager.approve_loan(&pending_loan_id);
+}
+

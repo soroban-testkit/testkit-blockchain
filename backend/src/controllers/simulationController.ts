@@ -90,10 +90,28 @@ export const getRemittanceHistory = asyncHandler(async (req: Request, res: Respo
   const history = Array.from(historyMap.values()).slice(-6);
 
   // 4. Calculate streak (consecutive "Completed" months from history)
+  //    Check calendar month continuity so gaps between non-adjacent months
+  //    are not counted as part of the streak.
   let streak = 0;
-  const historyReverse = Array.from(historyMap.values()).reverse();
-  for (const h of historyReverse) {
+  const historyReverse = Array.from(historyMap.entries()).reverse();
+  let prevDate: Date | null = null;
+
+  for (const [key, h] of historyReverse) {
     if (h.status === 'Completed') {
+      const parts = key.split(' ');
+      if (parts.length < 2) break;
+      const [monthName, yearStr] = parts as [string, string];
+      const monthNum = new Date(`${monthName} 1, ${yearStr}`).getMonth();
+      const yearNum = parseInt(yearStr, 10);
+      const currentDate = new Date(yearNum, monthNum);
+
+      if (prevDate) {
+        const diffMonths =
+          (prevDate.getFullYear() - currentDate.getFullYear()) * 12 +
+          (prevDate.getMonth() - currentDate.getMonth());
+        if (diffMonths !== 1) break;
+      }
+      prevDate = currentDate;
       streak++;
     } else if (h.status === 'Defaulted') {
       break;

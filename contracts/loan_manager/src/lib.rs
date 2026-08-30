@@ -1716,6 +1716,16 @@ impl LoanManager {
         env.storage().persistent().set(&loan_key, &loan);
         Self::bump_persistent_ttl(&env, &loan_key);
         Self::decrement_borrower_loan_count(&env, &loan.borrower);
+
+        let nft_contract = Self::nft_contract(&env);
+        let nft_client = NftClient::new(&env, &nft_contract);
+        nft_client.decrease_score(
+            &loan.borrower,
+            &Self::DEFAULT_SCORE_PENALTY_POINTS,
+            &Some(env.current_contract_address()),
+        );
+        nft_client.record_default(&loan.borrower, &Some(env.current_contract_address()));
+
         let lending_pool: Address = env
             .storage()
             .instance()

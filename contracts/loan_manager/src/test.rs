@@ -4086,3 +4086,49 @@ fn test_set_rate_oracle_emits_rate_oracle_updated_event() {
         "RateOracleUpdated event should be emitted"
     );
 }
+
+#[test]
+fn test_liquidate_decreases_score_and_records_default() {
+    let env = Env::default();
+    env.mock_all_auths_allowing_non_root_auth();
+
+    let (manager, nft_client, pool_client, token_id, _token_admin) = setup_test(&env);
+    let borrower = Address::generate(&env);
+    let liquidator = Address::generate(&env);
+
+    let history_hash = soroban_sdk::BytesN::from_array(&env, &[0u8; 32]);
+    nft_client.mint(
+        &borrower,
+        &600,
+        &history_hash,
+        &String::from_str(&env, "ipfs://QmTest"),
+        &create_test_commitment(&env, 1),
+        &None,
+    );
+
+    let stellar_token = soroban_sdk::token::StellarAssetClient::new(&env, &token_id);
+    stellar_token.mint(&pool_client, &10_000);
+
+    let loan_id = manager.request_loan(&borrower, &1000, &17280);
+    manager.approve_loan(&loan_id);
+
+    stellar_token.mint(&borrower, &500);
+    manager.deposit_collateral(&loan_id, &500);
+
+    assert_eq!(nft_client.get_score(&borrower), 600);
+    assert_eq!(nft_client.get_default_count(&borrower), 0);
+    assert!(!nft_client.is_seized(&borrower));
+
+    env.ledger().set_sequence_number(50_000);
+
+    manager.liquidate(&liquidator, &loan_id);
+
+    let loan = manager.get_loan(&loan_id);
+    assert_eq!(loan.status, LoanStatus::Liquidated);
+    assert_eq!(loan.collateral_amount, 0);
+
+    assert_eq!(nft_client.get_score(&borrower), 550);
+    assert_eq!(nft_client.get_default_count(&borrower), 1);
+    assert!(nft_client.is_seized(&borrower));
+}
+

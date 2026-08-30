@@ -1934,6 +1934,27 @@ impl LoanManager {
         let collateral_key = DataKey::Collateral(loan_id);
         env.storage().persistent().remove(&collateral_key);
 
+        // Remove the purged loan id from the borrower's loan list so that
+        // get_borrower_loans no longer returns a dangling id.
+        let borrower_loans_key = DataKey::BorrowerLoans(loan.borrower.clone());
+        if let Some(existing) = env
+            .storage()
+            .instance()
+            .get::<_, Vec<u32>>(&borrower_loans_key)
+        {
+            let mut updated: Vec<u32> = Vec::new(&env);
+            for id in existing.iter() {
+                if id != loan_id {
+                    updated.push_back(id);
+                }
+            }
+            if updated.is_empty() {
+                env.storage().instance().remove(&borrower_loans_key);
+            } else {
+                env.storage().instance().set(&borrower_loans_key, &updated);
+            }
+        }
+
         // Note: borrower loan count is already decremented by cancel_loan
         // and reject_loan themselves (#1591), so no additional decrement is
         // needed here for Cancelled/Rejected loans.

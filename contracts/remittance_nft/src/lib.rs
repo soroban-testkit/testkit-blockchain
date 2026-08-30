@@ -85,9 +85,7 @@ impl RemittanceNFT {
     pub const MAX_ALLOWED_BURN_THRESHOLD: u32 = 1000; // Set as appropriate for your business logic
     pub const MAX_AUTHORIZED_MINTERS: u32 = 32;
     const DEFAULT_MIN_REPAYMENT_AMOUNT: i128 = 0;
-    /// Stroop scale (10^7) — token amounts are denominated in stroops.
-    const STROOP_SCALE: i128 = 10_000_000;
-    /// Points denominator: 1 point per 100 tokens (100 * STROOP_SCALE stroops).
+    /// Points denominator: 1 point per 100 tokens (100 * 10^7 stroops).
     const POINTS_DENOMINATOR: i128 = 100 * 10_000_000; // 1_000_000_000 stroops = $100
     /// Minimum repayment amount accepted by update_score() (1 point worth in stroops).
     /// Dust repayments below this threshold award 0 score points due to integer

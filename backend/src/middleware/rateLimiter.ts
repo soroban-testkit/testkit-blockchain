@@ -1,9 +1,34 @@
 import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
+import { RedisStore } from 'rate-limit-redis';
+import { createClient } from 'redis';
+
+const REDIS_URL = process.env.REDIS_URL || 'redis://localhost:6379';
+let redisStore: RedisStore | undefined;
+
+function getRedisStore(): RedisStore | undefined {
+  if (redisStore) return redisStore;
+  try {
+    const client = createClient({ url: REDIS_URL });
+    client.on('error', () => {});
+    redisStore = new RedisStore({
+      sendCommand: (...args: string[]) => client.sendCommand(args),
+    });
+    return redisStore;
+  } catch {
+    return undefined;
+  }
+}
+
+function redisStoreConfig(): { store: RedisStore } | Record<string, never> {
+  const store = getRedisStore();
+  return store ? { store } : {};
+}
 
 export const createRateLimiter = (max: number, windowMinutes: number = 15) =>
   rateLimit({
     windowMs: windowMinutes * 60 * 1000,
     max,
+    ...redisStoreConfig(),
     message: { error: 'Too many requests, please try again later.' },
     standardHeaders: true,
     legacyHeaders: false,
@@ -16,6 +41,7 @@ export const strictRateLimiter = createRateLimiter(10, 45);
 export const challengeRateLimiter = rateLimit({
   windowMs: 60 * 1000, // 1 minute
   max: 10,
+  ...redisStoreConfig(),
   keyGenerator: (req) => ipKeyGenerator(req.ip ?? 'unknown'),
   message: {
     success: false,
@@ -32,6 +58,7 @@ export const challengeRateLimiter = rateLimit({
 export const loginRateLimiter = rateLimit({
   windowMs: 60 * 1000, // 1 minute
   max: 5,
+  ...redisStoreConfig(),
   keyGenerator: (req) =>
     `${ipKeyGenerator(req.ip ?? 'unknown')}:${req.body?.publicKey ?? 'unknown'}`,
   message: {
@@ -49,6 +76,7 @@ export const loginRateLimiter = rateLimit({
 export const ipLoginRateLimiter = rateLimit({
   windowMs: 60 * 1000, // 1 minute
   max: 5,
+  ...redisStoreConfig(),
   keyGenerator: (req) => ipKeyGenerator(req.ip ?? 'unknown'),
   message: {
     success: false,
@@ -65,6 +93,7 @@ export const ipLoginRateLimiter = rateLimit({
 export const verifyRateLimiter = rateLimit({
   windowMs: 60 * 1000, // 1 minute
   max: 10,
+  ...redisStoreConfig(),
   keyGenerator: (req) => ipKeyGenerator(req.ip ?? 'unknown'),
   message: { success: false, message: 'Too many verification attempts' },
   standardHeaders: true,
@@ -79,6 +108,7 @@ export const verifyRateLimiter = rateLimit({
 export const simulationRateLimiter = rateLimit({
   windowMs: 60 * 1000, // 1 minute
   max: 5,
+  ...redisStoreConfig(),
   keyGenerator: (req) => {
     // Use authenticated user's public key if available, otherwise fall back to IP
     const user = (req as unknown as { user?: { publicKey: string } }).user;

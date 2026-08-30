@@ -43,6 +43,11 @@ jest.unstable_mockModule('../services/cacheService.js', () => ({
     set: jest.fn(async (key: string, value: unknown) => {
       fakeCacheStore.set(key, value);
     }),
+    setNotExists: jest.fn(async (key: string, value: unknown) => {
+      if (fakeCacheStore.has(key)) return false;
+      fakeCacheStore.set(key, value);
+      return true;
+    }),
     delete: jest.fn(async (key: string) => {
       fakeCacheStore.delete(key);
     }),

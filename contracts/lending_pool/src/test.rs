@@ -2015,4 +2015,3 @@ fn test_utilization_accurate_when_yield_distributed() {
     assert_eq!(stats_after.utilization_bps, 2_666);
     assert!(stats_after.utilization_bps > 0);
 }
-

@@ -32,6 +32,9 @@ describe('Idempotency Middleware', () => {
     // or use jest.spyOn if the instance is exported.
     jest.spyOn(cacheService, 'get').mockReset();
     jest.spyOn(cacheService, 'set').mockReset();
+    // The in-flight lock (SET NX) is acquired on cache misses so the middleware
+    // proceeds to intercept the response and register the finish handler.
+    jest.spyOn(cacheService, 'setNotExists').mockReset().mockResolvedValue(true);
   });
 
   afterEach(() => {

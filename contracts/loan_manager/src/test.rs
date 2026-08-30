@@ -359,13 +359,18 @@ fn test_approve_loan_fails_when_pool_has_insufficient_liquidity() {
 }
 
 #[test]
-fn test_approve_loan_accounts_for_outstanding_approved_loans() {
+fn test_approve_loan_checks_live_pool_balance_without_double_deduction() {
+    // Regression test for #1589: approve_loan must gate on the lending pool's
+    // live idle balance, not on `pool_balance - total_outstanding`. The old
+    // check double-counted outstanding loans, blocking valid requests once
+    // pool utilization exceeded 50%.
     let env = Env::default();
     env.mock_all_auths_allowing_non_root_auth();
 
     let (manager, nft_client, pool_client, token_id, _token_admin) = setup_test(&env);
     let borrower_one = Address::generate(&env);
     let borrower_two = Address::generate(&env);
+    let borrower_three = Address::generate(&env);
 
     let history_hash = soroban_sdk::BytesN::from_array(&env, &[0u8; 32]);
     nft_client.mint(
@@ -384,6 +389,14 @@ fn test_approve_loan_accounts_for_outstanding_approved_loans() {
         &create_test_commitment(&env, 1),
         &None,
     );
+    nft_client.mint(
+        &borrower_three,
+        &600,
+        &history_hash,
+        &String::from_str(&env, "ipfs://QmTest"),
+        &create_test_commitment(&env, 1),
+        &None,
+    );
 
     let stellar_token = StellarAssetClient::new(&env, &token_id);
     stellar_token.mint(&pool_client, &10_000);
@@ -391,12 +404,21 @@ fn test_approve_loan_accounts_for_outstanding_approved_loans() {
     let first_loan = manager.request_loan(&borrower_one, &6_000, &17280);
     let second_loan = manager.request_loan(&borrower_two, &6_000, &17280);
 
+    // First approval disburses 6_000, leaving 4_000 idle in the pool. A second
+    // 6_000 loan must still fail: 4_000 idle < 6_000 requested.
     manager.approve_loan(&first_loan);
     let second_result = manager.try_approve_loan(&second_loan);
     assert_eq!(second_result, Err(Ok(LoanError::InsufficientPoolLiquidity)));
 
     assert_eq!(manager.get_loan(&first_loan).status, LoanStatus::Approved);
     assert_eq!(manager.get_loan(&second_loan).status, LoanStatus::Pending);
+
+    // A 4_000 loan exactly matches the remaining idle balance and must succeed
+    // even though total_outstanding (6_000) exceeds it — the old
+    // `pool_balance - total_outstanding` check rejected this valid request.
+    let third_loan = manager.request_loan(&borrower_three, &4_000, &17280);
+    manager.approve_loan(&third_loan);
+    assert_eq!(manager.get_loan(&third_loan).status, LoanStatus::Approved);
 }
 
 #[test]
@@ -3034,6 +3056,90 @@ fn test_refinance_loan_increases_principal_draws_from_pool() {
         token_client.balance(&pool_client),
         pool_balance_before - 1_000
     );
+}
+
+#[test]
+fn test_refinance_loan_checks_live_pool_balance_without_double_deduction() {
+    // Regression test for #1589: refinancing up must gate on the pool's live
+    // idle balance only. The old `pool_balance - (total_outstanding - loan.amount)`
+    // check double-counted other loans' outstanding debt, rejecting valid
+    // refinances once utilization was high (and could underflow once other
+    // loans were repaid).
+    let env = Env::default();
+    env.mock_all_auths_allowing_non_root_auth();
+
+    let (manager, nft_client, pool_client, token_id, _admin) = setup_test(&env);
+    let borrower_one = Address::generate(&env);
+    let borrower_two = Address::generate(&env);
+
+    let history_hash = soroban_sdk::BytesN::from_array(&env, &[0u8; 32]);
+    nft_client.mint(
+        &borrower_one,
+        &700,
+        &history_hash,
+        &String::from_str(&env, "ipfs://QmTest"),
+        &create_test_commitment(&env, 1),
+        &None,
+    );
+    nft_client.mint(
+        &borrower_two,
+        &700,
+        &history_hash,
+        &String::from_str(&env, "ipfs://QmTest"),
+        &create_test_commitment(&env, 1),
+        &None,
+    );
+
+    let stellar_token = StellarAssetClient::new(&env, &token_id);
+    let token_client = TokenClient::new(&env, &token_id);
+
+    // Two 6_000 loans exhaust a 12_000 pool; outstanding = 12_000.
+    stellar_token.mint(&pool_client, &12_000);
+    let loan_one = manager.request_loan(&borrower_one, &6_000, &17_280);
+    let loan_two = manager.request_loan(&borrower_two, &6_000, &17_280);
+    manager.approve_loan(&loan_one);
+    manager.approve_loan(&loan_two);
+    assert_eq!(token_client.balance(&pool_client), 0);
+
+    // New deposits top the pool back up with 5_000 idle liquidity.
+    stellar_token.mint(&pool_client, &5_000);
+
+    // Give borrower_one enough collateral to refinance up to 8_000.
+    stellar_token.mint(&manager.address, &8_000);
+    env.as_contract(&manager.address, || {
+        let key = DataKey::Loan(loan_one);
+        let mut loan: Loan = env.storage().persistent().get(&key).unwrap();
+        loan.collateral_amount = 8_000;
+        env.storage().persistent().set(&key, &loan);
+    });
+
+    let borrower_balance_before = token_client.balance(&borrower_one);
+
+    // Refinance 6_000 -> 8_000 draws an additional 2_000, which the 5_000 idle
+    // balance covers even though total_outstanding (12_000) far exceeds it.
+    manager.refinance_loan(&loan_one, &8_000, &17_280);
+
+    let loan = manager.get_loan(&loan_one);
+    assert_eq!(loan.amount, 8_000);
+    assert_eq!(loan.status, LoanStatus::Approved);
+    assert_eq!(
+        token_client.balance(&borrower_one),
+        borrower_balance_before + 2_000
+    );
+    assert_eq!(token_client.balance(&pool_client), 3_000);
+
+    // A refinance needing more than the idle balance must still fail: only
+    // 3_000 remains idle, so drawing 6_000 more is rejected.
+    env.as_contract(&manager.address, || {
+        let key = DataKey::Loan(loan_one);
+        let mut loan: Loan = env.storage().persistent().get(&key).unwrap();
+        loan.collateral_amount = 15_000;
+        env.storage().persistent().set(&key, &loan);
+    });
+    let borrower_balance_before = token_client.balance(&borrower_one);
+    let result = manager.try_refinance_loan(&loan_one, &14_000, &17_280);
+    assert_eq!(result, Err(Ok(LoanError::InsufficientPoolLiquidity)));
+    assert_eq!(token_client.balance(&borrower_one), borrower_balance_before);
 }
 
 #[test]

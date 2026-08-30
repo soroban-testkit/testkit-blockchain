@@ -1201,11 +1201,14 @@ impl LoanManager {
         }
 
         // Cross-contract READ for liquidity check — still in the CHECKS phase.
+        //
+        // #1589: `pool_balance` is the lending pool's live token balance, which
+        // already excludes principal disbursed to borrowers on approval.
+        // Deducting `total_outstanding` again would double-count active debt
+        // and reject valid loans once pool utilization exceeds 50%.
         let pool_client = PoolClient::new(&env, &lending_pool);
         let pool_balance = pool_client.pool_balance(&token);
-        let total_outstanding = Self::total_outstanding(&env, &token);
-        let available_liquidity = pool_balance.checked_sub(total_outstanding).unwrap_or(0);
-        if available_liquidity < loan.amount {
+        if pool_balance < loan.amount {
             return Err(LoanError::InsufficientPoolLiquidity);
         }
 
@@ -2006,13 +2009,11 @@ impl LoanManager {
                     .checked_sub(remaining_principal)
                     .expect("underflow");
                 let pool_balance = token_client.balance(&lending_pool);
-                let outstanding_after_excluding_current = Self::total_outstanding(&env, &token)
-                    .checked_sub(loan.amount)
-                    .expect("total outstanding underflow");
-                let available_liquidity = pool_balance
-                    .checked_sub(outstanding_after_excluding_current)
-                    .unwrap_or(0);
-                if available_liquidity < additional {
+                // #1589: `pool_balance` is the live idle balance and already
+                // excludes disbursed principal, so it must not be reduced by
+                // outstanding debt (which would double-count it and could even
+                // underflow once other loans are repaid).
+                if pool_balance < additional {
                     return Err(LoanError::InsufficientPoolLiquidity);
                 }
                 token_client.transfer(&lending_pool, &loan.borrower, &additional);

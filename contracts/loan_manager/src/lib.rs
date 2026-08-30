@@ -1972,6 +1972,27 @@ impl LoanManager {
         Self::accrue_interest(&env, &mut loan)?;
         let _ = Self::accrue_late_fee(&env, &mut loan);
 
+        let token: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Token)
+            .expect("token not set");
+        let lending_pool: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::LendingPool)
+            .expect("lending pool not set");
+        let token_client = TokenClient::new(&env, &token);
+
+        // Transfer accrued interest + late fees from borrower to lending pool before resetting.
+        let accrued_settlement = loan
+            .accrued_interest
+            .checked_add(loan.accrued_late_fee)
+            .expect("overflow");
+        if accrued_settlement > 0 {
+            token_client.transfer(&loan.borrower, &lending_pool, &accrued_settlement);
+        }
+
         loan.interest_paid = loan
             .interest_paid
             .checked_add(loan.accrued_interest)
@@ -1986,18 +2007,6 @@ impl LoanManager {
 
         // Adjust principal to new_amount.
         let remaining_principal = Self::remaining_principal(&loan);
-
-        let token: Address = env
-            .storage()
-            .instance()
-            .get(&DataKey::Token)
-            .expect("token not set");
-        let lending_pool: Address = env
-            .storage()
-            .instance()
-            .get(&DataKey::LendingPool)
-            .expect("lending pool not set");
-        let token_client = TokenClient::new(&env, &token);
 
         match new_amount.cmp(&remaining_principal) {
             core::cmp::Ordering::Greater => {

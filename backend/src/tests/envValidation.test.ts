@@ -26,9 +26,7 @@ describe('Environment Variable Validation', () => {
     mockExit.mockRestore();
   });
 
-  it('should not exit if all required variables are present', () => {
-    // All required variables are expected to be in originalEnv/process.env
-    // or we set them here for the test
+  function setAllRequiredVariables(): void {
     process.env.DATABASE_URL = 'postgres://localhost';
     process.env.REDIS_URL = 'redis://localhost';
     process.env.JWT_SECRET = 'secret';
@@ -45,12 +43,18 @@ describe('Environment Variable Validation', () => {
     process.env.SCORE_DELTA_LATE = '5';
     process.env.REMITTANCE_NFT_CONTRACT_ID = 'C3';
     process.env.MULTISIG_GOVERNANCE_CONTRACT_ID = 'C4';
+    process.env.PII_KEK_KEY = 'a'.repeat(64);
+  }
+
+  it('should not exit if all required variables are present', () => {
+    setAllRequiredVariables();
 
     expect(() => validateEnvVars()).not.toThrow();
     expect(mockExit).not.toHaveBeenCalled();
   });
 
   it('should exit with code 1 if a required variable is missing', () => {
+    setAllRequiredVariables();
     delete process.env.DATABASE_URL;
 
     expect(() => validateEnvVars()).toThrow('Process.exit called with 1');
@@ -58,6 +62,7 @@ describe('Environment Variable Validation', () => {
   });
 
   it('should exit with code 1 if a required variable is empty string', () => {
+    setAllRequiredVariables();
     process.env.DATABASE_URL = '   ';
 
     expect(() => validateEnvVars()).toThrow('Process.exit called with 1');
@@ -65,6 +70,7 @@ describe('Environment Variable Validation', () => {
   });
 
   it('should exit if neither PII_KEK_KEY nor PII_KMS_ENDPOINT is set', () => {
+    setAllRequiredVariables();
     delete process.env.PII_KEK_KEY;
     delete process.env.PII_KMS_ENDPOINT;
 
@@ -73,6 +79,7 @@ describe('Environment Variable Validation', () => {
   });
 
   it('should not exit if PII_KMS_ENDPOINT is set', () => {
+    setAllRequiredVariables();
     process.env.PII_KMS_ENDPOINT = 'https://kms.example.com';
     delete process.env.PII_KEK_KEY;
 
@@ -81,7 +88,7 @@ describe('Environment Variable Validation', () => {
   });
 
   it('should not exit if PII_KEK_KEY is set', () => {
-    process.env.PII_KEK_KEY = 'a'.repeat(64);
+    setAllRequiredVariables();
     delete process.env.PII_KMS_ENDPOINT;
 
     expect(() => validateEnvVars()).not.toThrow();

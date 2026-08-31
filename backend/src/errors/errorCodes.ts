@@ -23,7 +23,6 @@ export enum ErrorCode {
   TOKEN_EXPIRED = 'TOKEN_EXPIRED',
   TOKEN_INVALID = 'TOKEN_INVALID',
   CHALLENGE_EXPIRED = 'CHALLENGE_EXPIRED',
-  NONCE_ALREADY_USED = 'NONCE_ALREADY_USED',
 
   // Authorization Errors (403)
   FORBIDDEN = 'FORBIDDEN',
@@ -146,13 +145,6 @@ export const ERROR_CODE_REGISTRY: Record<ErrorCode, ErrorCodeMetadata> = {
     message: 'Challenge has expired',
     httpStatus: 401,
     description: 'The challenge message has expired (valid for 5 minutes)',
-    suggestedAction: 'Request a new challenge and sign it',
-  },
-  [ErrorCode.NONCE_ALREADY_USED]: {
-    code: ErrorCode.NONCE_ALREADY_USED,
-    message: 'Challenge nonce is unknown, expired, or already used',
-    httpStatus: 401,
-    description: 'The nonce in this signed message is not a valid, unused, server-issued nonce',
     suggestedAction: 'Request a new challenge and sign it',
   },
 

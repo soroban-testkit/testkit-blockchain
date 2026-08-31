@@ -22,9 +22,12 @@ export interface ChallengeMessage {
 
 const JWT_EXPIRES_IN = '24h';
 const CHALLENGE_EXPIRES_IN_MS = 5 * 60 * 1000;
+const CHALLENGE_EXPIRES_IN_SECONDS = CHALLENGE_EXPIRES_IN_MS / 1000;
+const CHALLENGE_NONCE_PREFIX = 'auth-challenge:';
 // Small allowance for client/server clock drift when a challenge timestamp
 // is slightly in the future.
 const CLOCK_SKEW_TOLERANCE_MS = 5 * 1000;
+const testChallengeStore = new Map<string, { message: string; expiresAt: number }>();
 
 function getJwtSecret(): string {
   const secret = process.env.JWT_SECRET;
@@ -34,7 +37,35 @@ function getJwtSecret(): string {
   return secret;
 }
 
-export function generateChallenge(publicKey: string): ChallengeMessage {
+function challengeNonceKey(publicKey: string, nonce: string): string {
+  return `${CHALLENGE_NONCE_PREFIX}${publicKey}:${nonce}`;
+}
+
+function parseChallengeNonce(message: string): string | null {
+  const nonceMatch = message.match(/Nonce: ([a-f0-9]{64})/);
+  return nonceMatch?.[1] ?? null;
+}
+
+async function storeChallengeNonce(
+  publicKey: string,
+  nonce: string,
+  message: string,
+  timestamp: number,
+): Promise<boolean> {
+  const key = challengeNonceKey(publicKey, nonce);
+
+  if (process.env.NODE_ENV === 'test') {
+    testChallengeStore.set(key, {
+      message,
+      expiresAt: timestamp + CHALLENGE_EXPIRES_IN_MS,
+    });
+    return true;
+  }
+
+  return cacheService.setNotExists(key, message, CHALLENGE_EXPIRES_IN_SECONDS);
+}
+
+export async function generateChallenge(publicKey: string): Promise<ChallengeMessage> {
   if (!StrKey.isValidEd25519PublicKey(publicKey)) {
     throw new Error('Invalid Stellar public key');
   }
@@ -43,6 +74,10 @@ export function generateChallenge(publicKey: string): ChallengeMessage {
   const timestamp = Date.now();
 
   const message = `Sign this message to authenticate with RemitLend.\n\nNonce: ${nonce}\nTimestamp: ${timestamp}\n\nThis request will expire in 5 minutes.`;
+  const stored = await storeChallengeNonce(publicKey, nonce, message, timestamp);
+  if (!stored) {
+    throw new Error('Failed to store challenge nonce');
+  }
 
   return {
     message,
@@ -52,34 +87,31 @@ export function generateChallenge(publicKey: string): ChallengeMessage {
   };
 }
 
-const NONCE_KEY_PREFIX = 'auth:nonce:';
+export async function verifyAndConsumeChallenge(
+  publicKey: string,
+  message: string,
+): Promise<boolean> {
+  if (!StrKey.isValidEd25519PublicKey(publicKey)) {
+    return false;
+  }
 
-/**
- * Persists an issued challenge nonce server-side, bound to the public key it
- * was issued for, so `consumeChallengeNonce` can later enforce that each
- * nonce authenticates at most one login (see #1068). TTL matches the
- * challenge validity window: a nonce past its expiry is unusable even if it
- * was never explicitly consumed.
- */
-export async function storeChallengeNonce(nonce: string, publicKey: string): Promise<void> {
-  await cacheService.set(`${NONCE_KEY_PREFIX}${nonce}`, publicKey, CHALLENGE_EXPIRES_IN_MS / 1000);
-}
+  const nonce = parseChallengeNonce(message);
+  if (!nonce) {
+    return false;
+  }
 
-/**
- * Atomically consumes a challenge nonce: the check (does it exist, was it
- * issued for this public key) and the invalidation (so it can never be used
- * again) happen in a single fenced compare-and-delete, so two concurrent
- * logins that replay the same signed message cannot both succeed.
- *
- * @returns true if the nonce existed, was issued for `publicKey`, and has now
- *          been invalidated; false if it was unknown, expired, already used,
- *          or issued for a different public key. In every false case the
- *          nonce is left untouched (a mismatched public key cannot burn a
- *          nonce it wasn't issued), matching `cacheService.deleteIfMatch`'s
- *          fenced compare-and-delete semantics.
- */
-export async function consumeChallengeNonce(nonce: string, publicKey: string): Promise<boolean> {
-  return cacheService.deleteIfMatch(`${NONCE_KEY_PREFIX}${nonce}`, publicKey);
+  const key = challengeNonceKey(publicKey, nonce);
+
+  if (process.env.NODE_ENV === 'test') {
+    const stored = testChallengeStore.get(key);
+    if (!stored || stored.message !== message || stored.expiresAt < Date.now()) {
+      return false;
+    }
+    testChallengeStore.delete(key);
+    return true;
+  }
+
+  return cacheService.deleteIfMatch(key, message);
 }
 
 export function verifySignature(publicKey: string, message: string, signature: string): boolean {

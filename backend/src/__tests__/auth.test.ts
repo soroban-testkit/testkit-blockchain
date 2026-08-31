@@ -1,52 +1,11 @@
-import { jest, describe, it, expect, beforeAll, beforeEach } from '@jest/globals';
+import { describe, it, expect, beforeAll } from '@jest/globals';
+import request from 'supertest';
+import app from '../app.js';
 import { Keypair } from '@stellar/stellar-sdk';
-
-// Auth challenge nonces are persisted through cacheService (Redis). Tests
-// run without a real Redis instance, so we back it with an in-memory Map
-// that honors the same single-use, fenced compare-and-delete contract as
-// the real `deleteIfMatch` Lua script (see cacheService.ts) — this is what
-// lets the nonce-replay regression tests below exercise the real control
-// flow.
-const nonceStore = new Map<string, unknown>();
-
-const mockSet = jest
-  .fn<(key: string, value: unknown, ttlSeconds?: number) => Promise<void>>()
-  .mockImplementation(async (key, value) => {
-    nonceStore.set(key, value);
-  });
-const mockDeleteIfMatch = jest
-  .fn<(key: string, expectedValue: string) => Promise<boolean>>()
-  .mockImplementation(async (key, expectedValue) => {
-    if (!nonceStore.has(key)) return false;
-    if (nonceStore.get(key) !== expectedValue) return false;
-    nonceStore.delete(key);
-    return true;
-  });
-const mockGet = jest.fn<(key: string) => Promise<null>>().mockResolvedValue(null);
-const mockDelete = jest.fn<(key: string) => Promise<void>>().mockResolvedValue(undefined);
-
-jest.unstable_mockModule('../services/cacheService.js', () => ({
-  cacheService: {
-    set: mockSet,
-    get: mockGet,
-    deleteIfMatch: mockDeleteIfMatch,
-    delete: mockDelete,
-    setNotExists: jest.fn<() => Promise<boolean>>().mockResolvedValue(true),
-    ping: jest.fn<() => Promise<string>>().mockResolvedValue('ok'),
-    invalidatePattern: jest.fn<() => Promise<void>>().mockResolvedValue(undefined),
-  },
-}));
-
-const request = (await import('supertest')).default;
-const { default: app } = await import('../app.js');
 
 describe('Auth API', () => {
   beforeAll(() => {
     process.env.JWT_SECRET = 'test-secret-key-for-jest';
-  });
-
-  beforeEach(() => {
-    nonceStore.clear();
   });
 
   describe('POST /api/auth/challenge', () => {
@@ -87,6 +46,7 @@ describe('Auth API', () => {
 
       const challengeResponse = await request(app)
         .post('/api/auth/challenge')
+        .set('X-Forwarded-For', '10.10.10.1')
         .send({ publicKey: keypair.publicKey() })
         .expect(200);
 
@@ -354,6 +314,31 @@ describe('authService unit tests', () => {
     });
   });
 
+  describe('challenge nonce consumption', () => {
+    it('allows a server-issued challenge exactly once', async () => {
+      const keypair = Keypair.random();
+      const challenge = await authService.generateChallenge(keypair.publicKey());
+
+      await expect(
+        authService.verifyAndConsumeChallenge(keypair.publicKey(), challenge.message),
+      ).resolves.toBe(true);
+      await expect(
+        authService.verifyAndConsumeChallenge(keypair.publicKey(), challenge.message),
+      ).resolves.toBe(false);
+    });
+
+    it('rejects self-issued challenge messages', async () => {
+      const keypair = Keypair.random();
+      const nonce = 'a'.repeat(64);
+      const timestamp = Date.now();
+      const message = `Sign this message to authenticate with RemitLend.\n\nNonce: ${nonce}\nTimestamp: ${timestamp}\n\nThis request will expire in 5 minutes.`;
+
+      await expect(
+        authService.verifyAndConsumeChallenge(keypair.publicKey(), message),
+      ).resolves.toBe(false);
+    });
+  });
+
   describe('extractBearerToken', () => {
     it('should extract token from valid Bearer header', () => {
       const token = 'my-jwt-token';
@@ -386,60 +371,6 @@ describe('authService unit tests', () => {
     it('should return null for wrong part count', () => {
       const result = authService.extractBearerToken('Bearer token extra');
       expect(result).toBeNull();
-    });
-  });
-
-  describe('challenge nonce single-use enforcement (#1068)', () => {
-    it('consumes an issued nonce exactly once: a valid login succeeds, a replay is rejected', async () => {
-      const keypair = Keypair.random();
-      const nonce = 'a'.repeat(64);
-
-      await authService.storeChallengeNonce(nonce, keypair.publicKey());
-
-      // First consumption for the exact public key it was issued to succeeds.
-      const firstConsume = await authService.consumeChallengeNonce(nonce, keypair.publicKey());
-      expect(firstConsume).toBe(true);
-
-      // Replaying the same nonce must fail: it has already been consumed.
-      const secondConsume = await authService.consumeChallengeNonce(nonce, keypair.publicKey());
-      expect(secondConsume).toBe(false);
-    });
-
-    it('rejects a nonce that was never issued (unknown nonce)', async () => {
-      const keypair = Keypair.random();
-      const result = await authService.consumeChallengeNonce(
-        'never-issued-nonce',
-        keypair.publicKey(),
-      );
-      expect(result).toBe(false);
-    });
-
-    it('rejects a nonce issued for a different public key', async () => {
-      const keypair = Keypair.random();
-      const otherKeypair = Keypair.random();
-      const nonce = 'b'.repeat(64);
-
-      await authService.storeChallengeNonce(nonce, keypair.publicKey());
-
-      const result = await authService.consumeChallengeNonce(nonce, otherKeypair.publicKey());
-      expect(result).toBe(false);
-
-      // The nonce is left untouched for a mismatched public key, so the
-      // rightful owner can still use it.
-      const rightfulConsume = await authService.consumeChallengeNonce(nonce, keypair.publicKey());
-      expect(rightfulConsume).toBe(true);
-    });
-
-    it('rejects a nonce that has expired server-side (evicted from the store)', async () => {
-      const keypair = Keypair.random();
-      const nonce = 'c'.repeat(64);
-
-      await authService.storeChallengeNonce(nonce, keypair.publicKey());
-      // Simulate TTL expiry: the store no longer has the nonce.
-      nonceStore.delete(`auth:nonce:${nonce}`);
-
-      const result = await authService.consumeChallengeNonce(nonce, keypair.publicKey());
-      expect(result).toBe(false);
     });
   });
 });

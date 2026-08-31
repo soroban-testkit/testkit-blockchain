@@ -3947,3 +3947,129 @@ fn test_set_rate_oracle_emits_rate_oracle_updated_event() {
         "RateOracleUpdated event should be emitted"
     );
 }
+
+// ── cancel-frees-slot regression test ─────────────────────────────────────
+
+/// After requesting and cancelling `MaxLoansPerBorrower` loans, the borrower
+/// must be able to request another — the cancel path must free the count slot.
+#[test]
+fn test_cancel_frees_slot_for_new_request() {
+    let env = Env::default();
+    env.mock_all_auths_allowing_non_root_auth();
+
+    let (client, nft_client, pool_client, token_id, _admin) = setup_test(&env);
+    let borrower = Address::generate(&env);
+
+    let history_hash = soroban_sdk::BytesN::from_array(&env, &[0u8; 32]);
+    nft_client.mint(
+        &borrower,
+        &700,
+        &history_hash,
+        &String::from_str(&env, "ipfs://QmTest"),
+        &create_test_commitment(&env, 1),
+        &None,
+    );
+
+    let stellar_token = StellarAssetClient::new(&env, &token_id);
+    stellar_token.mint(&pool_client, &50_000);
+
+    // Cap at 1 loan at a time
+    client.set_max_loans_per_borrower(&1);
+
+    // First request — fills the slot
+    let loan_1 = client.request_loan(&borrower, &500, &17280);
+    assert_eq!(client.get_borrower_loan_count(&borrower), 1);
+
+    // Cancel — should free the slot
+    client.cancel_loan(&borrower, &loan_1);
+    assert_eq!(client.get_borrower_loan_count(&borrower), 0);
+
+    // Second request must succeed (previously would return MaxLoansReached)
+    let loan_2 = client.request_loan(&borrower, &500, &17280);
+    assert_eq!(client.get_loan(&loan_2).status, LoanStatus::Pending);
+    assert_eq!(client.get_borrower_loan_count(&borrower), 1);
+}
+
+/// After requesting and having `MaxLoansPerBorrower` loans rejected by admin,
+/// the borrower must be able to request again.
+#[test]
+fn test_reject_frees_slot_for_new_request() {
+    let env = Env::default();
+    env.mock_all_auths_allowing_non_root_auth();
+
+    let (client, nft_client, pool_client, token_id, _admin) = setup_test(&env);
+    let borrower = Address::generate(&env);
+
+    let history_hash = soroban_sdk::BytesN::from_array(&env, &[0u8; 32]);
+    nft_client.mint(
+        &borrower,
+        &700,
+        &history_hash,
+        &String::from_str(&env, "ipfs://QmTest"),
+        &create_test_commitment(&env, 1),
+        &None,
+    );
+
+    let stellar_token = StellarAssetClient::new(&env, &token_id);
+    stellar_token.mint(&pool_client, &50_000);
+
+    // Cap at 1 loan at a time
+    client.set_max_loans_per_borrower(&1);
+
+    // First request — fills the slot
+    let loan_1 = client.request_loan(&borrower, &500, &17280);
+    assert_eq!(client.get_borrower_loan_count(&borrower), 1);
+
+    // Reject — should free the slot
+    client.reject_loan(&loan_1, &String::from_str(&env, "not eligible"));
+    assert_eq!(client.get_borrower_loan_count(&borrower), 0);
+
+    // Second request must succeed
+    let loan_2 = client.request_loan(&borrower, &500, &17280);
+    assert_eq!(client.get_loan(&loan_2).status, LoanStatus::Pending);
+    assert_eq!(client.get_borrower_loan_count(&borrower), 1);
+}
+
+/// Cycling through the full cap via request→cancel must never lock a borrower.
+#[test]
+fn test_request_cancel_cycle_does_not_lock_borrower() {
+    let env = Env::default();
+    env.mock_all_auths_allowing_non_root_auth();
+
+    let (client, nft_client, pool_client, token_id, _admin) = setup_test(&env);
+    let borrower = Address::generate(&env);
+
+    let history_hash = soroban_sdk::BytesN::from_array(&env, &[0u8; 32]);
+    nft_client.mint(
+        &borrower,
+        &700,
+        &history_hash,
+        &String::from_str(&env, "ipfs://QmTest"),
+        &create_test_commitment(&env, 1),
+        &None,
+    );
+
+    let stellar_token = StellarAssetClient::new(&env, &token_id);
+    stellar_token.mint(&pool_client, &50_000);
+
+    // Cap at 2
+    client.set_max_loans_per_borrower(&2);
+
+    // Fill the cap with two pending loans
+    let loan_1 = client.request_loan(&borrower, &500, &17280);
+    let _loan_2 = client.request_loan(&borrower, &500, &17280);
+    assert_eq!(client.get_borrower_loan_count(&borrower), 2);
+
+    // Third request should fail while cap is full
+    let result = client.try_request_loan(&borrower, &500, &17280);
+    assert_eq!(result, Err(Ok(LoanError::MaxLoansReached)));
+
+    // Cancel one — free a slot
+    client.cancel_loan(&borrower, &loan_1);
+    assert_eq!(client.get_borrower_loan_count(&borrower), 1);
+
+    // Now a new request must succeed
+    let loan_3 = client.request_loan(&borrower, &500, &17280);
+    assert_eq!(client.get_loan(&loan_3).status, LoanStatus::Pending);
+    assert_eq!(client.get_borrower_loan_count(&borrower), 2);
+}

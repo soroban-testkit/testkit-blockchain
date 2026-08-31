@@ -4440,3 +4440,133 @@ fn test_liquidate_decreases_score_and_records_default() {
     assert_eq!(nft_client.get_default_count(&borrower), 1);
     assert!(nft_client.is_seized(&borrower));
 }
+
+#[test]
+fn test_liquidate_partially_repaid_loan_no_underflow() {
+    // Regression test: verify that liquidating a partially repaid,
+    // undercollateralized loan does NOT cause TotalOutstanding underflow.
+    //
+    // Accounting model:
+    //   - TotalOutstanding is incremented by loan.amount at approval
+    //   - TotalOutstanding is NOT decremented during partial repayments
+    //   - TotalOutstanding is decremented by loan.amount at liquidation
+    // So liquidating a partially repaid loan should work fine.
+    let env = Env::default();
+    env.mock_all_auths_allowing_non_root_auth();
+
+    let (manager, nft_client, pool_client, token_id, _token_admin) = setup_test(&env);
+    let borrower = Address::generate(&env);
+    let liquidator = Address::generate(&env);
+
+    let history_hash = soroban_sdk::BytesN::from_array(&env, &[0u8; 32]);
+    nft_client.mint(
+        &borrower,
+        &650,
+        &history_hash,
+        &String::from_str(&env, "ipfs://QmTest"),
+        &create_test_commitment(&env, 1),
+        &None,
+    );
+
+    let stellar_token = StellarAssetClient::new(&env, &token_id);
+    stellar_token.mint(&pool_client, &20_000);
+    stellar_token.mint(&borrower, &20_000);
+
+    // Set liquidation threshold to 200% — the loan is undercollateralized
+    // when collateral < 2x total_debt. Even after a partial repayment
+    // reduces total_debt, collateral is still below this high threshold.
+    manager.set_liquidation_threshold(&20_000);
+    manager.set_liquidation_bonus_bps(&0);
+
+    // Create and approve a loan for 1000
+    let loan_id = manager.request_loan(&borrower, &1000, &17_280);
+    manager.approve_loan(&loan_id);
+
+    // Deposit 1000 collateral (= 100% of loan, well below 200% threshold)
+    manager.deposit_collateral(&loan_id, &1_000);
+
+    // Record TotalOutstanding before partial repayment
+    let total_before = manager.get_total_outstanding(&token_id);
+    assert_eq!(total_before, 1_000);
+
+    // Borrower makes a partial repayment of 300
+    manager.repay(&borrower, &loan_id, &300);
+
+    // Verify the loan is still active (not fully repaid)
+    let loan_after_partial = manager.get_loan(&loan_id);
+    assert_eq!(loan_after_partial.status, LoanStatus::Approved);
+    assert!(loan_after_partial.principal_paid > 0);
+
+    // TotalOutstanding should still be 1000 (partial repayments don't decrement it)
+    let total_after_partial = manager.get_total_outstanding(&token_id);
+    assert_eq!(total_after_partial, 1_000);
+
+    // Advance ledger past due date so debt accrues, increasing total_debt.
+    env.ledger().set_sequence_number(40_000);
+
+    // Liquidate the partially repaid, undercollateralized loan
+    // This should NOT panic with "total outstanding underflow"
+    let result = manager.try_liquidate(&liquidator, &loan_id);
+    assert_eq!(result, Ok(Ok(())));
+
+    let liquidated_loan = manager.get_loan(&loan_id);
+    assert_eq!(liquidated_loan.status, LoanStatus::Liquidated);
+
+    // TotalOutstanding should be 0 after liquidation
+    let total_after_liquidation = manager.get_total_outstanding(&token_id);
+    assert_eq!(total_after_liquidation, 0);
+}
+
+#[test]
+fn test_liquidate_zero_partial_repayment_unchanged_behavior() {
+    // Verify that liquidating a loan with NO partial repayments still works
+    // correctly (regression: the fix must not break the simple/common case).
+    let env = Env::default();
+    env.mock_all_auths_allowing_non_root_auth();
+
+    let (manager, nft_client, pool_client, token_id, _token_admin) = setup_test(&env);
+    let borrower = Address::generate(&env);
+    let liquidator = Address::generate(&env);
+
+    let history_hash = soroban_sdk::BytesN::from_array(&env, &[0u8; 32]);
+    nft_client.mint(
+        &borrower,
+        &650,
+        &history_hash,
+        &String::from_str(&env, "ipfs://QmTest"),
+        &create_test_commitment(&env, 1),
+        &None,
+    );
+
+    let token_client = TokenClient::new(&env, &token_id);
+    let stellar_token = StellarAssetClient::new(&env, &token_id);
+    stellar_token.mint(&pool_client, &20_000);
+    stellar_token.mint(&borrower, &20_000);
+
+    manager.set_liquidation_threshold(&14_500);
+    manager.set_liquidation_bonus_bps(&1_000);
+
+    let loan_id = manager.request_loan(&borrower, &1_000, &17_280);
+    manager.approve_loan(&loan_id);
+    manager.deposit_collateral(&loan_id, &1_400);
+
+    let total_before = manager.get_total_outstanding(&token_id);
+    assert_eq!(total_before, 1_000);
+
+    // No partial repayment — go straight to liquidation
+    env.ledger().set_sequence_number(50_000);
+
+    let pool_balance_before = token_client.balance(&pool_client);
+    manager.liquidate(&liquidator, &loan_id);
+    let pool_balance_after = token_client.balance(&pool_client);
+
+    let loan = manager.get_loan(&loan_id);
+    assert_eq!(loan.status, LoanStatus::Liquidated);
+
+    // TotalOutstanding should be 0 after liquidation
+    let total_after = manager.get_total_outstanding(&token_id);
+    assert_eq!(total_after, 0);
+
+    // Debt was sent to the pool
+    assert!(pool_balance_after > pool_balance_before);
+}

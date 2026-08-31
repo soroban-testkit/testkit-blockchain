@@ -1905,11 +1905,28 @@ impl LoanManager {
         Ok(())
     }
 
-    /// Refinance an active loan in good standing (not past due).
-    /// Settles all accrued interest and late fees, adjusts the principal to
-    /// new_amount (drawing from or returning funds to the pool), and resets
-    /// the due date to current_ledger + new_term.
-    /// Requires both borrower auth and admin auth.
+    /// Refinance an active loan.
+    ///
+    /// Refinancing is allowed for an active loan ([`LoanStatus::Approved`]) until the end of
+    /// its default window (`due_date + default_window`). Settles all accrued interest and
+    /// late fees, adjusts the principal to `new_amount` (drawing from or returning funds to
+    /// the lending pool), re-validates borrower credit score, and resets the due date to
+    /// `current_ledger + new_term`.
+    ///
+    /// # Authorization Requirements
+    /// Requires authorization from both the contract **admin** (`admin.require_auth()`) and the **borrower** (`loan.borrower.require_auth()`).
+    ///
+    /// # Error Conditions
+    /// - [`LoanError::ContractPaused`]: If the loan manager contract is paused.
+    /// - [`LoanError::LoanNotFound`]: If no loan matches `loan_id`.
+    /// - [`LoanError::LoanNotActive`]: If the loan status is not [`LoanStatus::Approved`].
+    /// - [`LoanError::LoanPastDue`]: If the current ledger sequence exceeds the end of the default window (`due_date + default_window`).
+    /// - [`LoanError::InvalidAmount`]: If `new_amount <= 0` or exceeds `max_loan_amount`.
+    /// - [`LoanError::InvalidTerm`]: If `new_term` is outside the configured `[min_term, max_term]` bounds.
+    /// - [`LoanError::NotInitialized`]: If the NFT contract reference is not configured in storage.
+    /// - [`LoanError::InsufficientScore`]: If the borrower's credit score falls below `min_score`.
+    /// - [`LoanError::InsufficientCollateral`]: If recorded collateral is strictly less than `new_amount`.
+    /// - [`LoanError::InsufficientPoolLiquidity`]: When refinancing to a higher principal, if available pool liquidity cannot cover the increase.
     pub fn refinance_loan(
         env: Env,
         loan_id: u32,

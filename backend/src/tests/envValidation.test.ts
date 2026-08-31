@@ -7,28 +7,7 @@ describe('Environment Variable Validation', () => {
   const originalEnv = process.env;
   let mockExit: ReturnType<typeof jest.spyOn>;
 
-  beforeAll(() => {
-    mockExit = jest
-      .spyOn(process, 'exit')
-      .mockImplementation((code?: string | number | null | undefined) => {
-        throw new Error(`Process.exit called with ${code}`);
-      });
-  });
-
-  beforeEach(() => {
-    jest.resetModules();
-    process.env = { ...originalEnv };
-    jest.clearAllMocks();
-  });
-
-  afterAll(() => {
-    process.env = originalEnv;
-    mockExit.mockRestore();
-  });
-
-  it('should not exit if all required variables are present', () => {
-    // All required variables are expected to be in originalEnv/process.env
-    // or we set them here for the test
+  const setRequiredEnvVars = () => {
     process.env.DATABASE_URL = 'postgres://localhost';
     process.env.REDIS_URL = 'redis://localhost';
     process.env.JWT_SECRET = 'secret';
@@ -45,7 +24,30 @@ describe('Environment Variable Validation', () => {
     process.env.SCORE_DELTA_LATE = '5';
     process.env.REMITTANCE_NFT_CONTRACT_ID = 'C3';
     process.env.MULTISIG_GOVERNANCE_CONTRACT_ID = 'C4';
+    process.env.PII_KEK_KEY = 'a'.repeat(64);
+  };
 
+  beforeAll(() => {
+    mockExit = jest
+      .spyOn(process, 'exit')
+      .mockImplementation((code?: string | number | null | undefined) => {
+        throw new Error(`Process.exit called with ${code}`);
+      });
+  });
+
+  beforeEach(() => {
+    jest.resetModules();
+    process.env = { ...originalEnv };
+    setRequiredEnvVars();
+    jest.clearAllMocks();
+  });
+
+  afterAll(() => {
+    process.env = originalEnv;
+    mockExit.mockRestore();
+  });
+
+  it('should not exit if all required variables are present', () => {
     expect(() => validateEnvVars()).not.toThrow();
     expect(mockExit).not.toHaveBeenCalled();
   });

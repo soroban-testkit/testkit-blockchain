@@ -467,12 +467,8 @@ impl LoanManager {
         total_debt: i128,
         threshold_bps: u32,
     ) -> bool {
-        if total_debt <= 0 {
+        if total_debt <= 0 || collateral_amount <= 0 {
             return false;
-        }
-
-        if collateral_amount <= 0 {
-            return true;
         }
 
         collateral_amount
@@ -1572,7 +1568,7 @@ impl LoanManager {
     }
 
     /// Returns whether `loan_id` is currently eligible for liquidation.
-    /// Non-`Approved` loans always return `false`.
+    /// Non-`Approved` loans and loans with zero or below-floor collateral always return `false`.
     pub fn is_liquidatable(env: Env, loan_id: u32) -> Result<bool, LoanError> {
         let loan_key = DataKey::Loan(loan_id);
         let mut loan: Loan = env
@@ -1583,6 +1579,10 @@ impl LoanManager {
         Self::bump_persistent_ttl(&env, &loan_key);
 
         if loan.status != LoanStatus::Approved {
+            return Ok(false);
+        }
+
+        if loan.collateral_amount <= 0 {
             return Ok(false);
         }
 
@@ -1619,18 +1619,18 @@ impl LoanManager {
     ///
     /// Requires `liquidator` authorization and the loan manager, lending pool,
     /// and NFT contract to be unpaused. The target loan must be
-    /// [`LoanStatus::Approved`] and its collateral ratio must be below the
-    /// configured liquidation threshold. Collateral first repays debt to the
-    /// lending pool. When collateral exceeds debt, the liquidator receives the
-    /// configured bonus capped by the surplus, and any remaining surplus is
-    /// refunded to the borrower; otherwise all collateral goes to debt recovery.
+    /// [`LoanStatus::Approved`], have collateral above zero, and its collateral
+    /// ratio must be below the configured liquidation threshold. Collateral first
+    /// repays debt to the lending pool. When collateral exceeds debt, the liquidator
+    /// receives the configured bonus capped by the surplus, and any remaining surplus
+    /// is refunded to the borrower; otherwise all collateral goes to debt recovery.
     ///
     /// Returns [`LoanError::ContractPaused`], [`LoanError::PoolPaused`], or
     /// [`LoanError::NftPaused`] when pause checks fail; [`LoanError::LoanNotFound`]
     /// when `loan_id` is unknown; [`LoanError::LoanNotActive`] when the loan is
     /// not approved; [`LoanError::AmountTooLarge`] if debt accrual overflows;
-    /// and [`LoanError::LoanNotLiquidatable`] when the collateral ratio is still
-    /// at or above the liquidation threshold.
+    /// and [`LoanError::LoanNotLiquidatable`] when the loan has zero or below-floor collateral
+    /// or the collateral ratio is still at or above the liquidation threshold.
     pub fn liquidate(env: Env, liquidator: Address, loan_id: u32) -> Result<(), LoanError> {
         use soroban_sdk::token::TokenClient;
 
@@ -1647,6 +1647,10 @@ impl LoanManager {
 
         if loan.status != LoanStatus::Approved {
             return Err(LoanError::LoanNotActive);
+        }
+
+        if loan.collateral_amount <= 0 {
+            return Err(LoanError::LoanNotLiquidatable);
         }
 
         let total_debt = {

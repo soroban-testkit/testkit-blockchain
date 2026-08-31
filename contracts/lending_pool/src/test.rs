@@ -2074,5 +2074,8 @@ fn test_total_deposits_tracks_principal_after_yield_and_full_withdrawal() {
 
     stellar_asset_client.mint(&provider_b, &1);
     let result = pool_client.try_deposit(&provider_b, &token_id, &1, &0);
-    assert!(result.is_err(), "deposit exceeding true-principal cap must be rejected");
+    assert!(
+        result.is_err(),
+        "deposit exceeding true-principal cap must be rejected"
+    );
 }

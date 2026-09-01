@@ -39,7 +39,8 @@ jest.unstable_mockModule('../jobMetricsService.js', () => ({
 }));
 
 const { WebhookService, getRetryDelayMs } = await import('../webhookService.js');
-const { startWebhookRetryProcessor, stopWebhookRetryProcessor } = await import('../webhookRetryProcessor.js');
+const { startWebhookRetryProcessor, stopWebhookRetryProcessor } =
+  await import('../webhookRetryProcessor.js');
 
 const MAX_RETRY_ATTEMPTS = 4;
 
@@ -325,9 +326,9 @@ describe('WebhookRetryProcessor', () => {
       mockQuery.mockImplementation(slowQuery);
 
       // Mock refreshWebhookRetryQueueDepth to succeed immediately
-      const { refreshWebhookRetryQueueDepth } = (await import(
-        '../../middleware/metrics.js',
-      )) as { refreshWebhookRetryQueueDepth: jest.Mock };
+      const { refreshWebhookRetryQueueDepth } = (await import('../../middleware/metrics.js')) as {
+        refreshWebhookRetryQueueDepth: jest.Mock;
+      };
       refreshWebhookRetryQueueDepth.mockResolvedValue(undefined);
 
       startWebhookRetryProcessor();
@@ -376,9 +377,9 @@ describe('WebhookRetryProcessor', () => {
         return { rows: [] };
       });
 
-      const { refreshWebhookRetryQueueDepth } = (await import(
-        '../../middleware/metrics.js',
-      )) as { refreshWebhookRetryQueueDepth: jest.Mock };
+      const { refreshWebhookRetryQueueDepth } = (await import('../../middleware/metrics.js')) as {
+        refreshWebhookRetryQueueDepth: jest.Mock;
+      };
       refreshWebhookRetryQueueDepth.mockResolvedValue(undefined);
 
       startWebhookRetryProcessor();

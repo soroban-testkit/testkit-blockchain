@@ -13,6 +13,7 @@ import { cacheService } from '../services/cacheService.js';
 import { notificationService } from '../services/notificationService.js';
 import { invalidateOnRepay, invalidateOnLoanRequest } from '../utils/cacheKeys.js';
 import { roundToCents } from '../money/decimal.js';
+import { parseStroopAmount, remainingPrincipal, accrueInterest } from '../money/loanAccrual.js';
 
 // ─── Test/Dev Only ────────────────────────────────────────────────────────────
 
@@ -371,7 +372,7 @@ export const getBorrowerLoans = asyncHandler(async (req: Request, res: Response)
       loan_fin AS (
         SELECT
           *,
-          (principal * effective_rate_bps * GREATEST(0, $2 - effective_approved_ledger)) / (10000 * effective_term_ledgers) as accrued_interest
+          FLOOR(GREATEST(0, principal - total_repaid) * effective_rate_bps * GREATEST(0, $2 - effective_approved_ledger) / (10000 * effective_term_ledgers)) as accrued_interest
         FROM loan_calculations
       ),
       loan_final AS (
@@ -518,11 +519,16 @@ export const getLoanDetails = asyncHandler(async (req: Request, res: Response) =
   );
 
   const principal = Number.parseFloat(requestEvent?.amount || '0');
-  const totalRepaid = repaymentEvents.reduce(
-    (sum: number, event: Record<string, unknown>) =>
-      sum + Number.parseFloat((event.amount as string) || '0'),
-    0,
+  // Accrue in exact integer stroops (issue #1600): interest is charged on the
+  // remaining unpaid principal (principal - totalRepaid), not the original
+  // principal, mirroring the contract's `accrue_interest` on `amount - principal_paid`.
+  const principalStroops = parseStroopAmount(String(requestEvent?.amount ?? ''));
+  const totalRepaidStroops = repaymentEvents.reduce(
+    (sum: bigint, event: Record<string, unknown>) =>
+      sum + parseStroopAmount(String(event.amount ?? '')),
+    0n,
   );
+  const totalRepaid = Number(totalRepaidStroops);
 
   const rateBps = approvalEvent?.interest_rate_bps || DEFAULT_INTEREST_RATE_BPS;
   const termLedgers = approvalEvent?.term_ledgers || DEFAULT_TERM_LEDGERS;
@@ -558,10 +564,19 @@ export const getLoanDetails = asyncHandler(async (req: Request, res: Response) =
 
   const isPending = approvedLedger <= 0 || currentLedger < approvedLedger;
 
-  const accruedInterest = isPending
-    ? 0
-    : (principal * rateBps * elapsedLedgers) / (10000 * termLedgers);
-  const totalOwed = principal + accruedInterest - totalRepaid;
+  const accruedInterestStroops = isPending
+    ? 0n
+    : accrueInterest({
+        remainingPrincipalStroops: remainingPrincipal(principalStroops, totalRepaidStroops),
+        interestRateBps: rateBps,
+        elapsedLedgers,
+        termLedgers,
+      });
+  const accruedInterest = Number(accruedInterestStroops);
+  // remaining principal + interest accrued on it == principal + accrued - totalRepaid
+  const totalOwed = Number(
+    remainingPrincipal(principalStroops, totalRepaidStroops) + accruedInterestStroops,
+  );
 
   res.json({
     success: true,

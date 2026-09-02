@@ -945,11 +945,18 @@ fn test_record_default_auto_burns_after_threshold() {
     assert!(client.is_seized(&user));
     assert!(client.get_metadata(&user).is_some());
 
+    let commitment = create_test_commitment(&env, 1);
+    assert_eq!(client.get_recipient_commitment(&user), commitment);
+
     client.record_default(&user, &None);
     assert_eq!(client.get_default_count(&user), 0);
     assert!(client.get_metadata(&user).is_none());
     assert_eq!(client.get_score(&user), 0);
     assert!(!client.is_seized(&user));
+    assert_eq!(
+        client.try_get_recipient_commitment(&user),
+        Err(Ok(NftError::CommitmentMissing))
+    );
 }
 
 #[test]
@@ -2287,6 +2294,37 @@ fn test_burn_removes_nft() {
 }
 
 #[test]
+fn test_burn_removes_recipient_commitment() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+
+    let contract_id = env.register(RemittanceNFT, ());
+    let client = RemittanceNFTClient::new(&env, &contract_id);
+
+    client.initialize(&admin);
+    let commitment = create_test_commitment(&env, 7);
+    client.mint(
+        &user,
+        &500,
+        &create_test_hash(&env, 1),
+        &create_test_uri(&env),
+        &commitment,
+        &None,
+    );
+    assert_eq!(client.get_recipient_commitment(&user), commitment);
+
+    client.burn(&user, &None);
+
+    assert_eq!(
+        client.try_get_recipient_commitment(&user),
+        Err(Ok(NftError::CommitmentMissing))
+    );
+}
+
+#[test]
 fn test_seize_collateral_by_authorized_only() {
     let env = Env::default();
     env.mock_all_auths();
@@ -2720,5 +2758,100 @@ fn test_transfer_succeeds_without_loan_manager_configured() {
     assert!(
         result.is_ok(),
         "transfer must succeed when no LoanManager is registered"
+    );
+}
+
+#[test]
+fn test_transfer_without_sender_commitment_leaves_recipient_without_commitment() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let admin = Address::generate(&env);
+    let sender = Address::generate(&env);
+    let recipient = Address::generate(&env);
+
+    let contract_id = env.register(RemittanceNFT, ());
+    let client = RemittanceNFTClient::new(&env, &contract_id);
+
+    client.initialize(&admin);
+    client.mint(
+        &sender,
+        &500,
+        &create_test_hash(&env, 1),
+        &create_test_uri(&env),
+        &create_test_commitment(&env, 1),
+        &None,
+    );
+
+    // Simulate a legacy user without RecipientCommitment by removing it directly
+    env.as_contract(&contract_id, || {
+        env.storage()
+            .persistent()
+            .remove(&DataKey::RecipientCommitment(sender.clone()));
+    });
+    assert_eq!(
+        client.try_get_recipient_commitment(&sender),
+        Err(Ok(NftError::CommitmentMissing))
+    );
+
+    client.transfer(&sender, &recipient, &None);
+
+    // Sender still has no commitment
+    assert_eq!(
+        client.try_get_recipient_commitment(&sender),
+        Err(Ok(NftError::CommitmentMissing))
+    );
+    // Recipient also has no commitment (nothing to migrate)
+    assert_eq!(
+        client.try_get_recipient_commitment(&recipient),
+        Err(Ok(NftError::CommitmentMissing))
+    );
+}
+
+#[test]
+fn test_burn_removes_all_per_user_keys() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+
+    let contract_id = env.register(RemittanceNFT, ());
+    let client = RemittanceNFTClient::new(&env, &contract_id);
+
+    client.initialize(&admin);
+    client.mint(
+        &user,
+        &500,
+        &create_test_hash(&env, 1),
+        &create_test_uri(&env),
+        &create_test_commitment(&env, 1),
+        &None,
+    );
+    // Write some score history so ScoreHistory key is populated
+    client.update_score(&user, &5_000_000_000, &None);
+
+    // All keys present before burn
+    assert!(client.get_metadata(&user).is_some());
+    assert_eq!(client.get_score(&user), 505);
+    assert!(!client.is_seized(&user));
+    assert_eq!(
+        client.get_recipient_commitment(&user),
+        create_test_commitment(&env, 1)
+    );
+    assert!(!client.get_score_history(&user, &0, &10).is_empty());
+
+    client.burn(&user, &None);
+
+    // All 7 per-user storage keys must be gone
+    assert!(client.get_metadata(&user).is_none());
+    assert_eq!(client.get_score(&user), 0);
+    assert!(client.get_score_history(&user, &0, &10).is_empty());
+    assert!(!client.is_seized(&user));
+    assert!(!client.is_remint_approved(&user));
+    assert_eq!(client.get_transfer_cooldown_remaining(&user), 0);
+    assert_eq!(
+        client.try_get_recipient_commitment(&user),
+        Err(Ok(NftError::CommitmentMissing))
     );
 }

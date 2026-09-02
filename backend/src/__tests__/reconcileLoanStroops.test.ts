@@ -65,9 +65,9 @@ describe('reconcileLoanStroops', () => {
     expect(result.owedStroops).toBe(0n);
     expect(result.paidStroops).toBe(0n);
     expect(result.driftStroops).toBe(0n);
-
   });
-    it('caps paidStroops at principal for loans with interest (no false drift)', async () => {
+
+  it('caps paidStroops at principal for loans with interest (no false drift)', async () => {
     const principal = toStroops('1000');
     // Total repayments exceed principal because they include interest
     const first = toStroops('600');

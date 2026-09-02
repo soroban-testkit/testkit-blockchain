@@ -3847,6 +3847,166 @@ fn test_refinance_loan_fails_when_term_outside_bounds() {
     assert_eq!(manager.get_loan(&loan_id).term_ledgers, 17_280);
 }
 
+#[test]
+fn test_refinance_loan_collects_accrued_interest_and_late_fees() {
+    // Regression test for #1085: refinance_loan must transfer accrued
+    // interest + late fees from the borrower to the lending pool before
+    // resetting them. Without this, a borrower could refinance repeatedly
+    // and never pay interest.
+    let env = Env::default();
+    env.mock_all_auths_allowing_non_root_auth();
+
+    let (manager, nft_client, pool_client, token_id, _admin) = setup_test(&env);
+    let borrower = Address::generate(&env);
+
+    let history_hash = soroban_sdk::BytesN::from_array(&env, &[0u8; 32]);
+    nft_client.mint(
+        &borrower,
+        &700,
+        &history_hash,
+        &String::from_str(&env, "ipfs://QmTest"),
+        &create_test_commitment(&env, 1),
+        &None,
+    );
+
+    let stellar_token = StellarAssetClient::new(&env, &token_id);
+    let token_client = TokenClient::new(&env, &token_id);
+    stellar_token.mint(&pool_client, &50_000);
+    // Give borrower tokens so they can pay accrued interest.
+    stellar_token.mint(&borrower, &10_000);
+
+    // Set ledger to 1 so last_interest_ledger = 1 (non-zero).
+    env.ledger().set_sequence_number(1);
+
+    let loan_id = manager.request_loan(&borrower, &1_000, &17_280);
+    manager.approve_loan(&loan_id);
+
+    // Set collateral high enough for refinance.
+    stellar_token.mint(&manager.address, &5_000);
+    env.as_contract(&manager.address, || {
+        let key = DataKey::Loan(loan_id);
+        let mut loan: Loan = env.storage().persistent().get(&key).unwrap();
+        loan.collateral_amount = 5_000;
+        env.storage().persistent().set(&key, &loan);
+    });
+
+    // Advance ledger to accrue interest (but stay before due_date so no late fees).
+    // Due date = 1 + 17_280 = 17_281. Use 8_000 to stay well within the term.
+    // Default rate is 1200 bps, term is 17_280 ledgers.
+    // After ~8_000 ledgers of accrual, accrued_interest should be positive.
+    env.ledger().set_sequence_number(8_000);
+
+    let pool_balance_before = token_client.balance(&pool_client);
+    let borrower_balance_before = token_client.balance(&borrower);
+
+    // Refinance to the same amount — interest must be collected.
+    // refinance_loan calls accrue_interest internally, so we don't need get_loan.
+    manager.refinance_loan(&loan_id, &1_000, &17_280);
+
+    // Now read the loan — get_loan will accrue again but interest was already
+    // settled by refinance, so last_interest_ledger == current ledger.
+    let loan_after = manager.get_loan(&loan_id);
+
+    // accrued_interest must be zeroed after refinance.
+    assert_eq!(loan_after.accrued_interest, 0);
+    // interest_paid must be > 0 (it was increased by the accrued amount).
+    assert!(
+        loan_after.interest_paid > 0,
+        "interest_paid should be positive after refinance collected accrued interest"
+    );
+
+    // Pool must have received the accrued interest from the borrower.
+    assert!(
+        token_client.balance(&pool_client) > pool_balance_before,
+        "pool balance should increase by the collected accrued interest"
+    );
+    // Borrower must have lost the accrued interest.
+    assert_eq!(
+        token_client.balance(&borrower),
+        borrower_balance_before - loan_after.interest_paid
+    );
+}
+
+#[test]
+fn test_refinance_loan_collects_late_fees_when_overdue() {
+    // Regression test for #1085: refinancing after the grace period must
+    // also collect accrued late fees, not just regular interest.
+    let env = Env::default();
+    env.mock_all_auths_allowing_non_root_auth();
+
+    let (manager, nft_client, pool_client, token_id, _admin) = setup_test(&env);
+    let borrower = Address::generate(&env);
+
+    let history_hash = soroban_sdk::BytesN::from_array(&env, &[0u8; 32]);
+    nft_client.mint(
+        &borrower,
+        &700,
+        &history_hash,
+        &String::from_str(&env, "ipfs://QmTest"),
+        &create_test_commitment(&env, 1),
+        &None,
+    );
+
+    let stellar_token = StellarAssetClient::new(&env, &token_id);
+    let token_client = TokenClient::new(&env, &token_id);
+    stellar_token.mint(&pool_client, &50_000);
+    // Give borrower tokens so they can pay accrued interest + late fees.
+    stellar_token.mint(&borrower, &10_000);
+
+    // Set ledger to 1 so last_interest_ledger = 1 (non-zero).
+    env.ledger().set_sequence_number(1);
+
+    let loan_id = manager.request_loan(&borrower, &1_000, &17_280);
+    manager.approve_loan(&loan_id);
+
+    stellar_token.mint(&manager.address, &5_000);
+    env.as_contract(&manager.address, || {
+        let key = DataKey::Loan(loan_id);
+        let mut loan: Loan = env.storage().persistent().get(&key).unwrap();
+        loan.collateral_amount = 5_000;
+        env.storage().persistent().set(&key, &loan);
+    });
+
+    // Advance well past due_date + grace_period to accrue both interest and late fees.
+    // Due date = 1 + 17_280 = 17_281, grace period = 4_320,
+    // so late fees start at ~21_601. Use 25_000.
+    env.ledger().set_sequence_number(25_000);
+
+    let pool_balance_before = token_client.balance(&pool_client);
+    let borrower_balance_before = token_client.balance(&borrower);
+
+    // Refinance to the same amount — both interest and late fees must be collected.
+    // refinance_loan calls accrue_interest + accrue_late_fee internally.
+    manager.refinance_loan(&loan_id, &1_000, &17_280);
+
+    let loan_after = manager.get_loan(&loan_id);
+
+    // Both accrued fields must be zeroed.
+    assert_eq!(loan_after.accrued_interest, 0);
+    assert_eq!(loan_after.accrued_late_fee, 0);
+
+    // interest_paid and late_fee_paid must have increased.
+    assert!(
+        loan_after.interest_paid > 0,
+        "interest_paid should be positive after refinance collected accrued interest"
+    );
+    assert!(
+        loan_after.late_fee_paid > 0,
+        "late_fee_paid should be positive after refinance collected late fees"
+    );
+
+    // Pool must have received the full settlement.
+    assert!(
+        token_client.balance(&pool_client) > pool_balance_before,
+        "pool balance should increase by the collected accrued interest + late fees"
+    );
+    // Borrower must have lost the full settlement.
+    assert_eq!(
+        token_client.balance(&borrower),
+        borrower_balance_before - loan_after.interest_paid - loan_after.late_fee_paid
+    );
+}
+
 // ── set_grace_period_ledgers tests ───────────────────────────────────────────
 
 #[test]

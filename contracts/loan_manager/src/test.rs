@@ -4333,6 +4333,48 @@ fn test_purge_cancelled_loan_does_not_double_decrement() {
     assert_eq!(manager.get_borrower_loan_count(&borrower), 0);
 }
 
+#[test]
+fn test_purge_removes_id_from_get_borrower_loans() {
+    let env = Env::default();
+    env.mock_all_auths_allowing_non_root_auth();
+
+    let (manager, nft_client, pool_client, token_id, _admin) = setup_test(&env);
+    let borrower = Address::generate(&env);
+
+    let history_hash = soroban_sdk::BytesN::from_array(&env, &[0u8; 32]);
+    nft_client.mint(
+        &borrower,
+        &600,
+        &history_hash,
+        &String::from_str(&env, "ipfs://QmTest"),
+        &create_test_commitment(&env, 1),
+        &None,
+    );
+
+    let stellar_token = StellarAssetClient::new(&env, &token_id);
+    stellar_token.mint(&pool_client, &10_000);
+    stellar_token.mint(&borrower, &10_000);
+
+    // Create and fully repay a loan so it becomes purgable.
+    let loan_id = manager.request_loan(&borrower, &1_000, &17280);
+    manager.approve_loan(&loan_id);
+    manager.repay(&borrower, &loan_id, &1_000);
+    assert_eq!(manager.get_loan(&loan_id).status, LoanStatus::Repaid);
+
+    // The id should be present before purging.
+    let loans = manager.get_borrower_loans(&borrower);
+    assert!(loans.iter().any(|id| id == loan_id));
+
+    manager.purge_loan(&loan_id);
+
+    // After purging the id must no longer appear in the borrower's list.
+    let loans = manager.get_borrower_loans(&borrower);
+    assert!(!loans.iter().any(|id| id == loan_id));
+    // get_loan must also return LoanNotFound.
+    let result = manager.try_get_loan(&loan_id);
+    assert!(result.is_err(), "expected LoanNotFound after purge");
+}
+
 // ── get_total_outstanding tests ────────────────────────────────────────────
 
 #[test]

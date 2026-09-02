@@ -213,7 +213,7 @@ class SorobanService {
     const borrowerScVal = nativeToScVal(Address.fromString(borrowerPublicKey), {
       type: 'address',
     });
-    const amountScVal = nativeToScVal(BigInt(amount), { type: 'i128' });
+    const amountScVal = nativeToScVal(toStroops(amount.toString()), { type: 'i128' });
     const termScVal = nativeToScVal(termLedgers, { type: 'u32' });
 
     const tx = new TransactionBuilder(account, {
@@ -261,7 +261,7 @@ class SorobanService {
       type: 'address',
     });
     const loanIdScVal = nativeToScVal(loanId, { type: 'u32' });
-    const amountScVal = nativeToScVal(BigInt(amount), { type: 'i128' });
+    const amountScVal = nativeToScVal(toStroops(amount.toString()), { type: 'i128' });
 
     const tx = new TransactionBuilder(account, {
       fee: BASE_FEE,
@@ -312,7 +312,7 @@ class SorobanService {
     const tokenScVal = nativeToScVal(Address.fromString(tokenAddress), {
       type: 'address',
     });
-    const amountScVal = nativeToScVal(BigInt(amount), { type: 'i128' });
+    const amountScVal = nativeToScVal(toStroops(amount.toString()), { type: 'i128' });
     const minSharesOutScVal = nativeToScVal(BigInt(minSharesOut), { type: 'i128' });
 
     const tx = new TransactionBuilder(account, {
@@ -366,7 +366,7 @@ class SorobanService {
       type: 'address',
     });
     const sharesScVal = nativeToScVal(BigInt(shares), { type: 'i128' });
-    const minAssetsOutScVal = nativeToScVal(BigInt(minAssetsOut), { type: 'i128' });
+    const minAssetsOutScVal = nativeToScVal(toStroops(minAssetsOut.toString()), { type: 'i128' });
 
     const tx = new TransactionBuilder(account, {
       fee: BASE_FEE,
@@ -419,7 +419,7 @@ class SorobanService {
       type: 'address',
     });
     const sharesScVal = nativeToScVal(BigInt(shares), { type: 'i128' });
-    const minAssetsOutScVal = nativeToScVal(BigInt(minAssetsOut), { type: 'i128' });
+    const minAssetsOutScVal = nativeToScVal(toStroops(minAssetsOut.toString()), { type: 'i128' });
 
     const tx = new TransactionBuilder(account, {
       fee: BASE_FEE,
@@ -592,7 +592,7 @@ class SorobanService {
     const account = await server.getAccount(borrowerPublicKey);
 
     const loanIdScVal = nativeToScVal(loanId, { type: 'u32' });
-    const amountScVal = nativeToScVal(BigInt(newAmount), { type: 'i128' });
+    const amountScVal = nativeToScVal(toStroops(newAmount.toString()), { type: 'i128' });
     const termScVal = nativeToScVal(newTerm, { type: 'u32' });
 
     const tx = new TransactionBuilder(account, {

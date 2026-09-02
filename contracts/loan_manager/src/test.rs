@@ -4691,7 +4691,7 @@ fn test_is_liquidatable_zero_collateral() {
     let loan_id = manager.request_loan(&borrower, &1_000, &17_280);
     manager.approve_loan(&loan_id);
 
-    assert!(manager.is_liquidatable(&loan_id));
+    assert!(!manager.is_liquidatable(&loan_id));
 }
 
 #[test]
@@ -4845,6 +4845,130 @@ fn test_liquidate_decreases_score_and_records_default() {
     assert_eq!(loan.collateral_amount, 0);
 
     assert_eq!(nft_client.get_score(&borrower), 550);
+    assert_eq!(nft_client.get_default_count(&borrower), 1);
+    assert!(nft_client.is_seized(&borrower));
+}
+
+#[test]
+fn test_liquidate_rejects_zero_collateral_loan() {
+    let env = Env::default();
+    env.mock_all_auths_allowing_non_root_auth();
+
+    let (manager, nft_client, pool_client, token_id, _token_admin) = setup_test(&env);
+    let borrower = Address::generate(&env);
+    let liquidator = Address::generate(&env);
+
+    let history_hash = soroban_sdk::BytesN::from_array(&env, &[0u8; 32]);
+    nft_client.mint(
+        &borrower,
+        &650,
+        &history_hash,
+        &String::from_str(&env, "ipfs://QmTest"),
+        &create_test_commitment(&env, 1),
+        &None,
+    );
+
+    let token_client = TokenClient::new(&env, &token_id);
+    let stellar_token = StellarAssetClient::new(&env, &token_id);
+    stellar_token.mint(&pool_client, &20_000);
+
+    let loan_id = manager.request_loan(&borrower, &1_000, &17_280);
+    manager.approve_loan(&loan_id);
+
+    let pool_balance_before = token_client.balance(&pool_client);
+    let liquidator_balance_before = token_client.balance(&liquidator);
+
+    let result = manager.try_liquidate(&liquidator, &loan_id);
+    assert_eq!(result, Err(Ok(LoanError::LoanNotLiquidatable)));
+
+    let loan = manager.get_loan(&loan_id);
+    assert_eq!(loan.status, LoanStatus::Approved);
+    assert_eq!(loan.collateral_amount, 0);
+    assert_eq!(manager.get_borrower_loan_count(&borrower), 1);
+    assert_eq!(token_client.balance(&pool_client), pool_balance_before);
+    assert_eq!(token_client.balance(&liquidator), liquidator_balance_before);
+    assert_eq!(nft_client.get_score(&borrower), 650);
+    assert_eq!(nft_client.get_default_count(&borrower), 0);
+}
+
+#[test]
+fn test_borrower_self_liquidation_fails() {
+    let env = Env::default();
+    env.mock_all_auths_allowing_non_root_auth();
+
+    let (manager, nft_client, pool_client, token_id, _token_admin) = setup_test(&env);
+    let borrower = Address::generate(&env);
+
+    let history_hash = soroban_sdk::BytesN::from_array(&env, &[0u8; 32]);
+    nft_client.mint(
+        &borrower,
+        &650,
+        &history_hash,
+        &String::from_str(&env, "ipfs://QmTest"),
+        &create_test_commitment(&env, 1),
+        &None,
+    );
+
+    let stellar_token = StellarAssetClient::new(&env, &token_id);
+    stellar_token.mint(&pool_client, &20_000);
+
+    let loan_id = manager.request_loan(&borrower, &1_000, &17_280);
+    manager.approve_loan(&loan_id);
+
+    // Borrower attempts to self-liquidate zero-collateral loan to escape debt
+    let result = manager.try_liquidate(&borrower, &loan_id);
+    assert_eq!(result, Err(Ok(LoanError::LoanNotLiquidatable)));
+
+    let loan = manager.get_loan(&loan_id);
+    assert_eq!(loan.status, LoanStatus::Approved);
+    assert_eq!(loan.amount, 1_000);
+    assert_eq!(loan.collateral_amount, 0);
+    assert_eq!(manager.get_borrower_loan_count(&borrower), 1);
+}
+
+#[test]
+fn test_uncollateralized_loan_follows_default_path_after_default_window() {
+    let env = Env::default();
+    env.mock_all_auths_allowing_non_root_auth();
+
+    let (manager, nft_client, pool_client, token_id, _token_admin) = setup_test(&env);
+    let borrower = Address::generate(&env);
+    let liquidator = Address::generate(&env);
+
+    let history_hash = soroban_sdk::BytesN::from_array(&env, &[0u8; 32]);
+    nft_client.mint(
+        &borrower,
+        &650,
+        &history_hash,
+        &String::from_str(&env, "ipfs://QmTest"),
+        &create_test_commitment(&env, 1),
+        &None,
+    );
+
+    let stellar_token = StellarAssetClient::new(&env, &token_id);
+    stellar_token.mint(&pool_client, &20_000);
+
+    let loan_id = manager.request_loan(&borrower, &1_000, &17_280);
+    manager.approve_loan(&loan_id);
+
+    // Liquidation must be rejected for zero-collateral loan
+    let result = manager.try_liquidate(&liquidator, &loan_id);
+    assert_eq!(result, Err(Ok(LoanError::LoanNotLiquidatable)));
+
+    // Fast-forward past due date + default window
+    let due_date = manager.get_loan(&loan_id).due_date;
+    let default_window = manager.get_default_window_ledgers();
+    env.ledger()
+        .set_sequence_number(due_date + default_window + 1);
+
+    // Loan routes through check_default correctly applying credit score penalty and default record
+    manager.check_default(&loan_id);
+
+    let loan = manager.get_loan(&loan_id);
+    assert_eq!(loan.status, LoanStatus::Defaulted);
+    assert_eq!(manager.get_borrower_loan_count(&borrower), 0);
+    assert_eq!(manager.get_total_outstanding(&token_id), 0);
+    assert_eq!(nft_client.get_score(&borrower), 600); // 650 - 50 penalty
     assert_eq!(nft_client.get_default_count(&borrower), 1);
     assert!(nft_client.is_seized(&borrower));
 }

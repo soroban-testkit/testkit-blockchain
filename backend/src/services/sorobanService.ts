@@ -15,6 +15,7 @@ import {
   getStellarNetworkPassphrase,
   getStellarRpcUrl,
 } from '../config/stellar.js';
+import { toStroops } from '../money/decimal.js';
 
 /**
  * Service for building and submitting Soroban contract transactions.
@@ -195,12 +196,13 @@ class SorobanService {
   }
 
   /**
-   * Builds an unsigned Soroban `request_loan(borrower, amount)` transaction.
+   * Builds an unsigned Soroban `request_loan(borrower, amount, term)` transaction.
    * Returns base64 XDR for the frontend to sign with the user's wallet.
    */
   async buildRequestLoanTx(
     borrowerPublicKey: string,
     amount: number,
+    termLedgers: number,
   ): Promise<{ unsignedTxXdr: string; networkPassphrase: string }> {
     const server = this.getRpcServer();
     const contractId = this.getLoanManagerContractId();
@@ -212,6 +214,7 @@ class SorobanService {
       type: 'address',
     });
     const amountScVal = nativeToScVal(BigInt(amount), { type: 'i128' });
+    const termScVal = nativeToScVal(termLedgers, { type: 'u32' });
 
     const tx = new TransactionBuilder(account, {
       fee: BASE_FEE,
@@ -221,7 +224,7 @@ class SorobanService {
         Operation.invokeContractFunction({
           contract: contractId,
           function: 'request_loan',
-          args: [borrowerScVal, amountScVal],
+          args: [borrowerScVal, amountScVal, termScVal],
         }),
       )
       .setTimeout(30)
@@ -233,6 +236,7 @@ class SorobanService {
     logger.withContext().info('Built request_loan transaction', {
       borrower: borrowerPublicKey,
       amount,
+      termLedgers,
     });
 
     return { unsignedTxXdr, networkPassphrase: passphrase };
@@ -286,7 +290,7 @@ class SorobanService {
   }
 
   /**
-   * Builds an unsigned Soroban `deposit(provider, token, amount)` transaction
+   * Builds an unsigned Soroban `deposit(provider, token, amount, min_shares_out)` transaction
    * against the LendingPool contract.
    * Returns base64 XDR for the frontend to sign with the user's wallet.
    */
@@ -294,6 +298,7 @@ class SorobanService {
     providerPublicKey: string,
     tokenAddress: string,
     amount: number,
+    minSharesOut: number,
   ): Promise<{ unsignedTxXdr: string; networkPassphrase: string }> {
     const server = this.getRpcServer();
     const contractId = this.getLendingPoolContractId();
@@ -308,6 +313,7 @@ class SorobanService {
       type: 'address',
     });
     const amountScVal = nativeToScVal(BigInt(amount), { type: 'i128' });
+    const minSharesOutScVal = nativeToScVal(BigInt(minSharesOut), { type: 'i128' });
 
     const tx = new TransactionBuilder(account, {
       fee: BASE_FEE,
@@ -317,7 +323,7 @@ class SorobanService {
         Operation.invokeContractFunction({
           contract: contractId,
           function: 'deposit',
-          args: [providerScVal, tokenScVal, amountScVal],
+          args: [providerScVal, tokenScVal, amountScVal, minSharesOutScVal],
         }),
       )
       .setTimeout(30)
@@ -330,6 +336,7 @@ class SorobanService {
       provider: providerPublicKey,
       token: tokenAddress,
       amount,
+      minSharesOut,
     });
 
     return { unsignedTxXdr, networkPassphrase: passphrase };
@@ -499,7 +506,7 @@ class SorobanService {
     const account = await server.getAccount(borrowerPublicKey);
 
     const loanIdScVal = nativeToScVal(loanId, { type: 'u32' });
-    const amountScVal = nativeToScVal(BigInt(amount), { type: 'i128' });
+    const amountScVal = nativeToScVal(toStroops(amount.toString()), { type: 'i128' });
 
     const tx = new TransactionBuilder(account, {
       fee: BASE_FEE,

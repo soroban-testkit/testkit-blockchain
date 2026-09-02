@@ -24,6 +24,7 @@ describe('Environment Variable Validation', () => {
     process.env.SCORE_DELTA_REPAY = '15';
     process.env.SCORE_DELTA_DEFAULT = '50';
     process.env.SCORE_DELTA_LATE = '5';
+    process.env.PII_KEK_KEY = 'a'.repeat(64);
   }
 
   beforeAll(() => {
@@ -34,30 +35,10 @@ describe('Environment Variable Validation', () => {
       });
   });
 
-  const setValidEnv = () => {
-    process.env.DATABASE_URL = 'postgres://localhost';
-    process.env.REDIS_URL = 'redis://localhost';
-    process.env.JWT_SECRET = 'secret';
-    process.env.STELLAR_RPC_URL = 'http://localhost';
-    process.env.STELLAR_NETWORK_PASSPHRASE = 'test';
-    process.env.LOAN_MANAGER_CONTRACT_ID = 'C1';
-    process.env.LENDING_POOL_CONTRACT_ID = 'C2';
-    process.env.POOL_TOKEN_ADDRESS = 'T1';
-    process.env.LOAN_MANAGER_ADMIN_SECRET = 'S1';
-    process.env.INTERNAL_API_KEY = 'K1';
-    process.env.FRONTEND_URL = 'http://localhost:3000';
-    process.env.SCORE_DELTA_REPAY = '15';
-    process.env.SCORE_DELTA_DEFAULT = '50';
-    process.env.SCORE_DELTA_LATE = '5';
-    process.env.REMITTANCE_NFT_CONTRACT_ID = 'C3';
-    process.env.MULTISIG_GOVERNANCE_CONTRACT_ID = 'C4';
-    process.env.PII_KEK_KEY = 'a'.repeat(64);
-  };
-
   beforeEach(() => {
     jest.resetModules();
     process.env = { ...originalEnv };
-    setValidEnv();
+    setAllRequiredVars();
     jest.clearAllMocks();
   });
 
@@ -72,8 +53,6 @@ describe('Environment Variable Validation', () => {
   });
 
   it('should exit with code 1 if a required variable is missing', () => {
-    setAllRequiredVars();
-    process.env.PII_KMS_ENDPOINT = 'https://kms.example.com';
     delete process.env.DATABASE_URL;
 
     expect(() => validateEnvVars()).toThrow('Process.exit called with 1');
@@ -81,8 +60,6 @@ describe('Environment Variable Validation', () => {
   });
 
   it('should exit with code 1 if a required variable is empty string', () => {
-    setAllRequiredVars();
-    process.env.PII_KMS_ENDPOINT = 'https://kms.example.com';
     process.env.DATABASE_URL = '   ';
 
     expect(() => validateEnvVars()).toThrow('Process.exit called with 1');
@@ -90,7 +67,6 @@ describe('Environment Variable Validation', () => {
   });
 
   it('should exit if neither PII_KEK_KEY nor PII_KMS_ENDPOINT is set', () => {
-    setAllRequiredVars();
     delete process.env.PII_KEK_KEY;
     delete process.env.PII_KMS_ENDPOINT;
 
@@ -99,7 +75,6 @@ describe('Environment Variable Validation', () => {
   });
 
   it('should not exit if PII_KMS_ENDPOINT is set', () => {
-    setAllRequiredVars();
     process.env.PII_KMS_ENDPOINT = 'https://kms.example.com';
     delete process.env.PII_KEK_KEY;
 
@@ -108,8 +83,6 @@ describe('Environment Variable Validation', () => {
   });
 
   it('should not exit if PII_KEK_KEY is set', () => {
-    setAllRequiredVars();
-    process.env.PII_KEK_KEY = 'a'.repeat(64);
     delete process.env.PII_KMS_ENDPOINT;
 
     expect(() => validateEnvVars()).not.toThrow();

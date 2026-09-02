@@ -663,7 +663,7 @@ describe('EventIndexer – transaction atomicity via ingestRawEvents', () => {
 
     const mockClient: MockClient = {
       query: jest.fn<any>().mockImplementation(async (sql: string, params: unknown[]) => {
-        if (String(sql).includes('INSERT INTO loan_events')) {
+        if (String(sql).includes('INSERT INTO contract_events')) {
           insertCalls.push(params);
           return { rowCount: 1, rows: [{ event_id: params?.[0] }] };
         }

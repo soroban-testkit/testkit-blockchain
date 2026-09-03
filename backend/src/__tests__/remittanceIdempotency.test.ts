@@ -10,6 +10,10 @@ const RECIPIENT = Keypair.random().publicKey();
 
 let createdCount = 0;
 const mockCreateRemittance = jest.fn(async () => {
+  // Slight artificial delay so the in-flight reservation is still held when a
+  // concurrent duplicate request reaches the middleware in the "409 while in
+  // progress" test below.
+  await new Promise((resolve) => setTimeout(resolve, 80));
   createdCount += 1;
   return {
     id: `remittance-${createdCount}`,
@@ -34,14 +38,17 @@ jest.unstable_mockModule('../services/remittanceService.js', () => ({
   },
 }));
 
-// In-memory fake so the idempotency middleware's cache reads/writes actually
-// persist across the two requests issued in the test below.
 const fakeCacheStore = new Map<string, unknown>();
 jest.unstable_mockModule('../services/cacheService.js', () => ({
   cacheService: {
     get: jest.fn(async (key: string) => fakeCacheStore.get(key) ?? null),
     set: jest.fn(async (key: string, value: unknown) => {
       fakeCacheStore.set(key, value);
+    }),
+    setNotExists: jest.fn(async (key: string, value: unknown) => {
+      if (fakeCacheStore.has(key)) return false;
+      fakeCacheStore.set(key, value);
+      return true;
     }),
     delete: jest.fn(async (key: string) => {
       fakeCacheStore.delete(key);
@@ -104,6 +111,52 @@ describe('POST /api/remittances idempotency', () => {
     expect(second.body).toEqual(first.body);
 
     // The underlying service — and therefore the DB insert — only ran once.
+    expect(mockCreateRemittance).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects reusing an Idempotency-Key for a different request (different body)', async () => {
+    const idempotencyKey = 'cross-endpoint-reuse-key';
+
+    const first = await request(app)
+      .post('/api/remittances')
+      .set(bearer(SENDER))
+      .set('Idempotency-Key', idempotencyKey)
+      .send(payload);
+
+    expect(first.status).toBe(201);
+
+    // Same key but a different body — the cached fingerprint no longer matches,
+    // so the key must NOT replay the first response.
+    const second = await request(app)
+      .post('/api/remittances')
+      .set(bearer(SENDER))
+      .set('Idempotency-Key', idempotencyKey)
+      .send({ ...payload, amount: 999 });
+
+    expect(second.status).toBe(409);
+    expect(mockCreateRemittance).toHaveBeenCalledTimes(1);
+  });
+
+  it('returns 409 for a concurrent duplicate while the first is still in flight', async () => {
+    const idempotencyKey = 'concurrent-key';
+
+    const [first, second] = await Promise.all([
+      request(app)
+        .post('/api/remittances')
+        .set(bearer(SENDER))
+        .set('Idempotency-Key', idempotencyKey)
+        .send(payload),
+      request(app)
+        .post('/api/remittances')
+        .set(bearer(SENDER))
+        .set('Idempotency-Key', idempotencyKey)
+        .send(payload),
+    ]);
+
+    // Exactly one request wins the in-flight reservation; the concurrent
+    // duplicate is rejected with 409 instead of double-executing.
+    const statuses = [first.status, second.status].sort((a, b) => a - b);
+    expect(statuses).toEqual([201, 409]);
     expect(mockCreateRemittance).toHaveBeenCalledTimes(1);
   });
 

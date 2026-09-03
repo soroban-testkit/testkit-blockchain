@@ -31,6 +31,7 @@ interface UnresolvedRow {
   borrower: string;
   operation: 'approve' | 'repay' | 'default';
   disbursementLedger: number | null;
+  disbursementTxHash: string | null;
   expectedScoreDelta: number;
   attempts: number;
   state: 'pending' | 'half_applied';
@@ -121,7 +122,7 @@ class CrossContractReconciler {
     const result = await query(
       `/* fetch-unresolved */
       SELECT id, intent_key, loan_id, borrower, operation, disbursement_ledger,
-             expected_score_delta, attempts, state
+             disbursement_tx_hash, expected_score_delta, attempts, state
       FROM cross_contract_reconciliation
       WHERE state IN ('pending', 'half_applied')
       ORDER BY id ASC
@@ -138,6 +139,7 @@ class CrossContractReconciler {
         borrower: String(r.borrower ?? ''),
         operation: String(r.operation ?? 'approve') as UnresolvedRow['operation'],
         disbursementLedger: r.disbursement_ledger == null ? null : Number(r.disbursement_ledger),
+        disbursementTxHash: r.disbursement_tx_hash == null ? null : String(r.disbursement_tx_hash),
         expectedScoreDelta: Number(r.expected_score_delta ?? 0),
         attempts: Number(r.attempts ?? 0),
         state: String(r.state ?? 'pending') as UnresolvedRow['state'],
@@ -145,19 +147,34 @@ class CrossContractReconciler {
     });
   }
 
-  /** Returns the ledger of the first matching on-chain score event, or null. */
+  /** Returns the ledger of the matching on-chain score event, or null. */
   private async findMatchingScoreLedger(
     borrower: string,
     sinceLedger: number | null,
+    txHash: string | null = null,
   ): Promise<number | null> {
+    if (txHash) {
+      const result = await query(
+        `/* match-score */
+        SELECT ledger
+        FROM contract_events
+        WHERE address = $1
+          AND event_type = ANY($2::text[])
+          AND tx_hash = $3
+        LIMIT 1`,
+        [borrower, SCORE_EVENT_TYPES, txHash],
+      );
+      const row = result.rows[0] as { ledger?: number | string } | undefined;
+      return row?.ledger == null ? null : Number(row.ledger);
+    }
+
     const result = await query(
       `/* match-score */
       SELECT ledger
       FROM contract_events
       WHERE address = $1
         AND event_type = ANY($2::text[])
-        AND ledger >= $3
-      ORDER BY ledger ASC
+        AND ledger = $3
       LIMIT 1`,
       [borrower, SCORE_EVENT_TYPES, sinceLedger ?? 0],
     );
@@ -232,6 +249,7 @@ class CrossContractReconciler {
         const scoreLedger = await this.findMatchingScoreLedger(
           row.borrower,
           row.disbursementLedger,
+          row.disbursementTxHash,
         );
 
         if (scoreLedger !== null) {

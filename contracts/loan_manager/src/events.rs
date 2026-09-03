@@ -5,6 +5,12 @@ pub fn loan_requested(env: &Env, loan_id: u32, borrower: Address, amount: i128) 
     env.events().publish(topics, amount);
 }
 
+/// # De-duplication Note
+/// A single call to `approve_loan` in `lib.rs` emits **two** events:
+/// 1. `LoanApproved` (emitted here with loan terms and interest rate)
+/// 2. `LoanApprv` (emitted by [`loan_approved_by_admin`] with admin and borrower address)
+///
+///    Indexers should de-duplicate or reconcile both events.
 pub fn loan_approved(
     env: &Env,
     loan_id: u32,
@@ -75,11 +81,6 @@ pub fn unpaused(env: &Env, unpaused_at_ledger: u32) {
     let topics = (Symbol::new(env, "Unpaused"),);
     env.events().publish(topics, unpaused_at_ledger);
 }
-
-// pub fn min_score_updated(env: &Env, old_score: u32, new_score: u32) {
-//     let topics = (Symbol::new(env, "MinScoreUpdated"),);
-//     env.events().publish(topics, (old_score, new_score));
-// }
 
 pub fn interest_rate_updated(env: &Env, old_rate: u32, new_rate: u32) {
     let topics = (Symbol::new(env, "InterestRateUpdated"),);

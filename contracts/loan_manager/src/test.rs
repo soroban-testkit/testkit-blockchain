@@ -4035,4 +4035,3 @@ fn test_approve_loan_rejects_borrower_seized_after_request() {
 
     manager.approve_loan(&pending_loan_id);
 }
-

@@ -16,6 +16,15 @@ RemitLend uses three core smart contracts:
 - [Soroban CLI](https://soroban.stellar.org/docs/getting-started/setup) (v22.0.0+)
 - [wasm32-unknown-unknown target](https://doc.rust-lang.org/rustc/platform-support/wasm32-unknown-unknown.html)
 
+### Required Versions
+
+| Dependency    | Version |
+| ------------- | ------- |
+| `soroban-sdk` | 22.0.0  |
+| `soroban-cli` | 22.0.0+ |
+
+> These versions are pinned in `contracts/Cargo.toml` — keep the two files in sync when upgrading.
+
 ### The pinned toolchain
 
 This directory contains a `rust-toolchain.toml` that pins the exact toolchain
@@ -53,13 +62,6 @@ rustup self update
 If you must confirm the pin is active, run `rustup show` from `contracts/` —
 the pinned version should be listed as the active toolchain, with `overridden
 by` pointing at `rust-toolchain.toml`.
-
-| Dependency | Version |
-|------------|---------|
-| `soroban-sdk` | 22.0.0 |
-| `soroban-cli` | 22.0.0+ |
-
-> These versions are pinned in `contracts/Cargo.toml` — keep the two files in sync when upgrading.
 
 ### Installation
 

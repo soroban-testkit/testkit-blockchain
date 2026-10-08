@@ -642,7 +642,6 @@ mod tests {
         assert_eq!(env.now(), before);
     }
 
- improve-ledger-clock-handling
     // --- advance overflow rejection and checked variants ----------------
 
     // Regression: a panic inside a *nested* `at` must unwind through both
@@ -702,7 +701,6 @@ mod tests {
     }
 
     // --- advance overflow rejection -------------------------------------
-  main
 
     // Regression: `ledgers as u32` used to truncate, so a duration worth
     // exactly 2^32 ledgers advanced the timestamp by ~680 years while

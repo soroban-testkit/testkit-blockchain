@@ -1,6 +1,8 @@
 #![no_std]
 
-use soroban_sdk::{contract, contracterror, contractimpl, contracttype, Address, Env, Vec};
+use soroban_sdk::{
+    contract, contracterror, contractimpl, contracttype, symbol_short, Address, Env, Vec,
+};
 
 #[contracttype]
 pub enum DataKey {
@@ -86,6 +88,14 @@ impl Vault {
             .ok_or(VaultError::NotInitialized)?;
         owner.require_auth();
         Self::withdraw(env, amount)
+    }
+
+    /// Publishes a receipt event for `amount`. The testkit's event examples
+    /// use this entry point to assert on captured events without defining a
+    /// second contract.
+    pub fn emit_receipt(env: Env, amount: i128) {
+        #[allow(deprecated)]
+        env.events().publish((symbol_short!("receipt"),), amount);
     }
 
     pub fn set_record(env: Env, value: i128) {

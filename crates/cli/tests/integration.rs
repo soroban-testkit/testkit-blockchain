@@ -2,9 +2,10 @@
 //! real `soroban-testkit` binary — exercising the CLI the way a user
 //! would, not just its internal functions.
 
-use std::io::Write;
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 fn workspace_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -166,9 +167,45 @@ fn audit_json_on_a_clean_file_is_an_empty_findings_list() {
     );
 }
 
-#[test]
-fn limits_finds_the_real_mainnet_write_ceiling_for_batch_payout() {
-    let build = Command::new("cargo")
+// ---- #215: isolated WASM artifacts for parallel test execution -----------
+
+/// A uniquely-named temp dir for one integration test.
+///
+/// Each instance gets its own directory under the system temp dir so that
+/// parallel tests never race on a shared `target/wasm32v1-none/release/*.wasm`.
+/// The directory (and every generated artifact inside it) is removed when the
+/// `IsolatedDir` is dropped, leaving no residue behind.
+struct IsolatedDir {
+    path: PathBuf,
+}
+
+impl Drop for IsolatedDir {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.path);
+    }
+}
+
+static ISO_COUNTER: AtomicUsize = AtomicUsize::new(0);
+
+/// Creates a fresh, uniquely-named temp dir for `test_name`.
+fn isolated_dir(test_name: &str) -> io::Result<IsolatedDir> {
+    let base = std::env::temp_dir();
+    let id = ISO_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let path = base.join(format!(
+        "soroban-testkit-integration-{test_name}-{}-{}",
+        std::process::id(),
+        id
+    ));
+    std::fs::create_dir_all(&path)?;
+    Ok(IsolatedDir { path })
+}
+
+/// Builds the `vault` contract into `iso`'s private target dir and returns the
+/// path to the generated `vault.wasm`. Because every caller passes its own
+/// `IsolatedDir`, parallel tests never clobber each other's artifacts.
+fn build_isolated_vault_wasm(iso: &IsolatedDir) -> PathBuf {
+    let target_dir = iso.path.join("target");
+    let status = Command::new("cargo")
         .args([
             "build",
             "-p",
@@ -176,13 +213,29 @@ fn limits_finds_the_real_mainnet_write_ceiling_for_batch_payout() {
             "--target",
             "wasm32v1-none",
             "--release",
+            "--target-dir",
+            target_dir.to_str().expect("target dir is valid unicode"),
         ])
         .current_dir(workspace_root())
         .status()
         .expect("failed to build vault.wasm");
-    assert!(build.success());
+    assert!(status.success(), "cargo build for vault must succeed");
 
-    let wasm = workspace_root().join("target/wasm32v1-none/release/vault.wasm");
+    let wasm = target_dir
+        .join("wasm32v1-none")
+        .join("release")
+        .join("vault.wasm");
+    assert!(
+        wasm.exists(),
+        "expected vault.wasm at {wasm:?} after build"
+    );
+    wasm
+}
+
+#[test]
+fn limits_finds_the_real_mainnet_write_ceiling_for_batch_payout() {
+    let iso = isolated_dir("limits-batch-payout").expect("isolated temp dir");
+    let wasm = build_isolated_vault_wasm(&iso);
     let output = run(&[
         "limits",
         "--contract",
@@ -202,12 +255,8 @@ fn limits_finds_the_real_mainnet_write_ceiling_for_batch_payout() {
 
 #[test]
 fn limits_reports_an_actionable_error_for_an_unknown_function() {
-    let wasm = workspace_root().join("target/wasm32v1-none/release/vault.wasm");
-    if !wasm.exists() {
-        // Built by limits_finds_the_real_mainnet_write_ceiling_for_batch_payout;
-        // skip if tests ran in isolation without it.
-        return;
-    }
+    let iso = isolated_dir("limits-unknown-fn").expect("isolated temp dir");
+    let wasm = build_isolated_vault_wasm(&iso);
     let output = run(&[
         "limits",
         "--contract",
@@ -221,6 +270,29 @@ fn limits_reports_an_actionable_error_for_an_unknown_function() {
     assert!(!output.status.success());
     assert!(stderr.contains("no function named"), "{stderr}");
 }
+
+#[test]
+fn isolated_temp_dir_is_created_used_and_cleaned_up() {
+    let wasm_path;
+    {
+        let iso = isolated_dir("cleanup-verification").expect("isolated temp dir");
+        assert!(iso.path.is_dir(), "temp dir must exist while in scope: {:?}", iso.path);
+        wasm_path = build_isolated_vault_wasm(&iso);
+        assert!(wasm_path.exists(), "wasm must exist inside the temp dir: {wasm_path:?}");
+    }
+    // `iso` was dropped above: the temp dir and every artifact in it must be gone.
+    assert!(
+        !wasm_path.exists(),
+        "temp dir and its wasm must be removed after the test: {wasm_path:?}"
+    );
+    assert!(
+        !wasm_path.parent().map(|p| p.exists()).unwrap_or(false),
+        "temp dir itself must be removed after the test"
+    );
+}
+
+// ---------------------------------------------------------------------------
+
 
 fn run_in(dir: &Path, args: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_soroban-testkit"))

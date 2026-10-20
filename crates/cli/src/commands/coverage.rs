@@ -106,11 +106,13 @@ pub fn run(args: CoverageArgs, out: Output) -> Result<(), CliError> {
     if !output.status.success() {
         if args.open {
             return Err(CliError(format!(
-                "coverage run or HTML browser launch failed (cargo llvm-cov exited with {status}); try without --open, then open target/llvm-cov/html/index.html manually; check your browser configuration"
+                "coverage run or HTML browser launch failed (cargo llvm-cov exited with {:?}); try without --open, then open target/llvm-cov/html/index.html manually; check your browser configuration",
+                output.status.code(),
             )));
         }
         return Err(CliError(format!(
-            "coverage run failed (cargo llvm-cov exited with {status})"
+            "coverage run failed (cargo llvm-cov exited with {:?})",
+            output.status.code(),
         )));
     }
 

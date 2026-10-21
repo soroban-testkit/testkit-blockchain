@@ -34,7 +34,7 @@ A small escrow contract, tested end to end: mint a token, release it to
 the seller, and check the event, the balances, and that no value was
 created or destroyed along the way.
 
-```
+```rust
 use soroban_sdk::{contract, contractimpl, symbol_short, Address, Env};
 use soroban_testkit::prelude::*;
 
@@ -136,14 +136,10 @@ for things that don't belong in a dev-dependency:
 
 ### Installation
 
-Install the companion binary via `cargo install`:
+Install from crates.io:
 
 ```sh
-# From crates.io
 cargo install soroban-testkit-cli --locked
-
-# Or from a local workspace checkout
-cargo install --path crates/cli --locked
 ```
 
 Verify the installation:
@@ -152,25 +148,20 @@ Verify the installation:
 soroban-testkit --help
 ```
 
-### Clean environment validation
-
-To validate CLI installation in a clean temporary environment without modifying your global Cargo binary cache:
+Install from a local checkout:
 
 ```sh
-# Create an isolated temporary directory
-TMP_DIR=$(mktemp -d)
-
-# Install into the temporary root
-CARGO_INSTALL_ROOT="$TMP_DIR" cargo install --path crates/cli --locked
-
-# Validate the binary runs in the isolated environment
-"$TMP_DIR/bin/soroban-testkit" --help
-
-# Clean up
-rm -rf "$TMP_DIR"
+cargo install --path crates/cli --locked
 ```
 
-A reproducible smoke-test script is also provided at [`scripts/smoke_test_cli_install.sh`](scripts/smoke_test_cli_install.sh) (runnable via `make smoke-test-install`).
+Install to a temporary directory for validation:
+
+```sh
+TMP_DIR=$(mktemp -d)
+CARGO_INSTALL_ROOT="$TMP_DIR" cargo install --path crates/cli --locked
+"$TMP_DIR/bin/soroban-testkit" --help
+rm -rf "$TMP_DIR"
+```
 
 ### Usage
 
@@ -197,19 +188,34 @@ Each command exits non-zero on failure, with the reason on stderr (#249):
 ```sh
 # coverage: cargo-llvm-cov not installed, or the run itself fails
 $ soroban-testkit coverage
-error: failed to run `cargo llvm-cov` (No such file or directory); is cargo-llvm-cov installed? try `cargo install cargo-llvm-cov`
+error: failed to inspect cargo-llvm-cov version (No such file or directory (os error 2)); install with `cargo install cargo-llvm-cov`
 $ soroban-testkit coverage --fail-under 90
 error: coverage run failed (cargo llvm-cov exited with exit status: 101)
 
 # limits: unknown --fn or --ramp parameter name
 $ soroban-testkit limits --contract target/wasm32v1-none/release/my_contract.wasm \
   --fn batch_payout --ramp nonexistent_param
-error: "batch_payout" has no parameter named "nonexistent_param"
+error: `batch_payout` has no parameter named `nonexistent_param`; its parameters are `recipients`, `amount`
+
+# limits: a parameter whose type the command can't build a value for
+error: parameter `balances` has type `Map<Symbol, u32>`, which this command doesn't know how to default yet; ...
+
+# audit: PATH doesn't exist
+$ soroban-testkit audit ./scr
+error: cannot audit `./scr`: No such file or directory (os error 2); pass a contract crate's source directory, a .rs file, or `-` for stdin
 
 # audit --strict: exits non-zero when findings exist (printed above this line)
 $ soroban-testkit audit ./src --strict
 error: 2 audit finding(s) (--strict)
 ```
+
+Every command reports failures the same way: exit status 1 and a single
+`error: <message>` on stderr (clap's own usage errors also start with
+`error:`, but exit 2). Messages say what failed and, where there is one,
+the fix; user-supplied names, paths and types are wrapped in backticks,
+and contract types are shown as Rust-like names (`Vec<Address>`), never
+as Rust debug output or a panic backtrace. The conventions live on
+`CliError` in `crates/cli/src/commands/mod.rs`.
 
 `soroban-testkit audit` is a linter with three heuristics, not a security
 product. It can miss real bugs and flag non-bugs; a missing finding is not a
@@ -364,9 +370,60 @@ soroban-testkit coverage --format lcov --fail-under 92.5
 # What actually runs (shown with --verbose):
 #   cargo llvm-cov test --fail-under-lines 80
 soroban-testkit --verbose coverage --fail-under 80
+
+# Print that command without running it; needs neither cargo nor
+# cargo-llvm-cov installed:
+#   cargo llvm-cov test --lcov --output-path lcov.info --fail-under-lines 80
+soroban-testkit coverage --format lcov --fail-under 80 --dry-run
 ```
 
 In CI, run it as an ordinary step; its exit code gates the job.
+
+### Coverage JSON summary
+
+`--format json` writes a machine-readable summary to `coverage.json` in the
+current directory, for CI steps that post or compare coverage numbers. It
+runs `cargo llvm-cov test --json --summary-only --output-path coverage.json`,
+so the file is LLVM's coverage export (`"type": "llvm.coverage.json.export"`,
+`"version": "2.x"`) with totals and per-file summaries but no per-line data.
+
+After the run, `coverage` checks the file against the fields below and fails
+with `error: coverage.json is not a valid coverage summary: ...` if any are
+missing or malformed:
+
+```json
+{
+  "type": "llvm.coverage.json.export",
+  "version": "2.0.1",
+  "data": [{
+    "totals": {
+      "lines":     { "count": 40, "covered": 34, "percent": 85.0 },
+      "functions": { "count": 10, "covered": 9,  "percent": 90.0 },
+      "regions":   { "count": 60, "covered": 48, "percent": 80.0 }
+    },
+    "files": [{ "filename": "src/lib.rs", "summary": { "lines": { "count": 40, "covered": 34, "percent": 85.0 } } }]
+  }]
+}
+```
+
+`count` and `covered` are non-negative integers with `covered <= count`, and
+`percent` is a number in `0..=100`. LLVM may add other fields (such as
+`branches`); consumers should ignore them. On success it prints
+`wrote coverage.json: line coverage 85.00% (34/40 lines)`, which `--quiet`
+suppresses. It combines with `--fail-under` and makes no network access.
+
+```sh
+soroban-testkit coverage --format json --fail-under 80
+jq '.data[0].totals.lines.percent' coverage.json
+```
+`--dry-run` is also how the flag forwarding is tested: the CLI's unit tests
+check the full command (program, arguments, and the `CARGO_TERM_COLOR` /
+`NO_COLOR` environment it sets) built by `coverage::Invocation`, and its
+integration tests run the real binary with `--dry-run` and an empty `PATH`,
+so `cargo test` never needs cargo-llvm-cov. `--open` combines only with
+`--format html` (or the default format, which it switches to HTML);
+`--format lcov --open` is rejected, since cargo-llvm-cov can't write both in
+one run.
 
 ### Output controls
 
@@ -414,18 +471,17 @@ network fetch, instead of silently falling back to it.
 
 ## Supported versions
 
-- **Rust:** the `stable` channel pinned in
-  [`rust-toolchain.toml`](rust-toolchain.toml). There is no separate MSRV —
-  the pinned stable toolchain is the only version CI runs against. See
-  [CONTRIBUTING.md's Rust edition policy](CONTRIBUTING.md#rust-edition-policy)
-  for how and when that pin moves.
-- **`soroban-sdk`:** the version pinned in `[workspace.dependencies]` in the
-  root `Cargo.toml` is the only version this crate is tested against for
-  every PR. A weekly `scheduled-sdk-check` CI job additionally builds and
-  tests the workspace against whatever version crates.io currently
-  considers latest, independent of that pin, and opens a tracking issue if
-  a newer release breaks compatibility — so drift is caught before a
-  contributor hits it, without requiring every PR to track upstream.
+| Rust toolchain | `soroban-sdk` | Validation | Cadence |
+| --- | --- | --- | --- |
+| `stable` from [`rust-toolchain.toml`](rust-toolchain.toml) | `27.0.6`, pinned in [`Cargo.toml`](Cargo.toml) | `cargo build --workspace`, `cargo test --workspace`, and `cargo doc --workspace` | Every pull request |
+| `stable` | Latest crates.io release | `cargo build --workspace` and `cargo test --workspace` | Weekly by [`scheduled-sdk-check`](.github/workflows/ci.yml) |
+| Latest `nightly` | Pinned workspace version (`27.0.6`) | `cargo +nightly build --workspace` and `cargo +nightly test --workspace` | Weekly by [`scheduled-nightly-check`](.github/workflows/ci.yml) |
+
+The pinned stable toolchain and SDK version are the supported combination;
+the scheduled latest-SDK and nightly runs are compatibility signals, not
+additional support guarantees. They open a tracking issue when a scheduled
+run fails. See [CONTRIBUTING.md's Rust edition policy](CONTRIBUTING.md#rust-edition-policy)
+for how and when the stable toolchain pin moves.
 
 ## Status
 

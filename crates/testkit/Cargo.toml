@@ -7,6 +7,7 @@ license.workspace = true
 repository.workspace = true
 keywords = ["soroban", "testing", "contracts", "stellar", "wasm"]
 categories = ["development-tools::testing"]
+exclude = ["tests/**"]
 
 [lib]
 doctest = true
@@ -27,3 +28,10 @@ thiserror.workspace = true
 
 [dev-dependencies]
 vault = { path = "../../examples/vault", features = ["testutils"] }
+
+# Published crate feature behavior:
+# soroban-testkit currently offers no optional or configurable Cargo features.
+# All capabilities are host-side testing utilities enabled unconditionally with
+# `soroban-sdk/testutils`.
+[features]
+

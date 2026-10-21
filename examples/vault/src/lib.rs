@@ -1,6 +1,8 @@
 #![no_std]
 
-use soroban_sdk::{contract, contracterror, contractimpl, contracttype, Address, Env, Vec};
+use soroban_sdk::{
+    contract, contracterror, contractevent, contractimpl, contracttype, Address, Env, Vec,
+};
 
 #[contracttype]
 pub enum DataKey {
@@ -20,6 +22,18 @@ pub enum DataKey {
 pub enum VaultError {
     NotInitialized = 1,
     InsufficientBalance = 2,
+}
+
+/// Emitted whenever `deposit` or `deposit_checked` credits the vault.
+#[contractevent]
+pub struct Deposited {
+    pub amount: i128,
+}
+
+/// Emitted whenever `withdraw` or `withdraw_checked` debits the vault.
+#[contractevent]
+pub struct Withdrawn {
+    pub amount: i128,
 }
 
 #[contract]
@@ -55,7 +69,21 @@ impl Vault {
         env.storage()
             .instance()
             .set(&DataKey::Balance, &(balance + amount));
+        Deposited { amount }.publish(&env);
         Ok(())
+    }
+
+    /// The authorized deposit entry point: only the owner may deposit.
+    /// `deposit` stays open to any caller so the `AuthMatrix` examples can
+    /// exercise an intentionally unauthenticated entry point.
+    pub fn deposit_checked(env: Env, amount: i128) -> Result<(), VaultError> {
+        let owner: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Owner)
+            .ok_or(VaultError::NotInitialized)?;
+        owner.require_auth();
+        Self::deposit(env, amount)
     }
 
     /// Deliberately missing the owner auth check: any caller can drain the
@@ -74,6 +102,7 @@ impl Vault {
         env.storage()
             .instance()
             .set(&DataKey::Balance, &(balance - amount));
+        Withdrawn { amount }.publish(&env);
         Ok(())
     }
 

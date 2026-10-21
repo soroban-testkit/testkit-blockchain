@@ -24,7 +24,10 @@ env:
 jobs:
   lint:
     name: fmt + clippy
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -59,6 +62,20 @@ jobs:
             status=1
           fi
           exit $status
+      - name: testutils stays out of the example's normal dependency graph
+        run: |
+          # Issue #227: feature boundaries.
+          # `examples/vault` is compiled to wasm by the CLI's integration
+          # tests, so `soroban-sdk/testutils` (host-only) must never reach
+          # its normal dependency graph — only dev-dependencies and the
+          # explicit `testutils` feature may enable it.
+          status=0
+          if cargo tree -p vault -e normal -e features --prefix none | grep -q 'soroban-sdk feature "testutils"'; then
+            echo "::error::soroban-sdk/testutils leaked into vault's normal dependency graph"
+            cargo tree -p vault -e normal -e features
+            status=1
+          fi
+          exit $status
       - name: Workflow token permissions are least-privilege (see CONTRIBUTING.md)
         run: |
           status=0
@@ -82,6 +99,9 @@ jobs:
 
           # Check that we have exactly the documented workspace members
           expected=$'soroban-testkit\nsoroban-testkit-cli\nvault'
+          expected="soroban-testkit
+          soroban-testkit-cli
+          vault"
           echo "$expected" | sort > /tmp/expected_packages.txt
 
           if ! diff -q /tmp/expected_packages.txt /tmp/actual_packages.txt >/dev/null 2>&1; then
@@ -95,7 +115,10 @@ jobs:
 
   test:
     name: build + test
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -113,14 +136,59 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo build --workspace
       - run: cargo test --workspace
+      - name: Verify tests and CLI work without network access
+        if: runner.os != 'Windows'
+        run: |
+          sudo unshare --net -- runuser -u "$USER" --preserve-environment -- env CARGO_NET_OFFLINE=true cargo test --workspace --offline
+          sudo unshare --net -- runuser -u "$USER" --preserve-environment -- env CARGO_NET_OFFLINE=true cargo run --offline -p soroban-testkit-cli -- --help
+      - name: Verify tests and CLI work without network access (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          $env:CARGO_NET_OFFLINE="true"
+          cargo test --workspace --offline
+          cargo run --offline -p soroban-testkit-cli -- --help
+      - name: Validate soroban-testkit package contents
+        run: |
+          files="$(cargo package -p soroban-testkit --list)"
+          if printf '%s\n' "$files" | grep -q '^tests/'; then
+            echo "::error::soroban-testkit package must exclude workspace integration tests"
+            exit 1
+          fi
+
+  examples:
+    name: compile public examples
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32v1-none
+      - name: Cache wasm target
+        uses: actions/cache@v4
+        with:
+          path: ~/.rustup/toolchains/*/lib/rustlib/wasm32v1-none
+          key: wasm32v1-none-${{ runner.os }}-${{ hashFiles('rust-toolchain.toml', 'Cargo.toml') }}
+          restore-keys: |
+            wasm32v1-none-${{ runner.os }}-
+      - uses: Swatinem/rust-cache@v2
+      - name: Build all examples
+        run: cargo build --examples --target wasm32v1-none --release
 
   doc:
     name: cargo doc
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+      - name: Validate README documentation links
+        run: cargo test -p soroban-testkit-cli --test repo_config readme_links_resolve_to_current_paths
       - run: cargo doc --workspace --no-deps
         env:
           RUSTDOCFLAGS: -D warnings
@@ -134,6 +202,10 @@ jobs:
     runs-on: ubuntu-latest
     env:
       SUPPLY_CHAIN_REPORT_DIR: ${{ runner.temp }}/supply-chain-reports
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -152,7 +224,10 @@ jobs:
 
   min-deps:
     name: minimum dependency versions
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@nightly
@@ -176,6 +251,10 @@ jobs:
     runs-on: ubuntu-latest
     env:
       SUPPLY_CHAIN_REPORT_DIR: ${{ runner.temp }}/supply-chain-reports
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
     steps:
       - uses: actions/checkout@v4
       - uses: taiki-e/install-action@cargo-deny
@@ -202,7 +281,10 @@ jobs:
 
   coverage:
     name: code coverage
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable

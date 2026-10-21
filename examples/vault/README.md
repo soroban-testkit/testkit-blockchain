@@ -20,9 +20,24 @@ The `vault` example is a deliberately buggy Soroban contract used in:
 - **Test Fixture Only**: Marked with `publish = false` to prevent crates.io publication
 - **Documentation Example**: Demonstrates common contract patterns and testing approaches
 
+## Authorized lifecycle
+
+`deposit` and `withdraw` remain open (and `withdraw` remains deliberately
+missing its auth check) so the authorization examples have a real bug to
+catch. The `_checked` entry points cover the safe lifecycle:
+
+- `deposit_checked(amount)` requires the owner's authorization, credits the
+  balance, and emits a `Deposited { amount }` event.
+- `withdraw_checked(amount)` requires the owner's authorization, rejects an
+  overdraft with `VaultError::InsufficientBalance`, debits the balance, and
+  emits a `Withdrawn { amount }` event.
+
+`tests/lifecycle.rs` asserts balances, events, and the owner-only auth gate
+for both entry points.
+
 ## Metadata
 
 - **Package**: `vault`
 - **Purpose**: Testing and documentation fixture
 - **Status**: Intentionally buggy, maintained for testing purposes only
-- **License**: Same as workspace (MIT OR Apache-2.0)
+- **License**: Apache-2.0, same as the workspace

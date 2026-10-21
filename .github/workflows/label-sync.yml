@@ -27,6 +27,9 @@ jobs:
               { name: 'size/s', color: 'C2E0C6', description: 'Roughly under an hour' },
               { name: 'size/m', color: 'C2E0C6', description: 'Roughly a sitting' },
               { name: 'size/l', color: 'C2E0C6', description: 'Roughly multiple sittings' },
+              { name: 'severity/critical', color: 'B60205', description: 'Incorrect results or a crash with no workaround' },
+              { name: 'severity/high', color: 'D93F0B', description: 'Incorrect results or a crash with a workaround' },
+              { name: 'severity/low', color: 'FBCA04', description: 'Cosmetic, docs, or minor inconvenience' },
             ];
 
             for (const label of LABELS) {

@@ -18,17 +18,18 @@ use super::CliError;
     soroban-testkit audit ./src --strict\n    \
     soroban-testkit audit ./src --json | jq '.findings'")]
 pub struct AuditArgs {
-    /// Path to the contract crate to audit (its `.rs` files are scanned
-    /// recursively). Pass `-` to read a single source file from stdin
-    /// instead, for editor integrations that audit unsaved buffers.
-    #[arg(value_name = "PATH", default_value = ".")]
+    /// Directory or .rs file to audit; directories are scanned recursively
+    /// for .rs files. Pass `-` to read a single source file from stdin
+    /// (for editor integrations that audit unsaved buffers)
+    #[arg(value_name = "PATH", default_value = ".", verbatim_doc_comment)]
     path: PathBuf,
-    /// Exit non-zero if any findings are reported.
-    #[arg(long)]
+    /// Exit 1 if any findings are reported. Without it, findings are
+    /// printed and the command still exits 0
+    #[arg(long, verbatim_doc_comment)]
     strict: bool,
-    /// Print findings as a JSON document instead of text. The document
-    /// carries `schema_version`; see [`AUDIT_JSON_SCHEMA_VERSION`].
-    #[arg(long)]
+    /// Print findings as a JSON document (`schema_version` 1) on stdout
+    /// instead of text
+    #[arg(long, verbatim_doc_comment)]
     json: bool,
 }
 
@@ -76,6 +77,16 @@ pub fn run(args: AuditArgs, out: Output) -> Result<(), CliError> {
             .map_err(|err| CliError(format!("failed to read stdin: {err}")))?;
         audit_source(&src, "<stdin>", &mut findings);
     } else {
+        // WalkDir yields a missing root as an Err entry, which the
+        // filter_map below would drop, so a typo'd PATH would otherwise
+        // "pass" with no findings.
+        std::fs::metadata(&args.path).map_err(|err| {
+            CliError(format!(
+                "cannot audit {}: {err}; pass a contract crate's source directory, \
+                 a .rs file, or `-` for stdin",
+                super::quote(args.path.display())
+            ))
+        })?;
         for entry in WalkDir::new(&args.path).into_iter().filter_map(Result::ok) {
             if !entry.file_type().is_file() {
                 continue;
@@ -182,8 +193,12 @@ fn finding_path(root: &Path, file: &Path) -> String {
 }
 
 fn audit_file(path: &Path, display: &str, findings: &mut Vec<Finding>) -> Result<(), CliError> {
-    let src = std::fs::read_to_string(path)
-        .map_err(|err| CliError(format!("failed to read {}: {err}", path.display())))?;
+    let src = std::fs::read_to_string(path).map_err(|err| {
+        CliError(format!(
+            "failed to read {}: {err}",
+            super::quote(path.display())
+        ))
+    })?;
     audit_source(&src, display, findings);
     Ok(())
 }
@@ -399,6 +414,13 @@ fn type_is_i128(ty: &Type) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn json_help_states_the_current_schema_version() {
+        // `audit --help` documents `--json` as "(`schema_version` 1)"; bump
+        // that text (and the help snapshot) together with the constant.
+        assert_eq!(AUDIT_JSON_SCHEMA_VERSION, 1);
+    }
 
     #[test]
     fn json_document_declares_schema_version_and_findings() {

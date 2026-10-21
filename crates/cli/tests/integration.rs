@@ -2,9 +2,10 @@
 //! real `soroban-testkit` binary — exercising the CLI the way a user
 //! would, not just its internal functions.
 
-use std::io::Write;
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 mod fixtures {
     pub const AUDIT_WITH_FINDINGS: &str = "examples/vault/src";
@@ -209,6 +210,76 @@ fn limits_finds_the_real_mainnet_write_ceiling_for_batch_payout() {
 
     let wasm = limits_fixture_wasm();
     let output = run_cli(&[
+// ---- #215: isolated WASM artifacts for parallel test execution -----------
+
+/// A uniquely-named temp dir for one integration test.
+///
+/// Each instance gets its own directory under the system temp dir so that
+/// parallel tests never race on a shared `target/wasm32v1-none/release/*.wasm`.
+/// The directory (and every generated artifact inside it) is removed when the
+/// `IsolatedDir` is dropped, leaving no residue behind.
+struct IsolatedDir {
+    path: PathBuf,
+}
+
+impl Drop for IsolatedDir {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.path);
+    }
+}
+
+static ISO_COUNTER: AtomicUsize = AtomicUsize::new(0);
+
+/// Creates a fresh, uniquely-named temp dir for `test_name`.
+fn isolated_dir(test_name: &str) -> io::Result<IsolatedDir> {
+    let base = std::env::temp_dir();
+    let id = ISO_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let path = base.join(format!(
+        "soroban-testkit-integration-{test_name}-{}-{}",
+        std::process::id(),
+        id
+    ));
+    std::fs::create_dir_all(&path)?;
+    Ok(IsolatedDir { path })
+}
+
+/// Builds the `vault` contract into `iso`'s private target dir and returns the
+/// path to the generated `vault.wasm`. Because every caller passes its own
+/// `IsolatedDir`, parallel tests never clobber each other's artifacts.
+fn build_isolated_vault_wasm(iso: &IsolatedDir) -> PathBuf {
+    let target_dir = iso.path.join("target");
+    let status = Command::new("cargo")
+        .args([
+            "build",
+            "-p",
+            "vault",
+            "--target",
+            "wasm32v1-none",
+            "--release",
+            "--target-dir",
+            target_dir.to_str().expect("target dir is valid unicode"),
+        ])
+        .current_dir(workspace_root())
+        .status()
+        .expect("failed to build vault.wasm");
+    assert!(status.success(), "cargo build for vault must succeed");
+
+    let wasm = target_dir
+        .join("wasm32v1-none")
+        .join("release")
+        .join("vault.wasm");
+    assert!(
+        wasm.exists(),
+        "expected vault.wasm at {wasm:?} after build"
+    );
+    wasm
+}
+
+#[test]
+fn limits_finds_the_real_mainnet_write_ceiling_for_batch_payout() {
+    let iso = isolated_dir("limits-batch-payout").expect("isolated temp dir");
+    let wasm = build_isolated_vault_wasm(&iso);
+    let output = run(&[
         "limits",
         "--contract",
         wasm.to_str().unwrap(),
@@ -234,6 +305,9 @@ fn limits_reports_an_actionable_error_for_an_unknown_function() {
         return;
     }
     let output = run_cli(&[
+    let iso = isolated_dir("limits-unknown-fn").expect("isolated temp dir");
+    let wasm = build_isolated_vault_wasm(&iso);
+    let output = run(&[
         "limits",
         "--contract",
         wasm.to_str().unwrap(),
@@ -245,6 +319,37 @@ fn limits_reports_an_actionable_error_for_an_unknown_function() {
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(!output.status.success());
     assert!(stderr.contains("no function named"), "{stderr}");
+}
+
+#[test]
+fn isolated_temp_dir_is_created_used_and_cleaned_up() {
+    let wasm_path;
+    {
+        let iso = isolated_dir("cleanup-verification").expect("isolated temp dir");
+        assert!(iso.path.is_dir(), "temp dir must exist while in scope: {:?}", iso.path);
+        wasm_path = build_isolated_vault_wasm(&iso);
+        assert!(wasm_path.exists(), "wasm must exist inside the temp dir: {wasm_path:?}");
+    }
+    // `iso` was dropped above: the temp dir and every artifact in it must be gone.
+    assert!(
+        !wasm_path.exists(),
+        "temp dir and its wasm must be removed after the test: {wasm_path:?}"
+    );
+    assert!(
+        !wasm_path.parent().map(|p| p.exists()).unwrap_or(false),
+        "temp dir itself must be removed after the test"
+    );
+}
+
+// ---------------------------------------------------------------------------
+
+
+fn run_in(dir: &Path, args: &[&str]) -> Output {
+    Command::new(env!("CARGO_BIN_EXE_soroban-testkit"))
+        .args(args)
+        .current_dir(dir)
+        .output()
+        .expect("failed to run soroban-testkit")
 }
 
 #[test]
@@ -360,7 +465,9 @@ fn coverage_help_includes_usage_examples() {
     assert!(stdout.contains("EXAMPLES"), "{stdout}");
     assert!(stdout.contains("--format html"), "{stdout}");
     assert!(stdout.contains("--format lcov"), "{stdout}");
+    assert!(stdout.contains("--format json"), "{stdout}");
     assert!(stdout.contains("--fail-under"), "{stdout}");
+    assert!(stdout.contains("--dry-run"), "{stdout}");
 }
 
 #[test]
@@ -373,6 +480,7 @@ fn limits_help_includes_usage_examples() {
     assert!(stdout.contains("--contract"), "{stdout}");
     assert!(stdout.contains("--fn"), "{stdout}");
     assert!(stdout.contains("--ramp"), "{stdout}");
+    assert!(stdout.contains("--dry-run"), "{stdout}");
 }
 
 #[test]
@@ -384,4 +492,99 @@ fn audit_help_includes_usage_examples() {
     assert!(stdout.contains("EXAMPLES"), "{stdout}");
     assert!(stdout.contains("--strict"), "{stdout}");
     assert!(stdout.contains("--json"), "{stdout}");
+}
+
+// ---- #204: coverage argument construction without cargo-llvm-cov --------
+
+/// Runs the binary with `PATH` pointing at a directory that does not
+/// exist, so neither `cargo` nor `cargo-llvm-cov` can be found: anything
+/// that passes here demonstrably needs no external tool.
+fn run_without_tools(args: &[&str]) -> Output {
+    Command::new(env!("CARGO_BIN_EXE_soroban-testkit"))
+        .args(args)
+        .current_dir(workspace_root())
+        .env(
+            "PATH",
+            workspace_root().join("target/no-tools-on-this-path"),
+        )
+        .env_remove("NO_COLOR")
+        .output()
+        .expect("failed to run soroban-testkit")
+}
+
+fn dry_run(args: &[&str]) -> String {
+    let output = run_without_tools(args);
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(output.status.success(), "{args:?}: stderr: {stderr}");
+    assert!(stderr.is_empty(), "{args:?}: stderr: {stderr}");
+    stdout
+}
+
+#[test]
+fn coverage_dry_run_prints_the_forwarded_flags_without_cargo_llvm_cov() {
+    let cases: &[(&[&str], &str)] = &[
+        (&["coverage", "--dry-run"], "cargo llvm-cov test\n"),
+        (
+            &[
+                "coverage",
+                "--dry-run",
+                "--format",
+                "lcov",
+                "--fail-under",
+                "92.5",
+            ],
+            "cargo llvm-cov test --lcov --output-path lcov.info --fail-under-lines 92.5\n",
+        ),
+        (
+            &["coverage", "--dry-run", "--format", "html", "--open"],
+            "cargo llvm-cov test --html --open\n",
+        ),
+        (
+            &["coverage", "--dry-run", "--open"],
+            "cargo llvm-cov test --html --open\n",
+        ),
+        (
+            &["-v", "coverage", "--dry-run", "--fail-under", "80"],
+            "cargo llvm-cov test --fail-under-lines 80 --verbose\n",
+        ),
+        (
+            &["--no-color", "-q", "coverage", "--dry-run"],
+            "CARGO_TERM_COLOR=never NO_COLOR=1 cargo llvm-cov test --color never --quiet\n",
+        ),
+    ];
+    for (args, expected) in cases {
+        assert_eq!(dry_run(args), *expected, "{args:?}");
+    }
+}
+
+#[test]
+fn coverage_open_with_lcov_is_rejected_before_running_anything() {
+    let output = run_without_tools(&["coverage", "--format", "lcov", "--open"]);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(output.status.code(), Some(1), "stderr: {stderr}");
+    assert!(
+        stderr.starts_with("error: --open only applies to the HTML report"),
+        "{stderr}"
+    );
+    assert!(output.stdout.is_empty());
+}
+
+#[test]
+fn coverage_without_cargo_on_path_reports_how_to_install_it() {
+    let output = run_without_tools(&["coverage", "--fail-under", "80"]);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(output.status.code(), Some(1), "stderr: {stderr}");
+    // Version gating (#194) checks `cargo llvm-cov --version` before
+    // running, so without tools on PATH the failure surfaces from the
+    // version check, not from spawning the run. Accept any of the
+    // install-related errors, all of which name the fix.
+    assert!(
+        stderr.starts_with("error: failed to inspect cargo-llvm-cov version")
+            || stderr.starts_with("error: cargo llvm-cov --version failed")
+            || stderr.starts_with("error: failed to run `cargo llvm-cov`"),
+        "{stderr}"
+    );
+    assert!(stderr.contains("cargo install cargo-llvm-cov"), "{stderr}");
+    assert!(!stderr.contains("panicked"), "{stderr}");
 }

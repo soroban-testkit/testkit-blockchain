@@ -6,11 +6,19 @@
 
 <!-- Which module (per BUILD_SPEC.md §4) does this touch? -->
 
+## Release notes
+
+<!-- Required for user-visible changes; see CONTRIBUTING.md#release-notes
+     and .github/release_notes_template.md. Delete this section if not
+     applicable. -->
+
 ## Checklist
 
 - [ ] `cargo fmt --check` passes
 - [ ] `cargo clippy -- -D warnings` passes
 - [ ] `cargo test --workspace` passes
+- [ ] Documentation is updated or not needed
+- [ ] User-visible behavior changes are described and tested, or marked N/A
 - [ ] Public API changes have doc comments with a runnable `# Example`
 - [ ] New assertion helpers have both a passing and a
       `#[should_panic(expected = "...")]` test

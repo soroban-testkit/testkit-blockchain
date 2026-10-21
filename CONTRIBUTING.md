@@ -38,9 +38,10 @@ Proposals falling into these categories will be declined with an explanation poi
   linear history.
 - Commit messages follow [Conventional Commits](https://www.conventionalcommits.org/),
   enforced in CI.
-- Every PR must pass: `cargo fmt --check`, `cargo clippy -- -D warnings`,
-  `cargo test --workspace`, `cargo doc` with no warnings, `cargo audit`,
-  `cargo deny check` (see [Supply-chain policy](#supply-chain-policy)).
+- Every PR must pass: `cargo fmt --all --check`, `cargo clippy --workspace
+  --all-targets -- -D warnings`, `cargo test --workspace`, `cargo doc` with
+  no warnings, `cargo audit`, `cargo deny check` (see
+  [Supply-chain policy](#supply-chain-policy)).
   Red CI blocks merge with no maintainer exception.
 - CI also runs a scheduled job weekly against whatever `soroban-sdk` version
   is currently latest on crates.io (independent of the pinned version in
@@ -50,6 +51,33 @@ Proposals falling into these categories will be declined with an explanation poi
 - Docs are also built the way docs.rs builds them (`make docsrs`), from the
   `[package.metadata.docs.rs]` table in `crates/testkit/Cargo.toml`: one host
   target and `--cfg docsrs`. Change both together.
+
+### Network-free verification
+
+Tests and CLI commands must work without network access. On Linux, after
+fetching dependencies with `cargo fetch --locked`, run the workspace tests
+and CLI help command in a network namespace:
+
+```sh
+sudo unshare --net -- runuser -u "$USER" --preserve-environment -- env CARGO_NET_OFFLINE=true cargo test --workspace --offline
+sudo unshare --net -- runuser -u "$USER" --preserve-environment -- env CARGO_NET_OFFLINE=true cargo run --offline -p soroban-testkit-cli -- --help
+```
+
+The test job in `.github/workflows/ci.yml` runs the same checks. `--offline`
+prevents Cargo from fetching dependencies; the network namespace also prevents
+tests and the CLI process from opening network connections.
+
+### Release package contents
+
+Before publishing `soroban-testkit`, inspect its package file list:
+
+```sh
+cargo package -p soroban-testkit --list
+```
+
+The crate manifest excludes `crates/testkit/tests/**`; these are workspace
+integration checks, not files needed by downstream users. The package-list
+check also runs in CI.
 
 ## CI workflow permissions
 
@@ -61,10 +89,11 @@ needs:
 |---|---|---|
 | `ci.yml` (default for all jobs) | `contents: read` | Check out and build the repo; nothing is written back |
 | `ci.yml` → `scheduled-sdk-check` | `contents: read`, `issues: write` | Opens a tracking issue when the weekly latest-SDK run fails; never runs on `pull_request` |
+| `ci.yml` → `scheduled-nightly-check` | `contents: read`, `issues: write` | Opens a tracking issue when the weekly nightly-toolchain run fails; never runs on `pull_request` |
 | `issue-triage.yml` (default) | none | — |
 | `issue-triage.yml` → `label` | `issues: write` | Adds labels from issue-form selections; no checkout |
 | `label-sync.yml` (default) | none | — |
-| `label-sync.yml` → `sync` | `issues: write` | Reconciles the documented module, docs, and sizing labels on manual dispatch |
+| `label-sync.yml` → `sync` | `issues: write` | Reconciles the documented module, docs, sizing, and severity labels on manual dispatch |
 
 Rules for new or changed workflows:
 
@@ -81,13 +110,23 @@ block, the absence of `write-all`/`read-all`, and the per-job scopes above.
 
 ## Issue triage
 
-New issues opened from the forms get `module/*` (or `docs`) and `size/*`
-labels automatically from their "Module" and "Size" dropdowns
+New issues opened from the forms get `module/*` (or `docs`), `size/*`, and
+`severity/*` labels automatically from their form dropdowns
 (`.github/workflows/issue-triage.yml`, taxonomy in `BUILD_SPEC.md` §13).
 When adding a dropdown option, add the matching entry to the workflow's
 `LABELS` map in the same PR; `repo_config.rs` fails otherwise.
 Maintainers can run `.github/workflows/label-sync.yml` manually to create or
-update the documented module, docs, and sizing labels reproducibly.
+update the documented module, docs, sizing, and severity labels
+reproducibly. The workflow and `BUILD_SPEC.md` §13 must list the same label
+names; verify with:
+
+```sh
+gh workflow run label-sync.yml --repo soroban-testkit/testkit-blockchain
+gh label list --repo soroban-testkit/testkit-blockchain
+```
+
+`good first issue` and `help wanted` use GitHub's built-in space-separated
+spellings, not hyphenated variants.
 
 ### Maintainer triage guide (#251)
 
@@ -155,6 +194,9 @@ full policy check runs.
 
 ## Code conventions
 
+- **Test names describe behavior, condition, and outcome.** Prefer
+  `<behavior>_when_<condition>_then_<expected_outcome>`; omit a clause only
+  when it does not apply. Do not prefix Rust test functions with `test_`.
 - No `unwrap()` or `expect()` in library code outside tests.
 - Assertion helpers panic deliberately (that is their contract), but always
   with `TestkitError` context, never a bare `panic!("...")` message.
@@ -172,6 +214,101 @@ full policy check runs.
 - Failure messages are a first-class feature of this crate. An assertion
   helper whose failure message doesn't tell the user what went wrong and
   what to look at is not done.
+- CLI `--help` text must state each command's real defaults and
+  limitations. The top-level and every subcommand's `--help` and `-h`
+  output is pinned in `crates/cli/tests/snapshots/help/`; after an
+  intentional change, regenerate and commit the snapshots with
+  `UPDATE_HELP_SNAPSHOTS=1 cargo test -p soroban-testkit-cli --test help_snapshots`.
+  A new subcommand must add its snapshot cases there.
+
+
+## Panic and error-handling policy
+
+This crate has two distinct categories of failure, and they must not be
+conflated. Using the wrong mechanism for a given failure mode is a
+documentation and compatibility bug.
+
+### Assertion helpers — intentional panics
+
+Assertion helpers (any function whose name begins with `assert_` or that
+is documented as verifying a contract invariant) are **expected to panic**
+when the condition under test is not met. A failing assertion is not a
+recoverable error; it is a signal to the developer that the contract
+misbehaved, and panicking is how `cargo test` surfaces that signal.
+
+Rules for assertion helpers:
+
+- **Always panic with a `TestkitError`, never with a bare string.**
+  `panic!("...")` and `panic!("{}", msg)` are prohibited; use
+  `panic!("{}", TestkitError::AssertionFailed("...".into()))` or the
+  equivalent `panic!` through `TestkitError`'s `Display` impl instead.
+- **Use `TestkitError::AssertionFailed`** for invariant violations (an
+  expected event was not emitted, conservation did not hold, an unauthorized
+  call was not rejected).
+- **Use `TestkitError::Misuse`** when the testkit API itself was called
+  outside its documented contract (e.g. asserting on events before a
+  capture window was opened, or warping the ledger clock to a past
+  timestamp). This is a developer error in the test code, not a contract
+  behavior failure.
+- **Include the full observed vs. expected context** in the message so a
+  developer reading the panic output can diagnose the problem without
+  re-running with extra logging.
+- **Pin representative failure output in tests** using
+  `#[should_panic(expected = "...")]` with a meaningful substring of the
+  expected message. Tests that accept any panic string are not sufficient.
+
+### Setup and configuration operations — recoverable errors
+
+Functions that initialize, configure, or acquire resources for testing
+(e.g. constructors, environment wrappers, anything documented as a
+"setup" operation) must **return `Result<_, TestkitError>` or use a
+typed error** rather than panic when an expected, recoverable failure
+occurs. This includes:
+
+- Configuration values that may be invalid (e.g. out-of-range decimals,
+  unknown storage kinds).
+- Resource acquisition that can fail for external reasons.
+- Operations on input that the caller controls and may legitimately get
+  wrong.
+
+Rules for setup operations:
+
+- **Return `Result`**, not `Option` or an untyped `panic`.
+- **Prefer `TestkitError::Misuse`** when the error arises from incorrect
+  use of the API, and **`TestkitError::DecodeFailed`** when a captured
+  value cannot be deserialized into the requested type.
+- **Document the error conditions** in the function's doc comment so
+  callers know when to expect a non-`Ok` return.
+- **Do not use `unwrap()` or `expect()`** in library code outside tests —
+  use `TestkitError::Misuse` and let the caller decide whether to propagate
+  or panic.
+
+### Testing recoverable errors vs. expected panics
+
+| Failure kind | How to test |
+|---|---|
+| Assertion helper that should panic | `#[should_panic(expected = "<substring>")]` pinning the `TestkitError` message |
+| Setup function returning `Err(_)` | `assert!(result.is_err())` or `matches!(result, Err(TestkitError::Misuse(_)))` |
+| Assertion helper that should *not* panic | Call it in a normal test; the absence of panic is the assertion |
+
+Never use `std::panic::catch_unwind` to test a setup function's error
+path — if a setup function can fail in expected ways, it must return
+`Result`, not panic.
+
+### Distinguishing developer-facing from external-input failures
+
+- A panic from an assertion helper is a **developer-facing assertion
+  failure**: the developer's test is telling them the contract misbehaved.
+  It is never caused by external input or production data at test time.
+- A `TestkitError::Misuse` returned from a setup function signals that
+  **the test code itself is incorrect** (wrong arguments, wrong call
+  order). It may be surfaced to the developer as a `Result::Err` or, if
+  the calling code chooses to `unwrap`, as a secondary panic — but the
+  root cause is always the test author's mistake, not the contract's.
+- Functions that take developer-controlled input (seeds, counts, durations)
+  should document any validity constraints in their doc comment and use
+  `TestkitError::Misuse` (returned as `Err`) for constraint violations
+  rather than panicking, so callers can handle them.
 
 ## Maintainer SDK review checklist
 
@@ -270,7 +407,11 @@ rustup show               # installs the pinned toolchain from rust-toolchain.to
 make check                # fmt + clippy + test, same as CI
 ```
 
+`make fmt` (and CI) run `cargo fmt --all --check`, so formatting is enforced
+across every workspace member and example — including test files — not just
+the package you happened to build.
+
 ## Good first issues
 
-Labeled `good-first-issue`. Module 7 (`ttl`) is not beginner-friendly and
+Labeled `good first issue`. Module 7 (`ttl`) is not beginner-friendly and
 is never labeled as such.

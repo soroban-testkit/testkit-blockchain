@@ -1,4 +1,5 @@
 use std::panic;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::process::Command;
 
 use clap::Args;
@@ -8,7 +9,54 @@ use soroban_sdk::xdr::{ScSpecEntry, ScSpecFunctionInputV0, ScSpecFunctionV0, ScS
 use soroban_sdk::{Address, Env, IntoVal, Symbol, Val, Vec as SVec};
 
 use super::output::Output;
-use super::CliError;
+use super::{quote, CliError};
+
+/// The signal handler only sets an atomic flag; no IO runs inside it.
+static CANCELLED: AtomicBool = AtomicBool::new(false);
+
+#[cfg(unix)]
+mod signals {
+    use super::{CANCELLED, Ordering};
+    use std::os::raw::c_int;
+    const SIGINT: c_int = 2;
+    const SIGTERM: c_int = 15;
+    unsafe extern "C" {
+        fn signal(signum: c_int, handler: usize) -> usize;
+    }
+    extern "C" fn cancel(_: c_int) {
+        CANCELLED.store(true, Ordering::Relaxed);
+    }
+    pub struct SignalGuard {
+        previous_int: usize,
+        previous_term: usize,
+    }
+    impl SignalGuard {
+        pub fn install() -> Self {
+            CANCELLED.store(false, Ordering::Relaxed);
+            // SAFETY: The installed handler only writes an atomic flag.
+            let previous_int = unsafe { signal(SIGINT, cancel as usize) };
+            let previous_term = unsafe { signal(SIGTERM, cancel as usize) };
+            Self { previous_int, previous_term }
+        }
+    }
+    impl Drop for SignalGuard {
+        fn drop(&mut self) {
+            // SAFETY: Restore the handlers returned by signal().
+            unsafe {
+                signal(SIGINT, self.previous_int);
+                signal(SIGTERM, self.previous_term);
+            }
+        }
+    }
+}
+
+#[cfg(not(unix))]
+mod signals {
+    pub struct SignalGuard;
+    impl SignalGuard {
+        pub fn install() -> Self { Self }
+    }
+}
 
 /// Arguments for `soroban-testkit limits`.
 #[derive(Args)]
@@ -16,15 +64,39 @@ use super::CliError;
     soroban-testkit limits --contract target/wasm32v1-none/release/my_contract.wasm --fn batch_payout --ramp recipients\n    \
     soroban-testkit limits --contract my_contract.wasm --fn transfer --ramp amount")]
 pub struct LimitsArgs {
-    /// Path to the compiled contract .wasm file.
-    #[arg(long, value_name = "PATH")]
+    /// Path to the compiled contract .wasm file
+    /// (e.g. `target/wasm32v1-none/release/<crate>.wasm`)
+    #[arg(long, value_name = "PATH", verbatim_doc_comment)]
     contract: std::path::PathBuf,
-    /// The contract function to ramp.
+    /// The contract function to ramp, as named in the contract's spec.
     #[arg(long = "fn", value_name = "NAME")]
     function: String,
-    /// The parameter to increase on each attempt.
-    #[arg(long, value_name = "PARAM")]
+    /// The parameter of --fn to increase on each attempt: an integer type
+    /// (ramped as the value) or `Vec<Address>` (ramped as its length)
+    #[arg(long, value_name = "PARAM", verbatim_doc_comment)]
     ramp: String,
+    // Results are read back in ramp order, so the boundary matches a sequential
+    // run. Probes past the first failure are discarded; see BUILD_SPEC.md.
+    /// Probe up to N ramp values at once (1 to 8, default 1).
+    #[arg(long, value_name = "N", default_value_t = 1)]
+    jobs: usize,
+    /// Generate and print one probe's arguments without invoking the contract.
+    /// This validates the contract spec and is useful when diagnosing defaults.
+    #[arg(long)]
+    dry_run: bool,
+}
+
+/// Largest accepted `--jobs`. Each concurrent probe is a full child process.
+pub const MAX_JOBS: usize = 8;
+
+/// Largest ramp value tried while doubling. Values above it are never probed.
+const SEARCH_CEILING: u32 = 1 << 24;
+
+/// Outcome of one search phase. `Cancelled` carries the best known success.
+#[derive(Debug, PartialEq)]
+enum Search<T> {
+    Done(T),
+    Cancelled { last_ok: Option<u32> },
 }
 
 /// Hidden: runs exactly one probe (a single ramp value) and reports its
@@ -80,6 +152,13 @@ pub struct ProbeArgs {
 /// constraint). Only CPU instructions and memory, available locally via
 /// the host's budget, are reported.
 pub fn run(args: LimitsArgs, out: Output) -> Result<(), CliError> {
+    if args.jobs == 0 || args.jobs > MAX_JOBS {
+        return Err(CliError(format!(
+            "--jobs must be between 1 and {MAX_JOBS} (got {})",
+            args.jobs
+        )));
+    }
+    let _signal_guard = signals::SignalGuard::install();
     // Validate the configuration (function exists, ramp parameter exists,
     // every parameter's type is one this command knows how to default or
     // ramp) up front, in-process, before spawning any probes — this is
@@ -88,80 +167,68 @@ pub fn run(args: LimitsArgs, out: Output) -> Result<(), CliError> {
     // reports its actual cause instead of the generic "failed at value 1"
     // a swallowed child-process error would otherwise produce.
     let (_, env, function, ramp_index) = load(&args.contract, &args.function, &args.ramp)?;
-    build_args(&env, &function, ramp_index, 1)?;
+    let preview = build_args(&env, &function, ramp_index, 1)?;
+    if args.dry_run {
+        println!("probe {}=1 generated arguments: {preview:?}", args.ramp);
+        return Ok(());
+    }
     drop(env);
 
     let self_exe = std::env::current_exe()
         .map_err(|err| CliError(format!("failed to locate this binary: {err}")))?;
 
-    let probe = |value: u32| -> Result<bool, CliError> {
-        let status = Command::new(&self_exe)
-            .arg("__limits-probe")
-            .arg("--contract")
-            .arg(&args.contract)
-            .arg("--fn")
-            .arg(&args.function)
-            .arg("--ramp")
-            .arg(&args.ramp)
-            .arg("--value")
-            .arg(value.to_string())
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .status()
-            .map_err(|err| CliError(format!("failed to spawn probe: {err}")))?;
-        out.detail(format!(
-            "probe {}={value}: {}",
-            args.ramp,
-            if status.success() { "ok" } else { "failed" }
-        ));
-        Ok(status.success())
+    // Runs one batch of probes concurrently, then logs them in ramp order.
+    // Returns `None` when the run is cancelled before the batch starts.
+    let mut probe_batch = |values: &[u32]| -> Result<Option<Vec<bool>>, CliError> {
+        if CANCELLED.load(Ordering::Relaxed) {
+            return Ok(None);
+        }
+        let results =
+            probe_concurrently(values, |value| run_probe_process(&self_exe, &args, value));
+        let mut outcomes = Vec::with_capacity(values.len());
+        for (value, result) in values.iter().zip(results) {
+            let ok = result?;
+            out.detail(format!(
+                "probe {}={value}: {}",
+                args.ramp,
+                if ok { "ok" } else { "failed" }
+            ));
+            outcomes.push(ok);
+        }
+        Ok(Some(outcomes))
     };
 
     // Find a failing upper bound by doubling.
-    let mut last_ok: Option<u32> = None;
-    let mut low = 1u32;
-    let mut high = None;
-    loop {
-        if probe(low)? {
-            last_ok = Some(low);
-            match low.checked_mul(2) {
-                Some(next) => low = next,
-                None => {
-                    high = None;
-                    break;
-                }
-            }
-        } else {
-            high = Some(low);
-            break;
-        }
-        if low > 1 << 24 {
-            break;
-        }
+    let (ladder_ok, ladder_failed) = match find_ladder_bounds(args.jobs, &mut probe_batch)? {
+        Search::Done(bounds) => bounds,
+        Search::Cancelled { last_ok } => return report_interrupted(&args, last_ok),
+    };
+
+    if CANCELLED.load(Ordering::Relaxed) {
+        return report_interrupted(&args, ladder_ok);
     }
 
-    let Some(last_ok) = last_ok else {
+    let Some(last_ok) = ladder_ok else {
         return Err(CliError(format!(
-            "{:?} failed even at the smallest ramp value (1) for parameter {:?}",
-            args.function, args.ramp
+            "{} failed even at the smallest ramp value (1) for parameter {}; check that \
+             the function succeeds with default arguments (run with --verbose to see each probe)",
+            quote(&args.function),
+            quote(&args.ramp)
         )));
     };
 
     // Binary search between the last success and the first failure for a
     // tighter bound, if we found one.
     let mut best = last_ok;
-    if let Some(hi_start) = high {
-        let mut lo = last_ok;
-        let mut hi = hi_start;
-        while lo + 1 < hi {
-            let mid = lo + (hi - lo) / 2;
-            if probe(mid)? {
-                lo = mid;
-            } else {
-                hi = mid;
-            }
-        }
-        best = lo;
+    if let Some(hi_start) = ladder_failed {
+        best = match refine_boundary(last_ok, hi_start, args.jobs, &mut probe_batch)? {
+            Search::Done(boundary) => boundary,
+            Search::Cancelled { last_ok } => return report_interrupted(&args, last_ok),
+        };
+    }
+
+    if CANCELLED.load(Ordering::Relaxed) {
+        return report_interrupted(&args, Some(best));
     }
 
     // Measure resources at the best-known-good value, in-process this
@@ -180,6 +247,154 @@ pub fn run(args: LimitsArgs, out: Output) -> Result<(), CliError> {
     );
 
     Ok(())
+}
+
+/// Runs one probe in its own process. `Ok(true)` means the ramp value succeeded.
+fn run_probe_process(
+    self_exe: &std::path::Path,
+    args: &LimitsArgs,
+    value: u32,
+) -> Result<bool, CliError> {
+    let status = Command::new(self_exe)
+        .arg("__limits-probe")
+        .arg("--contract")
+        .arg(&args.contract)
+        .arg("--fn")
+        .arg(&args.function)
+        .arg("--ramp")
+        .arg(&args.ramp)
+        .arg("--value")
+        .arg(value.to_string())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map_err(|err| CliError(format!("failed to spawn probe: {err}")))?;
+    Ok(status.success())
+}
+
+/// Runs `work` on each value on its own thread and returns the results in
+/// the order of `values`. A worker that panics reports an error for its value.
+fn probe_concurrently(
+    values: &[u32],
+    work: impl Fn(u32) -> Result<bool, CliError> + Sync,
+) -> Vec<Result<bool, CliError>> {
+    std::thread::scope(|scope| {
+        let work = &work;
+        let workers: Vec<_> = values
+            .iter()
+            .map(|&value| scope.spawn(move || work(value)))
+            .collect();
+        workers
+            .into_iter()
+            .map(|worker| {
+                worker.join().unwrap_or_else(|_| {
+                    Err(CliError(
+                        "an isolated probe worker panicked; re-run with --jobs 1".to_string(),
+                    ))
+                })
+            })
+            .collect()
+    })
+}
+
+/// The doubling ladder value after `value`, or `None` past [`SEARCH_CEILING`].
+fn ladder_successor(value: u32) -> Option<u32> {
+    value.checked_mul(2).filter(|next| *next <= SEARCH_CEILING)
+}
+
+/// Up to `jobs` consecutive ladder values starting at `start`, never past
+/// [`SEARCH_CEILING`]. A `jobs` of 0 is treated as 1.
+fn ladder_batch(start: u32, jobs: usize) -> Vec<u32> {
+    let mut batch = Vec::new();
+    let mut current = Some(start);
+    while let Some(value) = current {
+        if batch.len() == jobs.max(1) {
+            break;
+        }
+        batch.push(value);
+        current = ladder_successor(value);
+    }
+    batch
+}
+
+/// Doubling phase. Probes ladder values in batches of `jobs`, reads each
+/// batch in order, and stops at the first failure. Returns the last success
+/// and the first failure. Both are `None` when the search reached the ceiling
+/// without failing.
+fn find_ladder_bounds<P>(
+    jobs: usize,
+    mut probe_batch: P,
+) -> Result<Search<(Option<u32>, Option<u32>)>, CliError>
+where
+    P: FnMut(&[u32]) -> Result<Option<Vec<bool>>, CliError>,
+{
+    let mut last_ok = None;
+    let mut next = Some(1u32);
+    while let Some(start) = next {
+        let batch = ladder_batch(start, jobs);
+        let Some(results) = probe_batch(&batch)? else {
+            return Ok(Search::Cancelled { last_ok });
+        };
+        for (value, ok) in batch.into_iter().zip(results) {
+            if !ok {
+                return Ok(Search::Done((last_ok, Some(value))));
+            }
+            last_ok = Some(value);
+            next = ladder_successor(value);
+        }
+    }
+    Ok(Search::Done((last_ok, None)))
+}
+
+/// Refinement phase. `lo` is a known success and `hi` a known failure.
+/// Each round probes up to `jobs` evenly spaced points strictly between
+/// them, then keeps the sub-interval that straddles the first failure. With
+/// `jobs` = 1 this is the classic midpoint binary search. The search ends
+/// when `lo` and `hi` are adjacent, and returns `lo`.
+fn refine_boundary<P>(
+    mut lo: u32,
+    mut hi: u32,
+    jobs: usize,
+    mut probe_batch: P,
+) -> Result<Search<u32>, CliError>
+where
+    P: FnMut(&[u32]) -> Result<Option<Vec<bool>>, CliError>,
+{
+    while lo + 1 < hi {
+        let gap = hi - lo;
+        // At least one point, and never more points than fit strictly inside.
+        let count = jobs.max(1).min((gap - 1) as usize);
+        let points: Vec<u32> = (1..=count as u32)
+            .map(|i| lo + gap * i / (count as u32 + 1))
+            .collect();
+        let Some(results) = probe_batch(&points)? else {
+            return Ok(Search::Cancelled { last_ok: Some(lo) });
+        };
+        match results.iter().position(|ok| !ok) {
+            Some(0) => hi = points[0],
+            Some(first_failure) => {
+                lo = points[first_failure - 1];
+                hi = points[first_failure];
+            }
+            None => lo = points[count - 1],
+        }
+    }
+    Ok(Search::Done(lo))
+}
+
+/// A cancelled run reports its last successful probe without claiming
+/// a proven maximum or attempting a fresh WASM invocation.
+fn report_interrupted(args: &LimitsArgs, last_ok: Option<u32>) -> Result<(), CliError> {
+    match last_ok {
+        Some(value) => {
+            println!("interrupted; last successful {} for {:?}: {value} (partial result, not a proven maximum)", args.ramp, args.function);
+            println!("  resource measurements unavailable after cancellation");
+            Ok(())
+        }
+        None => Err(CliError(format!(
+            "limits search interrupted before any successful probe for {:?}", args.function
+        ))),
+    }
 }
 
 /// The hidden probe entry point: performs exactly one invocation and
@@ -246,11 +461,14 @@ fn load(
     function: &str,
     ramp: &str,
 ) -> Result<(Address, Env, ScSpecFunctionV0, usize), CliError> {
-    let wasm = std::fs::read(contract)
-        .map_err(|err| CliError(format!("failed to read {}: {err}", contract.display())))?;
+    let wasm = std::fs::read(contract).map_err(|err| {
+        CliError(format!(
+            "failed to read {}: {err}; pass the path to a compiled contract .wasm",
+            quote(contract.display())
+        ))
+    })?;
 
-    let entries = soroban_spec::read::from_wasm(&wasm)
-        .map_err(|err| CliError(format!("failed to read contract spec: {err}")))?;
+    let entries = soroban_spec::read::from_wasm(&wasm).map_err(|err| spec_error(contract, &err))?;
 
     let func_spec = find_function_spec(entries, contract, function)?;
     let ramp_index = ramp_index_of(&func_spec, function, ramp)?;
@@ -270,6 +488,81 @@ fn load(
     Ok((contract_id, env, func_spec, ramp_index))
 }
 
+/// An actionable message for a `.wasm` whose contract spec can't be read.
+/// `FromWasmError`'s own `Display` is just "reading wasm" etc., which
+/// names neither the file nor the fix.
+fn spec_error(contract: &std::path::Path, err: &soroban_spec::read::FromWasmError) -> CliError {
+    use soroban_spec::read::FromWasmError;
+
+    let path = quote(contract.display());
+    CliError(match err {
+        FromWasmError::Read(source) => format!(
+            "{path} is not a valid WebAssembly module ({source}); pass a contract built for \
+             wasm32v1-none, e.g. target/wasm32v1-none/release/<crate>.wasm"
+        ),
+        FromWasmError::Parse(source) => format!(
+            "{path} has a malformed contract spec ({source}); rebuild it with a current \
+             soroban-sdk"
+        ),
+        FromWasmError::NotFound => format!(
+            "{path} has no contract spec (no `contractspecv0` section); is it a Soroban \
+             contract built with soroban-sdk?"
+        ),
+    })
+}
+
+/// A Rust-like name for a contract spec type, for error messages, e.g.
+/// `Vec<Address>`, `Map<Symbol, u32>` or `Option<BytesN<32>>`, in place
+/// of the XDR struct's `Debug` dump.
+fn type_name(type_: &ScSpecTypeDef) -> String {
+    let simple = match type_ {
+        ScSpecTypeDef::Val => "Val",
+        ScSpecTypeDef::Bool => "bool",
+        ScSpecTypeDef::Void => "()",
+        ScSpecTypeDef::Error => "Error",
+        ScSpecTypeDef::U32 => "u32",
+        ScSpecTypeDef::I32 => "i32",
+        ScSpecTypeDef::U64 => "u64",
+        ScSpecTypeDef::I64 => "i64",
+        ScSpecTypeDef::Timepoint => "Timepoint",
+        ScSpecTypeDef::Duration => "Duration",
+        ScSpecTypeDef::U128 => "u128",
+        ScSpecTypeDef::I128 => "i128",
+        ScSpecTypeDef::U256 => "U256",
+        ScSpecTypeDef::I256 => "I256",
+        ScSpecTypeDef::Bytes => "Bytes",
+        ScSpecTypeDef::String => "String",
+        ScSpecTypeDef::Symbol => "Symbol",
+        ScSpecTypeDef::Address => "Address",
+        ScSpecTypeDef::MuxedAddress => "MuxedAddress",
+        ScSpecTypeDef::Option(option) => {
+            return format!("Option<{}>", type_name(&option.value_type))
+        }
+        ScSpecTypeDef::Result(result) => {
+            return format!(
+                "Result<{}, {}>",
+                type_name(&result.ok_type),
+                type_name(&result.error_type)
+            )
+        }
+        ScSpecTypeDef::Vec(vec) => return format!("Vec<{}>", type_name(&vec.element_type)),
+        ScSpecTypeDef::Map(map) => {
+            return format!(
+                "Map<{}, {}>",
+                type_name(&map.key_type),
+                type_name(&map.value_type)
+            )
+        }
+        ScSpecTypeDef::Tuple(tuple) => {
+            let items: Vec<String> = tuple.value_types.iter().map(type_name).collect();
+            return format!("({})", items.join(", "));
+        }
+        ScSpecTypeDef::BytesN(bytes) => return format!("BytesN<{}>", bytes.n),
+        ScSpecTypeDef::Udt(udt) => return udt.name.to_utf8_string_lossy(),
+    };
+    simple.to_string()
+}
+
 /// Picks `function` out of a contract's spec entries. Split out of [`load`]
 /// so the lookup can be tested against hand-built spec fixtures, without a
 /// compiled `.wasm`.
@@ -286,8 +579,9 @@ fn find_function_spec(
         })
         .ok_or_else(|| {
             CliError(format!(
-                "no function named {function:?} in {}'s spec",
-                contract.display()
+                "no function named {} in {}'s spec; check the --fn name",
+                quote(function),
+                quote(contract.display())
             ))
         })
 }
@@ -302,7 +596,23 @@ fn ramp_index_of(
         .inputs
         .iter()
         .position(|input| input.name.to_utf8_string_lossy() == ramp)
-        .ok_or_else(|| CliError(format!("{function:?} has no parameter named {ramp:?}")))
+        .ok_or_else(|| {
+            let params: Vec<String> = func_spec
+                .inputs
+                .iter()
+                .map(|input| quote(input.name.to_utf8_string_lossy()))
+                .collect();
+            let params = if params.is_empty() {
+                "it takes no parameters".to_string()
+            } else {
+                format!("its parameters are {}", params.join(", "))
+            };
+            CliError(format!(
+                "{} has no parameter named {}; {params}",
+                quote(function),
+                quote(ramp)
+            ))
+        })
 }
 
 fn build_args(
@@ -351,8 +661,9 @@ fn ramp_val(env: &Env, type_: &ScSpecTypeDef, ramp_value: u32) -> Result<Val, Cl
             Ok(addrs.into_val(env))
         }
         other => Err(CliError(format!(
-            "the ramp parameter's type ({other:?}) isn't supported yet; supported ramp types \
-             are u32/i32/u64/i64/u128/i128 and Vec<Address>"
+            "the ramp parameter's type ({}) isn't supported yet; supported ramp types \
+             are u32/i32/u64/i64/u128/i128 and Vec<Address>",
+            quote(type_name(other))
         ))),
     }
 }
@@ -412,10 +723,11 @@ fn default_val(
         ScSpecTypeDef::Bytes => Ok(soroban_sdk::Bytes::new(env).into_val(env)),
         ScSpecTypeDef::Vec(_) => Ok(SVec::<Val>::new(env).into_val(env)),
         other => Err(CliError(format!(
-            "parameter {:?} has type {other:?}, which this command doesn't know how to \
-             default yet; only the --ramp parameter needs a type this command understands \
-             today, every other parameter needs a supported default type",
-            input.name.to_utf8_string_lossy()
+            "parameter {} has type {}, which this command doesn't know how to \
+             default yet; every parameter other than --ramp needs one of Address, bool, \
+             u32/i32/u64/i64/u128/i128, Symbol, String, Bytes or Vec",
+            quote(input.name.to_utf8_string_lossy()),
+            quote(type_name(other))
         ))),
     }
 }
@@ -425,9 +737,162 @@ fn default_val(
 /// building a `.wasm` first.
 #[cfg(test)]
 mod tests {
-    use soroban_sdk::xdr::{ScSpecTypeMap, ScSpecTypeVec, ScSymbol};
+    use soroban_sdk::xdr::{
+        ScSpecTypeBytesN, ScSpecTypeMap, ScSpecTypeOption, ScSpecTypeResult, ScSpecTypeTuple,
+        ScSpecTypeUdt, ScSpecTypeVec, ScSymbol,
+    };
 
     use super::*;
+
+    /// A probe where a value succeeds exactly when it is at most `threshold`.
+    fn threshold_probe(
+        threshold: u32,
+    ) -> impl FnMut(&[u32]) -> Result<Option<Vec<bool>>, CliError> {
+        move |values: &[u32]| -> Result<Option<Vec<bool>>, CliError> {
+            Ok(Some(values.iter().map(|v| *v <= threshold).collect()))
+        }
+    }
+
+    /// The boundary `run` reports for `threshold`: doubling, then refinement.
+    fn boundary_for(threshold: u32, jobs: usize) -> Option<u32> {
+        let bounds = match find_ladder_bounds(jobs, threshold_probe(threshold)).unwrap() {
+            Search::Done(bounds) => bounds,
+            Search::Cancelled { .. } => unreachable!("no cancellation in this test"),
+        };
+        let (last_ok, first_failed) = bounds;
+        let last_ok = last_ok?;
+        let Some(hi) = first_failed else {
+            return Some(last_ok);
+        };
+        match refine_boundary(last_ok, hi, jobs, threshold_probe(threshold)).unwrap() {
+            Search::Done(boundary) => Some(boundary),
+            Search::Cancelled { .. } => unreachable!("no cancellation in this test"),
+        }
+    }
+
+    #[test]
+    fn boundary_is_the_same_for_every_jobs_value() {
+        let thresholds = [
+            1,
+            2,
+            3,
+            5,
+            7,
+            8,
+            100,
+            1000,
+            SEARCH_CEILING - 1,
+            SEARCH_CEILING,
+            u32::MAX,
+        ];
+        for threshold in thresholds {
+            let expected = threshold.min(SEARCH_CEILING);
+            for jobs in 1..=MAX_JOBS {
+                assert_eq!(
+                    boundary_for(threshold, jobs),
+                    Some(expected),
+                    "threshold {threshold}, jobs {jobs}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_failing_first_value_leaves_no_success() {
+        assert_eq!(
+            find_ladder_bounds(4, threshold_probe(0)).unwrap(),
+            Search::Done((None, Some(1)))
+        );
+    }
+
+    #[test]
+    fn each_batch_uses_exactly_the_requested_concurrency() {
+        for jobs in 1..=MAX_JOBS {
+            let mut inner = threshold_probe(1000);
+            let mut largest_batch = 0;
+            let mut probe = |values: &[u32]| {
+                largest_batch = largest_batch.max(values.len());
+                inner(values)
+            };
+            let Search::Done((Some(lo), Some(hi))) = find_ladder_bounds(jobs, &mut probe).unwrap()
+            else {
+                panic!("expected a bracket around 1000 for jobs {jobs}");
+            };
+            refine_boundary(lo, hi, jobs, &mut probe).unwrap();
+            assert_eq!(largest_batch, jobs, "jobs {jobs}");
+        }
+    }
+
+    #[test]
+    fn cancellation_mid_search_keeps_the_last_success() {
+        let mut calls = 0;
+        let mut probe = |values: &[u32]| -> Result<Option<Vec<bool>>, CliError> {
+            calls += 1;
+            if calls == 1 {
+                Ok(Some(values.iter().map(|_| true).collect()))
+            } else {
+                Ok(None)
+            }
+        };
+        assert_eq!(
+            find_ladder_bounds(2, &mut probe).unwrap(),
+            Search::Cancelled { last_ok: Some(2) }
+        );
+    }
+
+    #[test]
+    fn ladder_batches_double_and_stop_at_the_ceiling() {
+        assert_eq!(ladder_batch(1, 1), vec![1]);
+        assert_eq!(ladder_batch(1, 3), vec![1, 2, 4]);
+        assert_eq!(ladder_batch(1 << 23, 4), vec![1 << 23, 1 << 24]);
+        assert_eq!(ladder_batch(1 << 24, 4), vec![1 << 24]);
+        assert_eq!(ladder_batch(2, 0), vec![2]);
+    }
+
+    #[test]
+    fn concurrent_probes_return_results_in_input_order() {
+        let values = [4, 1, 6, 3];
+        let results = probe_concurrently(&values, |value| {
+            // Later values finish first, so completion order differs from input order.
+            std::thread::sleep(std::time::Duration::from_millis(u64::from(10 - value)));
+            Ok(value % 2 == 1)
+        });
+        let outcomes: Vec<bool> = results.into_iter().map(|r| r.unwrap()).collect();
+        assert_eq!(outcomes, vec![false, true, false, true]);
+    }
+
+    #[test]
+    fn jobs_outside_one_to_eight_is_rejected_before_loading_the_contract() {
+        for jobs in [0, MAX_JOBS + 1] {
+            let args = LimitsArgs {
+                contract: "missing.wasm".into(),
+                function: "run".into(),
+                ramp: "amount".into(),
+                jobs,
+                dry_run: false,
+            };
+            let out = crate::commands::output::Output {
+                verbosity: crate::commands::output::Verbosity::Quiet,
+                color: false,
+            };
+            let err = run(args, out).unwrap_err();
+            assert_eq!(err.0, format!("--jobs must be between 1 and 8 (got {jobs})"));
+        }
+    }
+
+    #[test]
+    fn cancellation_without_success_is_an_error() {
+        let args = LimitsArgs {
+            contract: "test.wasm".into(),
+            function: "run".into(),
+            ramp: "amount".into(),
+            jobs: 1,
+            dry_run: false,
+        };
+        let err = report_interrupted(&args, None).expect_err("no successful result");
+        assert!(err.0.contains("before any successful probe"));
+        assert!(report_interrupted(&args, Some(7)).is_ok());
+    }
 
     fn vec_of(element: ScSpecTypeDef) -> ScSpecTypeDef {
         ScSpecTypeDef::Vec(Box::new(ScSpecTypeVec {
@@ -503,8 +968,8 @@ mod tests {
             "withdraw",
         )
         .expect_err("withdraw is not in the spec");
-        assert!(err.0.contains("no function named \"withdraw\""), "{err}");
-        assert!(err.0.contains("vault.wasm"), "{err}");
+        assert!(err.0.contains("no function named `withdraw`"), "{err}");
+        assert!(err.0.contains("`vault.wasm`"), "{err}");
     }
 
     #[test]
@@ -530,9 +995,11 @@ mod tests {
         );
         let err = ramp_index_of(&func, "batch_payout", "recipients").expect_err("no such input");
         assert!(
-            err.0.contains("has no parameter named \"recipients\""),
+            err.0
+                .contains("`batch_payout` has no parameter named `recipients`"),
             "{err}"
         );
+        assert!(err.0.contains("its parameters are `funder`"), "{err}");
     }
 
     #[test]
@@ -592,5 +1059,80 @@ mod tests {
         let fixture = input("balances", ty.clone());
         let err = default_val(&env, &admin, &ty, &fixture).expect_err("Map has no default");
         assert!(err.0.contains("doesn't know how to default"), "{err}");
+        assert!(
+            err.0
+                .contains("parameter `balances` has type `Map<Symbol, u32>`"),
+            "{err}"
+        );
+        assert_no_debug_output(&err);
+    }
+
+    /// The raw `Debug` shapes the error conventions in `commands/mod.rs`
+    /// rule out.
+    fn assert_no_debug_output(err: &CliError) {
+        for marker in ["ScSpecType", " { ", "Box(", "\\\""] {
+            assert!(!err.0.contains(marker), "debug output {marker:?} in: {err}");
+        }
+    }
+
+    #[test]
+    fn unsupported_ramp_types_are_named_without_debug_output() {
+        let env = Env::default();
+        let ty = ScSpecTypeDef::Option(Box::new(ScSpecTypeOption {
+            value_type: Box::new(vec_of(ScSpecTypeDef::BytesN(ScSpecTypeBytesN { n: 32 }))),
+        }));
+        let err = ramp_val(&env, &ty, 3).expect_err("not a ramp type");
+        assert!(err.0.contains("(`Option<Vec<BytesN<32>>>`)"), "{err}");
+        assert_no_debug_output(&err);
+    }
+
+    #[test]
+    fn type_names_read_like_rust() {
+        let cases = [
+            (ScSpecTypeDef::U32, "u32"),
+            (ScSpecTypeDef::Bool, "bool"),
+            (vec_of(ScSpecTypeDef::Address), "Vec<Address>"),
+            (
+                ScSpecTypeDef::Result(Box::new(ScSpecTypeResult {
+                    ok_type: Box::new(ScSpecTypeDef::Void),
+                    error_type: Box::new(ScSpecTypeDef::Error),
+                })),
+                "Result<(), Error>",
+            ),
+            (
+                ScSpecTypeDef::Tuple(Box::new(ScSpecTypeTuple {
+                    value_types: vec![ScSpecTypeDef::I128, ScSpecTypeDef::Symbol]
+                        .try_into()
+                        .expect("two types fit"),
+                })),
+                "(i128, Symbol)",
+            ),
+            (
+                ScSpecTypeDef::Udt(ScSpecTypeUdt {
+                    name: "DataKey".try_into().expect("name fits"),
+                }),
+                "DataKey",
+            ),
+        ];
+        for (ty, expected) in cases {
+            assert_eq!(type_name(&ty), expected);
+        }
+    }
+
+    #[test]
+    fn spec_read_failures_name_the_file_and_the_fix() {
+        let path = std::path::Path::new("README.md");
+        let err = soroban_spec::read::from_wasm(b"not wasm").expect_err("not a wasm module");
+        let err = spec_error(path, &err);
+        assert!(
+            err.0
+                .starts_with("`README.md` is not a valid WebAssembly module"),
+            "{err}"
+        );
+        assert!(err.0.contains("wasm32v1-none"), "{err}");
+        assert_no_debug_output(&err);
+
+        let err = spec_error(path, &soroban_spec::read::FromWasmError::NotFound);
+        assert!(err.0.contains("no contract spec"), "{err}");
     }
 }

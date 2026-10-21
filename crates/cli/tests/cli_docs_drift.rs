@@ -6,8 +6,27 @@ mod cli_docs_tests {
     use std::process::Command;
 
     fn get_help_output(subcommand: &str) -> String {
+        get_help_output_with(subcommand, "--help")
+    }
+
+    /// `-h` output. Unlike `--help`, which puts each description on the
+    /// line below its flag once any argument has multi-line help, `-h`
+    /// always prints a flag and its description on one line.
+    fn get_short_help_output(subcommand: &str) -> String {
+        get_help_output_with(subcommand, "-h")
+    }
+
+    fn get_help_output_with(subcommand: &str, flag: &str) -> String {
         let output = Command::new("cargo")
-            .args(&["run", "--bin", "soroban-testkit", "--", subcommand, "--help"])
+            .args(["run", "--bin", "soroban-testkit", "--", subcommand, flag])
+            .args([
+                "run",
+                "--bin",
+                "soroban-testkit",
+                "--",
+                subcommand,
+                "--help",
+            ])
             .current_dir(env!("CARGO_MANIFEST_DIR"))
             .output()
             .expect("Failed to run command");
@@ -16,16 +35,13 @@ mod cli_docs_tests {
     }
 
     #[test]
-    fn test_audit_help_has_key_flags() {
+    fn audit_help_lists_flags_and_descriptions_when_help_is_requested() {
         let help = get_help_output("audit");
 
         // Assert key flags are documented
         assert!(help.contains("--strict"), "audit should have --strict flag");
         assert!(help.contains("--json"), "audit should have --json flag");
-        assert!(
-            help.contains("PATH"),
-            "audit should document PATH argument"
-        );
+        assert!(help.contains("PATH"), "audit should document PATH argument");
 
         // Assert descriptions are present
         assert!(
@@ -39,7 +55,7 @@ mod cli_docs_tests {
     }
 
     #[test]
-    fn test_audit_examples_present() {
+    fn audit_help_shows_usage_examples_when_help_is_requested() {
         let help = get_help_output("audit");
 
         // Assert examples section exists
@@ -56,9 +72,9 @@ mod cli_docs_tests {
     }
 
     #[test]
-    fn test_main_help_lists_subcommands() {
+    fn main_help_lists_subcommands_when_help_is_requested() {
         let output = Command::new("cargo")
-            .args(&["run", "--bin", "soroban-testkit", "--", "--help"])
+            .args(["run", "--bin", "soroban-testkit", "--", "--help"])
             .current_dir(env!("CARGO_MANIFEST_DIR"))
             .output()
             .expect("Failed to run command");
@@ -76,9 +92,9 @@ mod cli_docs_tests {
     }
 
     #[test]
-    fn test_version_flag_works() {
+    fn version_flag_prints_version_when_requested() {
         let output = Command::new("cargo")
-            .args(&["run", "--bin", "soroban-testkit", "--", "--version"])
+            .args(["run", "--bin", "soroban-testkit", "--", "--version"])
             .current_dir(env!("CARGO_MANIFEST_DIR"))
             .output()
             .expect("Failed to run command");
@@ -90,20 +106,23 @@ mod cli_docs_tests {
             version_output.contains("soroban-testkit") || !version_output.is_empty(),
             "--version should display version info"
         );
-        assert!(output.status.success(), "--version should exit successfully");
+        assert!(
+            output.status.success(),
+            "--version should exit successfully"
+        );
     }
 
     #[test]
-    fn test_help_flag_consistency() {
+    fn help_flag_matches_commands_when_invoked_on_each_subcommand() {
         // Test that -h and --help produce similar output
         let short_output = Command::new("cargo")
-            .args(&["run", "--bin", "soroban-testkit", "--", "-h"])
+            .args(["run", "--bin", "soroban-testkit", "--", "-h"])
             .current_dir(env!("CARGO_MANIFEST_DIR"))
             .output()
             .expect("Failed to run -h");
 
         let long_output = Command::new("cargo")
-            .args(&["run", "--bin", "soroban-testkit", "--", "--help"])
+            .args(["run", "--bin", "soroban-testkit", "--", "--help"])
             .current_dir(env!("CARGO_MANIFEST_DIR"))
             .output()
             .expect("Failed to run --help");
@@ -123,7 +142,7 @@ mod cli_docs_tests {
     }
 
     #[test]
-    fn test_audit_json_schema_version_documented() {
+    fn audit_json_schema_version_is_documented() {
         let help = get_help_output("audit");
 
         // JSON output should mention schema version
@@ -136,7 +155,7 @@ mod cli_docs_tests {
     }
 
     #[test]
-    fn test_stdin_support_documented() {
+    fn audit_stdin_support_is_documented() {
         let help = get_help_output("audit");
 
         // Stdin support should be documented
@@ -147,17 +166,14 @@ mod cli_docs_tests {
     }
 
     #[test]
-    fn test_clap_derive_matches_docs() {
+    fn clap_derive_surface_matches_documentation() {
         // This test ensures clap-generated help matches our expectations
         // If this fails, either update clap attributes or documentation
-        
+
         let help = get_help_output("audit");
 
         // Key clap attributes should be present
-        assert!(
-            help.contains("Usage:"),
-            "Clap should generate usage line"
-        );
+        assert!(help.contains("Usage:"), "Clap should generate usage line");
         assert!(
             help.contains("Options:") || help.contains("FLAGS:"),
             "Clap should list options"
@@ -165,7 +181,7 @@ mod cli_docs_tests {
     }
 
     #[test]
-    fn test_all_flags_have_descriptions() {
+    fn every_cli_flag_has_a_help_description() {
         let help = get_help_output("audit");
 
         // Count flag definitions vs descriptions

@@ -134,6 +134,33 @@ soroban-testkit/
 
 The crate must have **zero non-dev network dependencies** and must compile for the WASM target where applicable.
 
+### 3a. Resource probing vs. benchmark-framework scope
+
+**What resource probing is:**
+The CLI's `limits` subcommand (`soroban-testkit limits`) is a *resource probe*, not a benchmark harness. It answers the question "what is the maximum input size (e.g. recipient count, entry count) at which this contract function still fits within Soroban's execution budget?" by invoking the contract with increasing parameter values until it exceeds the resource limit, then reporting the last successful value together with its instruction count, memory bytes, and transaction size.
+
+**What resource probing measures:**
+- The ceiling of a ramped parameter before the Soroban resource limit is breached.
+- Instruction count, memory bytes, and transaction size at that ceiling — the same resource dimensions Soroban's validators enforce.
+- Whether a specific entry point consistently fits within budget across a range of inputs.
+
+**What resource probing does not provide:**
+- Wall-clock timing or CPU-cycle measurements.
+- Statistical analysis, variance, or confidence intervals across repeated runs.
+- Historical result tracking or automated regression detection between commits.
+- A full criterion-style or benchmark-harness workflow.
+
+**How to use resource measurements when investigating changes:**
+Run `soroban-testkit limits --contract <path-to-wasm> --fn <name> --ramp <param>` before and after a change. If the ceiling value or the reported instruction count shifts significantly, the change has affected on-chain resource usage — investigate further before merging. The probe is deterministic (execution is in-process, not network-dependent) so differences between two runs reflect code changes, not environmental noise.
+
+**What would need to change before a larger benchmarking framework could be considered:**
+Adding a criterion-style harness, historical result storage, or automated regression detection would require network-free infrastructure for result persistence, a dedicated CI artifact store, and meaningful statistical methodology for Soroban's sandboxed execution model. Any such proposal must first demonstrate that the resource probe is insufficient for the contributor's actual use case, propose a concrete and bounded extension, and be reviewed against §3's out-of-scope list. Proposals that duplicate or wrap criterion without addressing Soroban-specific resource semantics will be declined.
+
+**Contributor guidance:**
+- Open issues and PRs touching `crates/cli/src/commands/limits.rs` that extend the fields *reported* by the probe (e.g. ledger reads/writes if the SDK exposes them) are in scope.
+- Issues proposing timing-based benchmarks, historical tracking, or criterion integration are out of scope and will be closed with a pointer to this section.
+- The output of `soroban-testkit limits` is documentation of the Soroban execution budget, not a performance benchmark; do not cite it as a wall-clock performance number.
+
 ---
 
 ## 4. Build order
@@ -552,7 +579,7 @@ Use `clap` with derive. Three subcommands, built in this order.
 Wraps coverage collection for the WASM target, which does not work out of the box.
 
 ```
-soroban-testkit coverage [--format text|lcov|html] [--fail-under <pct>] [--open]
+soroban-testkit coverage [--format text|lcov|html|json] [--output <path>] [--fail-under <pct>] [--open]
 ```
 
 Shells out to the underlying coverage tool. Its job is knowing the right flags for Soroban's target, not reimplementing coverage.
@@ -562,10 +589,14 @@ Shells out to the underlying coverage tool. Its job is knowing the right flags f
 Empirically discovers resource ceilings rather than guessing them.
 
 ```
-soroban-testkit limits --contract <path-to-wasm> --fn <name> --ramp <param>
+soroban-testkit limits --contract <path-to-wasm> --fn <name> --ramp <param> [--jobs <n>] [--dry-run]
 ```
 
 Invokes the function with an increasing parameter (e.g. recipient count) until it exceeds resource limits, then reports the last successful value plus instruction count, ledger reads/writes, and transaction size at that point.
+
+`--dry-run` loads the contract specification and prints the generated arguments for a single ramp value without invoking contract code.
+
+`--jobs <n>` (1 to 8, default 1) is opt-in. Each batch runs up to `n` probes concurrently, each in its own process. The doubling phase batches consecutive ladder values. The refinement phase probes up to `n` evenly spaced points between the bounds per round. Results are read back in ramp order, so the reported boundary is the same as a sequential run for any `n`, under the same monotonicity assumption that binary refinement already makes. A probe past the first failure is discarded, so higher values can use more CPU. With `--jobs 1`, probing is one at a time, as before.
 
 **This directly answers the `batch_payout` maximum-recipients question** and is the CLI's most compelling demo. Feature it in the README.
 
@@ -645,7 +676,7 @@ The Soroban toolchain moves quickly and this document is a snapshot. Confirm the
 
 Once Module 8 is done, the repo can be applied to a Wave Program. Target 12–15 open issues before a Wave opens; an approved repo with an empty board is worse than not applying. This target balances contributor engagement (enough work for a healthy cohort) against maintainer capacity to review and merge without overwhelming the backlog. Issues beyond this target tend to go stale before pickup.
 
-Every issue must state: the problem, affected file paths, expected behavior, acceptance criteria, and how to test locally. An issue that does not meet that bar is not ready for a `good-first-issue` label.
+Every issue must state: the problem, affected file paths, expected behavior, acceptance criteria, and how to test locally. An issue that does not meet that bar is not ready for a `good first issue` label.
 
 **Natural issue seams in this design:**
 
@@ -661,8 +692,8 @@ Label taxonomy:
 
 | Label | Meaning | Apply when |
 |---|---|---|
-| `good-first-issue` | Scoped, self-contained, no cross-module context needed | The acceptance criteria touch one file and one public item |
-| `help-wanted` | Maintainers want outside contributors on this, regardless of difficulty | Any open issue the maintainers are not planning to pick up themselves |
+| `good first issue` | Scoped, self-contained, no cross-module context needed | The acceptance criteria touch one file and one public item |
+| `help wanted` | Maintainers want outside contributors on this, regardless of difficulty | Any open issue the maintainers are not planning to pick up themselves |
 | `module/core` | Scoped to `src/core/` | Changes `TestEnv` or `TestkitError` |
 | `module/money` | Scoped to `src/money/` | Changes generators or `Conservation` |
 | `module/events` | Scoped to `src/events/` | Changes `EventLog` or capture |
@@ -677,11 +708,20 @@ Label taxonomy:
 | `severity/high` | Incorrect results or a crash with a workaround | The bug is real but avoidable (e.g. by pinning a version or avoiding one input) |
 | `severity/low` | Cosmetic, docs, or minor inconvenience | A doc typo, confusing error message, or non-functional nit |
 
-**Owner-facing usage:** an issue gets exactly one `module/*` label (or `docs` if it touches no module code), exactly one `size/*` label (feature requests) or `severity/*` label (bug reports), and `good-first-issue` and/or `help-wanted` as applicable. An issue missing a `module/*` or `docs` label, and a `size/*` or `severity/*` label as appropriate for its form, is not ready to open.
+**Owner-facing usage:** an issue gets exactly one `module/*` label (or `docs` if it touches no module code), exactly one `size/*` label (feature requests) or `severity/*` label (bug reports), and `good first issue` and/or `help wanted` as applicable. An issue missing a `module/*` or `docs` label, and a `size/*` or `severity/*` label as appropriate for its form, is not ready to open.
 
 **Difficulty guidance:** Modules 3, 4, 5, and the `audit` rules are good first issues. Module 7 is not — do not label TTL work as beginner-friendly.
 
-**Automatic labels:** issues opened from the forms in `.github/ISSUE_TEMPLATE/` get their `module/*` (or `docs`) and `size/*` labels from the form's "Module" and "Size" dropdowns, applied by `.github/workflows/issue-triage.yml` when the issue is opened. The workflow only adds labels from a fixed allowlist and never removes or edits them afterwards; `good-first-issue` and `help-wanted` stay a maintainer decision.
+**Automatic labels:** issues opened from the forms in `.github/ISSUE_TEMPLATE/` get their `module/*` (or `docs`), `size/*`, and `severity/*` labels from the form dropdowns, applied by `.github/workflows/issue-triage.yml` when the issue is opened. The workflow only adds labels from a fixed allowlist and never removes or edits them afterwards; `good first issue` and `help wanted` stay a maintainer decision.
+
+**Names and provisioning:** the label names in the table are the exact GitHub names. `good first issue` and `help wanted` use GitHub's built-in space-separated spellings, not hyphenated variants. The namespaced labels, plus `docs`, are created or reconciled by `.github/workflows/label-sync.yml`; run it manually after changing this table:
+
+```sh
+gh workflow run label-sync.yml --repo soroban-testkit/testkit-blockchain
+gh label list --repo soroban-testkit/testkit-blockchain
+```
+
+Update `label-sync.yml`, `issue-triage.yml`, and this table in the same PR. A label that appears in the docs but not in the provisioning workflow (or the reverse) is a bug. The sync workflow only creates or updates the labels it lists; it never deletes labels or edits existing issues.
 
 ### Seeding safeguards
 
@@ -694,13 +734,13 @@ Seeding many issues at once is where low-quality and duplicate entries get in. A
 3. **In scope.** Nothing in it falls under [§3](#3-scope-boundaries); in particular nothing that needs network access at test time.
 4. **Not a duplicate.** Before opening, search open *and closed* issues and open PRs for the same affected path and the same public item (`is:issue <path>`, `is:pr <path>`, and the item name). If a match exists, comment on or reopen it instead. Two issues touching the same public item are duplicates unless their acceptance criteria are disjoint, and then each must link the other.
 5. **Not already done.** The behavior is checked against `main` at seeding time — the code, its tests, and its docs — so the issue does not describe something that has since landed.
-6. **Independently mergeable.** It can be completed and merged without another open issue landing first. If it cannot, state the dependency in the body and do not label it `good-first-issue`.
+6. **Independently mergeable.** It can be completed and merged without another open issue landing first. If it cannot, state the dependency in the body and do not label it `good first issue`.
 7. **Labeled.** Exactly one `module/*` or `docs` label and exactly one `size/*` label, per the taxonomy above.
 
 **Bounded batching workflow:**
 
 1. **Draft a batch of at most 5 issues** in one place (a scratch document, not the tracker). Do not draft from a template loop that stamps the same text across many paths; each issue's problem statement is written for that issue.
-2. **Review the batch against the readiness review**, including a duplicate search for every issue, both against the tracker and against the rest of the batch. A second maintainer reviews any batch that adds `good-first-issue` labels.
+2. **Review the batch against the readiness review**, including a duplicate search for every issue, both against the tracker and against the rest of the batch. A second maintainer reviews any batch that adds `good first issue` labels.
 3. **Open the batch**, then stop and re-read the board as a contributor would see it. Fix overlapping wording or acceptance criteria before drafting the next batch.
 4. **Repeat until the board holds 12–15 ready issues, and no more.** Issues beyond that target go stale before anyone picks them up; keep further drafts out of the tracker until the open count drops.
 5. **Close rather than accumulate.** An issue found to be a duplicate, out of scope, or already done during a later batch is closed with a link to the canonical issue or commit, not left open with a comment.

@@ -7,6 +7,15 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+mod fixtures {
+    pub const AUDIT_WITH_FINDINGS: &str = "examples/vault/src";
+    pub const AUDIT_CLEAN_FILE: &str = "crates/cli/src/commands/mod.rs";
+    pub const VAULT_ROOT: &str = "examples/vault";
+    pub const LIMITS_FUNCTION: &str = "batch_payout";
+    pub const LIMITS_RAMP_PARAMETER: &str = "recipients";
+    pub const LIMITS_WASM: &str = "target/wasm32v1-none/release/vault.wasm";
+}
+
 fn workspace_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
@@ -16,7 +25,7 @@ fn workspace_root() -> PathBuf {
         .to_path_buf()
 }
 
-fn run(args: &[&str]) -> Output {
+fn run_cli(args: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_soroban-testkit"))
         .args(args)
         .current_dir(workspace_root())
@@ -24,7 +33,7 @@ fn run(args: &[&str]) -> Output {
         .expect("failed to run soroban-testkit")
 }
 
-fn run_with_stdin(args: &[&str], stdin: &str) -> Output {
+fn run_cli_with_stdin(args: &[&str], stdin: &str) -> Output {
     let mut child = Command::new(env!("CARGO_BIN_EXE_soroban-testkit"))
         .args(args)
         .current_dir(workspace_root())
@@ -44,9 +53,37 @@ fn run_with_stdin(args: &[&str], stdin: &str) -> Output {
         .expect("failed to wait on soroban-testkit")
 }
 
+fn run_cli_in(dir: &Path, args: &[&str]) -> Output {
+    Command::new(env!("CARGO_BIN_EXE_soroban-testkit"))
+        .args(args)
+        .current_dir(dir)
+        .output()
+        .expect("failed to run soroban-testkit")
+}
+
+fn limits_fixture_wasm() -> PathBuf {
+    workspace_root().join(fixtures::LIMITS_WASM)
+}
+
+fn build_limits_fixture() {
+    let build = Command::new("cargo")
+        .args([
+            "build",
+            "-p",
+            "vault",
+            "--target",
+            "wasm32v1-none",
+            "--release",
+        ])
+        .current_dir(workspace_root())
+        .status()
+        .expect("failed to build vault.wasm");
+    assert!(build.success());
+}
+
 #[test]
 fn no_subcommand_shows_concise_usage_and_exits_non_zero() {
-    let output = run(&[]);
+    let output = run_cli(&[]);
     let stderr = String::from_utf8_lossy(&output.stderr);
 
     assert!(!output.status.success(), "stderr: {stderr}");
@@ -59,7 +96,7 @@ fn no_subcommand_shows_concise_usage_and_exits_non_zero() {
 
 #[test]
 fn help_invocation_succeeds_and_lists_subcommands() {
-    let output = run(&["--help"]);
+    let output = run_cli(&["--help"]);
     let stdout = String::from_utf8_lossy(&output.stdout);
 
     assert!(output.status.success(), "stdout: {stdout}");
@@ -71,7 +108,7 @@ fn help_invocation_succeeds_and_lists_subcommands() {
 
 #[test]
 fn audit_reports_findings_against_vault() {
-    let output = run(&["audit", "examples/vault/src"]);
+    let output = run_cli(&["audit", fixtures::AUDIT_WITH_FINDINGS]);
     let stdout = String::from_utf8_lossy(&output.stdout);
 
     assert!(output.status.success(), "stdout: {stdout}");
@@ -83,7 +120,7 @@ fn audit_reports_findings_against_vault() {
 
 #[test]
 fn audit_strict_exits_non_zero_on_findings() {
-    let output = run(&["audit", "examples/vault/src", "--strict"]);
+    let output = run_cli(&["audit", fixtures::AUDIT_WITH_FINDINGS, "--strict"]);
     assert!(!output.status.success());
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("audit finding(s)"), "{stderr}");
@@ -91,7 +128,7 @@ fn audit_strict_exits_non_zero_on_findings() {
 
 #[test]
 fn audit_reports_no_findings_on_a_clean_directory() {
-    let output = run(&["audit", "crates/cli/src/commands/mod.rs"]);
+    let output = run_cli(&["audit", fixtures::AUDIT_CLEAN_FILE]);
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(output.status.success(), "stdout: {stdout}");
     assert!(stdout.contains("no findings"), "{stdout}");
@@ -108,7 +145,7 @@ fn audit_reads_source_from_stdin_when_path_is_dash() {
             let total = amount + 1;
         }
     "#;
-    let output = run_with_stdin(&["audit", "-"], src);
+    let output = run_cli_with_stdin(&["audit", "-"], src);
     let stdout = String::from_utf8_lossy(&output.stdout);
 
     assert!(output.status.success(), "stdout: {stdout}");
@@ -119,7 +156,7 @@ fn audit_reads_source_from_stdin_when_path_is_dash() {
 
 #[test]
 fn audit_stdin_reports_no_findings_on_empty_input() {
-    let output = run_with_stdin(&["audit", "-"], "");
+    let output = run_cli_with_stdin(&["audit", "-"], "");
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(output.status.success(), "stdout: {stdout}");
     assert!(stdout.contains("no findings"), "{stdout}");
@@ -127,7 +164,7 @@ fn audit_stdin_reports_no_findings_on_empty_input() {
 
 #[test]
 fn audit_stdin_reports_no_findings_on_invalid_input() {
-    let output = run_with_stdin(&["audit", "-"], "fn {{{ not valid rust");
+    let output = run_cli_with_stdin(&["audit", "-"], "fn {{{ not valid rust");
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(output.status.success(), "stdout: {stdout}");
     assert!(stdout.contains("no findings"), "{stdout}");
@@ -135,7 +172,7 @@ fn audit_stdin_reports_no_findings_on_invalid_input() {
 
 #[test]
 fn audit_json_declares_schema_version_and_findings() {
-    let output = run(&["audit", "examples/vault/src", "--json"]);
+    let output = run_cli(&["audit", fixtures::AUDIT_WITH_FINDINGS, "--json"]);
     let stdout = String::from_utf8_lossy(&output.stdout);
 
     assert!(output.status.success(), "stdout: {stdout}");
@@ -156,7 +193,7 @@ fn audit_json_declares_schema_version_and_findings() {
 
 #[test]
 fn audit_json_on_a_clean_file_is_an_empty_findings_list() {
-    let output = run(&["audit", "crates/cli/src/commands/mod.rs", "--json"]);
+    let output = run_cli(&["audit", fixtures::AUDIT_CLEAN_FILE, "--json"]);
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(output.status.success(), "stdout: {stdout}");
     assert!(
@@ -167,6 +204,12 @@ fn audit_json_on_a_clean_file_is_an_empty_findings_list() {
     );
 }
 
+#[test]
+fn limits_finds_the_real_mainnet_write_ceiling_for_batch_payout() {
+    build_limits_fixture();
+
+    let wasm = limits_fixture_wasm();
+    let output = run_cli(&[
 // ---- #215: isolated WASM artifacts for parallel test execution -----------
 
 /// A uniquely-named temp dir for one integration test.
@@ -241,9 +284,9 @@ fn limits_finds_the_real_mainnet_write_ceiling_for_batch_payout() {
         "--contract",
         wasm.to_str().unwrap(),
         "--fn",
-        "batch_payout",
+        fixtures::LIMITS_FUNCTION,
         "--ramp",
-        "recipients",
+        fixtures::LIMITS_RAMP_PARAMETER,
     ]);
     let stdout = String::from_utf8_lossy(&output.stdout);
 
@@ -255,6 +298,13 @@ fn limits_finds_the_real_mainnet_write_ceiling_for_batch_payout() {
 
 #[test]
 fn limits_reports_an_actionable_error_for_an_unknown_function() {
+    let wasm = limits_fixture_wasm();
+    if !wasm.exists() {
+        // Built by limits_finds_the_real_mainnet_write_ceiling_for_batch_payout;
+        // skip if tests ran in isolation without it.
+        return;
+    }
+    let output = run_cli(&[
     let iso = isolated_dir("limits-unknown-fn").expect("isolated temp dir");
     let wasm = build_isolated_vault_wasm(&iso);
     let output = run(&[
@@ -305,10 +355,10 @@ fn run_in(dir: &Path, args: &[&str]) -> Output {
 #[test]
 fn audit_paths_are_relative_to_the_audited_root_from_any_working_directory() {
     let root = workspace_root();
-    let vault_src = root.join("examples/vault/src");
-    let from_workspace = run_in(&root, &["audit", "examples/vault/src", "--json"]);
-    let from_crate = run_in(&root.join("examples/vault"), &["audit", "src", "--json"]);
-    let absolute = run_in(
+    let vault_src = root.join(fixtures::AUDIT_WITH_FINDINGS);
+    let from_workspace = run_cli_in(&root, &["audit", fixtures::AUDIT_WITH_FINDINGS, "--json"]);
+    let from_crate = run_cli_in(&root.join(fixtures::VAULT_ROOT), &["audit", "src", "--json"]);
+    let absolute = run_cli_in(
         &root.join("crates"),
         &["audit", vault_src.to_str().unwrap(), "--json"],
     );
@@ -322,7 +372,7 @@ fn audit_paths_are_relative_to_the_audited_root_from_any_working_directory() {
 
 #[test]
 fn audit_text_output_uses_root_relative_paths() {
-    let output = run_in(&workspace_root().join("examples/vault"), &["audit"]);
+    let output = run_cli_in(&workspace_root().join(fixtures::VAULT_ROOT), &["audit"]);
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(output.status.success(), "stdout: {stdout}");
     assert!(
@@ -335,11 +385,11 @@ fn audit_text_output_uses_root_relative_paths() {
 #[test]
 fn no_color_output_is_ansi_free() {
     for args in [
-        &["--no-color", "audit", "examples/vault/src", "--strict"][..],
-        &["audit", "examples/vault/src", "--no-color", "--json"][..],
+        &["--no-color", "audit", fixtures::AUDIT_WITH_FINDINGS, "--strict"][..],
+        &["audit", fixtures::AUDIT_WITH_FINDINGS, "--no-color", "--json"][..],
         &["--no-color", "audit", "does/not/exist.rs", "--bogus"][..],
     ] {
-        let output = run(args);
+        let output = run_cli(args);
         let stdout = String::from_utf8_lossy(&output.stdout);
         let stderr = String::from_utf8_lossy(&output.stderr);
         assert!(!stdout.contains('\x1b'), "{args:?} stdout: {stdout}");
@@ -350,7 +400,7 @@ fn no_color_output_is_ansi_free() {
 #[test]
 fn no_color_env_var_keeps_errors_ansi_free() {
     let output = Command::new(env!("CARGO_BIN_EXE_soroban-testkit"))
-        .args(["audit", "examples/vault/src", "--strict"])
+        .args(["audit", fixtures::AUDIT_WITH_FINDINGS, "--strict"])
         .current_dir(workspace_root())
         .env("NO_COLOR", "1")
         .output()
@@ -362,33 +412,33 @@ fn no_color_env_var_keeps_errors_ansi_free() {
 
 #[test]
 fn quiet_drops_advisory_notes_but_keeps_findings() {
-    let output = run(&["-q", "audit", "examples/vault/src"]);
+    let output = run_cli(&["-q", "audit", fixtures::AUDIT_WITH_FINDINGS]);
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(output.status.success(), "stdout: {stdout}");
     assert!(stdout.contains("missing-require-auth"), "{stdout}");
     assert!(!stdout.contains("not a security product"), "{stdout}");
 
-    let clean = run(&["audit", "crates/cli/src/commands/mod.rs", "--quiet"]);
+    let clean = run_cli(&["audit", fixtures::AUDIT_CLEAN_FILE, "--quiet"]);
     assert!(clean.status.success());
     assert!(clean.stdout.is_empty(), "{:?}", clean.stdout);
 }
 
 #[test]
 fn quiet_still_reports_errors_and_json() {
-    let strict = run(&["--quiet", "audit", "examples/vault/src", "--strict"]);
+    let strict = run_cli(&["--quiet", "audit", fixtures::AUDIT_WITH_FINDINGS, "--strict"]);
     assert!(!strict.status.success());
     let stderr = String::from_utf8_lossy(&strict.stderr);
     assert!(stderr.contains("audit finding(s)"), "{stderr}");
 
-    let json = run(&["--quiet", "audit", "examples/vault/src", "--json"]);
+    let json = run_cli(&["--quiet", "audit", fixtures::AUDIT_WITH_FINDINGS, "--json"]);
     let stdout = String::from_utf8_lossy(&json.stdout);
     assert!(stdout.starts_with("{\"schema_version\":1,"), "{stdout}");
 }
 
 #[test]
 fn verbose_adds_diagnostics_on_stderr_only() {
-    let normal = run(&["audit", "examples/vault/src"]);
-    let verbose = run(&["--verbose", "audit", "examples/vault/src"]);
+    let normal = run_cli(&["audit", fixtures::AUDIT_WITH_FINDINGS]);
+    let verbose = run_cli(&["--verbose", "audit", fixtures::AUDIT_WITH_FINDINGS]);
     let stderr = String::from_utf8_lossy(&verbose.stderr);
 
     assert!(verbose.status.success(), "stderr: {stderr}");
@@ -400,7 +450,7 @@ fn verbose_adds_diagnostics_on_stderr_only() {
 
 #[test]
 fn quiet_and_verbose_conflict() {
-    let output = run(&["-q", "-v", "audit", "examples/vault/src"]);
+    let output = run_cli(&["-q", "-v", "audit", fixtures::AUDIT_WITH_FINDINGS]);
     assert!(!output.status.success());
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("cannot be used with"), "{stderr}");
@@ -408,7 +458,7 @@ fn quiet_and_verbose_conflict() {
 
 #[test]
 fn coverage_help_includes_usage_examples() {
-    let output = run(&["coverage", "--help"]);
+    let output = run_cli(&["coverage", "--help"]);
     let stdout = String::from_utf8_lossy(&output.stdout);
 
     assert!(output.status.success(), "stdout: {stdout}");
@@ -422,7 +472,7 @@ fn coverage_help_includes_usage_examples() {
 
 #[test]
 fn limits_help_includes_usage_examples() {
-    let output = run(&["limits", "--help"]);
+    let output = run_cli(&["limits", "--help"]);
     let stdout = String::from_utf8_lossy(&output.stdout);
 
     assert!(output.status.success(), "stdout: {stdout}");
@@ -435,7 +485,7 @@ fn limits_help_includes_usage_examples() {
 
 #[test]
 fn audit_help_includes_usage_examples() {
-    let output = run(&["audit", "--help"]);
+    let output = run_cli(&["audit", "--help"]);
     let stdout = String::from_utf8_lossy(&output.stdout);
 
     assert!(output.status.success(), "stdout: {stdout}");

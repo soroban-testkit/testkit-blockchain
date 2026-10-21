@@ -98,6 +98,7 @@ jobs:
           cargo metadata --format-version 1 --offline 2>/dev/null | jq -r '.packages[] | select(.source == null) | .name' | sort > /tmp/actual_packages.txt
 
           # Check that we have exactly the documented workspace members
+          expected=$'soroban-testkit\nsoroban-testkit-cli\nvault'
           expected="soroban-testkit
           soroban-testkit-cli
           vault"
@@ -198,6 +199,9 @@ jobs:
 
   audit:
     name: cargo audit
+    runs-on: ubuntu-latest
+    env:
+      SUPPLY_CHAIN_REPORT_DIR: ${{ runner.temp }}/supply-chain-reports
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
@@ -206,7 +210,17 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: taiki-e/install-action@cargo-audit
-      - run: cargo audit
+      - name: Prepare supply-chain report directory
+        run: mkdir -p "$SUPPLY_CHAIN_REPORT_DIR"
+      - name: Run cargo audit
+        id: audit
+        shell: bash {0}
+        env:
+          CARGO_TERM_COLOR: never
+        run: cargo audit 2>&1 | tee "$SUPPLY_CHAIN_REPORT_DIR/audit.log"; status=${PIPESTATUS[0]}; echo "status=$status" >> "$GITHUB_OUTPUT"; exit "$status"
+      - name: Summarize cargo audit results
+        if: always()
+        run: bash .github/scripts/report-supply-chain.sh "cargo audit" "${{ steps.audit.outputs.status }}" "$SUPPLY_CHAIN_REPORT_DIR/audit.log"
 
   min-deps:
     name: minimum dependency versions
@@ -234,6 +248,9 @@ jobs:
 
   deny:
     name: cargo deny
+    runs-on: ubuntu-latest
+    env:
+      SUPPLY_CHAIN_REPORT_DIR: ${{ runner.temp }}/supply-chain-reports
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
@@ -241,10 +258,26 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: taiki-e/install-action@cargo-deny
+      - name: Prepare supply-chain report directory
+        run: mkdir -p "$SUPPLY_CHAIN_REPORT_DIR"
       - name: Verify the license allowlist
-        run: cargo deny check licenses
+        id: deny_licenses
+        shell: bash {0}
+        env:
+          CARGO_TERM_COLOR: never
+        run: cargo deny check licenses 2>&1 | tee "$SUPPLY_CHAIN_REPORT_DIR/deny-licenses.log"; status=${PIPESTATUS[0]}; echo "status=$status" >> "$GITHUB_OUTPUT"; exit "$status"
       - name: Verify all cargo-deny policies
-        run: cargo deny check
+        id: deny_policies
+        if: always()
+        shell: bash {0}
+        env:
+          CARGO_TERM_COLOR: never
+        run: cargo deny check 2>&1 | tee "$SUPPLY_CHAIN_REPORT_DIR/deny-policies.log"; status=${PIPESTATUS[0]}; echo "status=$status" >> "$GITHUB_OUTPUT"; exit "$status"
+      - name: Summarize cargo deny results
+        if: always()
+        run: |
+          bash .github/scripts/report-supply-chain.sh "cargo deny (licenses)" "${{ steps.deny_licenses.outputs.status }}" "$SUPPLY_CHAIN_REPORT_DIR/deny-licenses.log"
+          bash .github/scripts/report-supply-chain.sh "cargo deny (all policies)" "${{ steps.deny_policies.outputs.status }}" "$SUPPLY_CHAIN_REPORT_DIR/deny-policies.log"
 
   coverage:
     name: code coverage

@@ -1,3 +1,4 @@
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use clap::{Args, ValueEnum};
@@ -50,7 +51,11 @@ pub struct CoverageArgs {
     /// Exit 1 if line coverage is below PCT percent (0-100). Forwarded to
     /// cargo-llvm-cov as --fail-under-lines. Default: no threshold
     #[arg(long, value_name = "PCT", verbatim_doc_comment)]
+    #[arg(value_parser = validate_percentage)]
     fail_under: Option<f64>,
+    /// Cargo.toml to target when invoking from another directory.
+    #[arg(long, value_name = "PATH")]
+    manifest_path: Option<PathBuf>,
     /// Open the HTML report in a browser after generating it (implies
     /// --format html)
     #[arg(verbatim_doc_comment)]
@@ -83,6 +88,39 @@ pub struct CoverageArgs {
 /// (`cargo install cargo-llvm-cov`), except with `--dry-run`, which only
 /// prints the [`Invocation`] (so it can be tested, and inspected, without
 /// the tool).
+fn validate_percentage(raw: &str) -> Result<f64, String> {
+    let value: f64 = raw
+        .parse()
+        .map_err(|_| "expected percentage 0..=100".to_string())?;
+    if value.is_finite() && (0.0..=100.0).contains(&value) {
+        Ok(value)
+    } else {
+        Err("expected finite percentage 0..=100".to_string())
+    }
+}
+
+fn validate_manifest(path: &Path) -> Result<PathBuf, CliError> {
+    let canonical = std::fs::canonicalize(path)
+        .map_err(|e| CliError(format!("cannot access manifest {}: {e}", path.display())))?;
+    if !canonical.is_file() || canonical.file_name().and_then(|n| n.to_str()) != Some("Cargo.toml")
+    {
+        return Err(CliError(
+            "--manifest-path must point to an existing Cargo.toml".into(),
+        ));
+    }
+    Ok(canonical)
+}
+
+fn report_path(args: &CoverageArgs) -> Option<PathBuf> {
+    args.output.clone().or_else(|| match args.format {
+        Format::Lcov => Some("lcov.info".into()),
+        Format::Json => Some(JSON_OUTPUT_PATH.into()),
+        Format::Html => Some("target/llvm-cov/html".into()),
+        Format::Text if args.open => Some("target/llvm-cov/html".into()),
+        Format::Text => None,
+    })
+}
+
 pub fn run(args: CoverageArgs, out: Output) -> Result<(), CliError> {
     let invocation = Invocation::new(&args, out)?;
 
@@ -91,12 +129,38 @@ pub fn run(args: CoverageArgs, out: Output) -> Result<(), CliError> {
         return Ok(());
     }
 
+    let manifest = args
+        .manifest_path
+        .as_deref()
+        .map(validate_manifest)
+        .transpose()?;
+    if let Some(path) = report_path(&args) {
+        let root = manifest
+            .as_deref()
+            .and_then(Path::parent)
+            .unwrap_or(Path::new("."));
+        let destination = if path.is_absolute() {
+            path
+        } else {
+            root.join(path)
+        };
+        if destination.exists() {
+            return Err(CliError(format!(
+                "coverage output already exists at {}; remove it or select a different --output path",
+                destination.display()
+            )));
+        }
+    }
     check_llvm_cov_version()?;
     if args.open {
         ensure_opener_available()?;
     }
     out.detail(format!("running: {invocation}"));
-    let output = invocation.command().output().map_err(|err| {
+    let mut command = invocation.command();
+    if let Some(manifest) = manifest.as_deref() {
+        command.current_dir(manifest.parent().unwrap_or(Path::new(".")));
+    }
+    let output = command.output().map_err(|err| {
         CliError(format!(
             "failed to run `cargo llvm-cov` ({err}); is cargo-llvm-cov installed? \
              try `cargo install cargo-llvm-cov`"
@@ -117,20 +181,28 @@ pub fn run(args: CoverageArgs, out: Output) -> Result<(), CliError> {
     }
 
     if matches!(args.format, Format::Json) {
-        let path = args.output.as_deref().unwrap_or(std::path::Path::new(JSON_OUTPUT_PATH));
+        let path = args
+            .output
+            .as_deref()
+            .unwrap_or(std::path::Path::new(JSON_OUTPUT_PATH));
         let json = std::fs::read_to_string(path).map_err(|err| {
             CliError(format!(
-                "cargo llvm-cov succeeded but {} could not be read: {err}", path.display()
+                "cargo llvm-cov succeeded but {} could not be read: {err}",
+                path.display()
             ))
         })?;
         let lines = validate_json_summary(&json).map_err(|err| {
             CliError(format!(
-                "{} is not a valid coverage summary: {err}", path.display()
+                "{} is not a valid coverage summary: {err}",
+                path.display()
             ))
         })?;
         out.note(format!(
-            "wrote {}: line coverage {:.2}% ({}/{} lines)", path.display(), lines.percent,
-            lines.covered, lines.count
+            "wrote {}: line coverage {:.2}% ({}/{} lines)",
+            path.display(),
+            lines.percent,
+            lines.covered,
+            lines.count
         ));
     }
 
@@ -277,6 +349,10 @@ impl Invocation {
     /// - `--quiet`/`--verbose` → `--quiet`/`--verbose`.
     pub fn new(args: &CoverageArgs, out: Output) -> Result<Self, CliError> {
         let mut cargo_args = vec!["llvm-cov".to_string(), "test".to_string()];
+        if let Some(path) = &args.manifest_path {
+            cargo_args.push("--manifest-path".into());
+            cargo_args.push(path.to_string_lossy().into_owned());
+        }
         let mut push = |arg: &str| cargo_args.push(arg.to_string());
 
         match args.format {
@@ -296,7 +372,13 @@ impl Invocation {
             Format::Lcov => {
                 push("--lcov");
                 push("--output-path");
-                push(args.output.as_deref().unwrap_or(std::path::Path::new("lcov.info")).to_str().unwrap_or("lcov.info"));
+                push(
+                    args.output
+                        .as_deref()
+                        .unwrap_or(std::path::Path::new("lcov.info"))
+                        .to_str()
+                        .unwrap_or("lcov.info"),
+                );
             }
             Format::Html => {
                 push("--html");
@@ -309,7 +391,13 @@ impl Invocation {
                 push("--json");
                 push("--summary-only");
                 push("--output-path");
-                push(args.output.as_deref().unwrap_or(std::path::Path::new(JSON_OUTPUT_PATH)).to_str().unwrap_or(JSON_OUTPUT_PATH));
+                push(
+                    args.output
+                        .as_deref()
+                        .unwrap_or(std::path::Path::new(JSON_OUTPUT_PATH))
+                        .to_str()
+                        .unwrap_or(JSON_OUTPUT_PATH),
+                );
             }
             Format::Html => push("--html"),
             Format::Json => {
@@ -471,6 +559,7 @@ mod tests {
             format,
             output: None,
             fail_under,
+            manifest_path: None,
             open,
             dry_run: false,
             packages: Vec::new(),
@@ -490,6 +579,24 @@ mod tests {
     /// The forwarded arguments, for an invocation that must build.
     fn cargo_args(args: &CoverageArgs, out: Output) -> Vec<String> {
         Invocation::new(args, out).expect("valid flags").args
+    }
+
+    #[test]
+    fn percentage_bounds() {
+        for v in ["NaN", "inf", "-1", "101", "wat"] {
+            assert!(validate_percentage(v).is_err());
+        }
+        assert!(validate_percentage("0").is_ok());
+        assert!(validate_percentage("100").is_ok());
+    }
+
+    #[test]
+    fn forwards_manifest_path() {
+        let mut request = args(Format::Text, None, false);
+        request.manifest_path = Some("/tmp/example/Cargo.toml".into());
+        assert!(cargo_args(&request, normal())
+            .windows(2)
+            .any(|w| w == ["--manifest-path", "/tmp/example/Cargo.toml"]));
     }
 
     #[test]
@@ -584,16 +691,27 @@ mod tests {
 
     #[test]
     fn explicit_output_path_is_forwarded_for_each_file_format() {
-        for (format, flag) in [(Format::Text, "--output-path"), (Format::Lcov, "--output-path"), (Format::Json, "--output-path")] {
+        for (format, flag) in [
+            (Format::Text, "--output-path"),
+            (Format::Lcov, "--output-path"),
+            (Format::Json, "--output-path"),
+        ] {
             let mut request = args(format, None, false);
             request.output = Some("reports/result.out".into());
             let cargo = cargo_args(&request, normal());
-            assert!(cargo.windows(2).any(|pair| pair == [flag.to_string(), "reports/result.out".to_string()]), "{cargo:?}");
+            assert!(
+                cargo
+                    .windows(2)
+                    .any(|pair| pair == [flag.to_string(), "reports/result.out".to_string()]),
+                "{cargo:?}"
+            );
         }
         let mut request = args(Format::Html, None, false);
         request.output = Some("reports/html".into());
         let cargo = cargo_args(&request, normal());
-        assert!(cargo.windows(2).any(|pair| pair == ["--output-dir".to_string(), "reports/html".to_string()]));
+        assert!(cargo
+            .windows(2)
+            .any(|pair| pair == ["--output-dir".to_string(), "reports/html".to_string()]));
     }
 
     /// A trimmed `cargo llvm-cov test --json --summary-only` export.

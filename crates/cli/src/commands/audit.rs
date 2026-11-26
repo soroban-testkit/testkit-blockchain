@@ -324,6 +324,18 @@ struct Finding {
 /// capable of missing real bugs or flagging non-bugs. The absence of a
 /// finding here is never a security guarantee.
 ///
+ fix/audit-136-138-139
+/// 1. Contract entry points taking an `Address` parameter that never call
+///    `require_auth` anywhere in the function body. An entry point is a
+///    `pub fn` in an `impl` block marked `#[contractimpl]`, or any fn of a
+///    `#[contractimpl]` trait impl; free functions and helper `impl`s are
+///    not entry points (see [`EntryPoints`]).
+/// 2. Arithmetic (`+ - * / %`, unary `-`, compound assignment, and raw
+///    arithmetic method calls) on an `i128`-typed binding, done outside a
+///    `checked_`/`saturating_`/`wrapping_` call. The finding points at the
+///    operator's line, so multiline expressions identify the exact
+///    arithmetic source location.
+
 /// 1. Contract entry points taking an `Address` parameter (including references,
 ///    fully qualified paths like `soroban_sdk::Address`, and type or import
 ///    aliases) that never call `require_auth` anywhere in the function body or
@@ -337,6 +349,7 @@ struct Finding {
 ///    and simple aliases), done outside a `checked_`/`saturating_`/`wrapping_`
 ///    call. The finding points at the operator's line, so multiline expressions
 ///    identify the exact arithmetic source location.
+ main
 /// 3. A `.persistent()`/`.temporary()` storage read with no
 ///    `.extend_ttl(` call anywhere in the same function.
 ///
@@ -932,6 +945,20 @@ impl FunctionVisitor<'_> {
 
         // Rule 1: an entry point's Address parameter that's never checked
         // with require_auth. Helpers are reached through an entry point.
+ fix/audit-136-138-139
+        let address_params = address_typed_params(sig);
+        if entry_point && self.runs(Rule::MissingRequireAuth) && !address_params.is_empty() {
+            let mut tracked_addrs = HashSet::new();
+            for arg in &sig.inputs {
+                if let FnArg::Typed(pat_type) = arg {
+                    if type_is_address(&pat_type.ty) {
+                        extract_pat_idents(&pat_type.pat, &mut tracked_addrs);
+                    }
+                }
+            }
+            let mut auth_visitor = RequireAuthVisitor {
+                tracked_addrs,
+
         let address_params = address_typed_params(sig, self.address_aliases);
         if entry_point
             && !suppressed
@@ -941,6 +968,7 @@ impl FunctionVisitor<'_> {
             let mut auth_visitor = RequireAuthVisitor {
                 helpers: self.helpers,
                 visiting: HashSet::new(),
+ main
                 has_require_auth: false,
             };
             auth_visitor.visit_block(body);
@@ -951,7 +979,7 @@ impl FunctionVisitor<'_> {
                     "warning",
                     format!(
                         "fn {name} takes Address parameter(s) {address_params:?} but never calls \
-                         require_auth in its body"
+                         require_auth on any of them in its body"
                     ),
                 );
             }
@@ -1092,14 +1120,32 @@ impl<'ast> Visit<'ast> for I128ArithmeticVisitor<'_> {
     fn visit_local(&mut self, node: &'ast Local) {
         let mut is_i128 = false;
         if let Pat::Type(pat_type) = &node.pat {
+ fix/audit-136-138-139
+            if type_is_i128(&pat_type.ty) {
+
             if type_is_i128(&pat_type.ty, self.i128_aliases) {
+ main
                 is_i128 = true;
             }
         }
         if !is_i128 {
             if let Some(init) = &node.init {
+ fix/audit-136-138-139
+                if self.touches_i128(&init.expr) {
+                    is_i128 = true;
+                }
+            }
+        }
+        if is_i128 {
+            if let Pat::Ident(ident) = &node.pat {
+                self.i128_bindings.insert(ident.ident.to_string());
+            } else if let Pat::Type(pat_type) = &node.pat {
+                if let Pat::Ident(ident) = &*pat_type.pat {
+                    self.i128_bindings.insert(ident.ident.to_string());
+
                 if self.is_i128_expr(&init.expr) {
                     is_i128 = true;
+ main
                 }
             }
         }
@@ -1115,33 +1161,194 @@ impl<'ast> Visit<'ast> for I128ArithmeticVisitor<'_> {
         }
         let whole = Expr::Binary(node.clone());
         if self.arithmetic_touches_i128(&whole) {
-            self.findings.push(Finding {
-                file: self.path.clone(),
-                line: op_line(&node.op),
-                rule: Rule::UncheckedI128Arithmetic.id(),
-                severity: "warning",
-                message: format!(
-                    "fn {} does raw arithmetic on an i128 value; prefer checked_/saturating_/ \
-                     wrapping_ variants to avoid silent overflow",
-                    self.fn_name
-                ),
-            });
+            self.push_arithmetic_finding(line_of(node.op));
         }
         // The arithmetic operators of this expression are covered by the
         // check above; only its non-arithmetic operands may hold separate
         // expressions (calls, blocks, closures) that need their own check.
         self.visit_arithmetic_operands(&whole);
     }
+
+    fn visit_expr_unary(&mut self, node: &'ast syn::ExprUnary) {
+        if !matches!(node.op, syn::UnOp::Neg(_)) || is_int_literal(&node.expr) {
+            return visit::visit_expr_unary(self, node);
+        }
+        let whole = Expr::Unary(node.clone());
+        if self.arithmetic_touches_i128(&whole) {
+            self.push_arithmetic_finding(line_of(node.op));
+        }
+        self.visit_arithmetic_operands(&whole);
+    }
+
+    fn visit_expr_method_call(&mut self, node: &'ast syn::ExprMethodCall) {
+        let method = node.method.to_string();
+        if !is_unchecked_arithmetic_method(&method) {
+            return visit::visit_expr_method_call(self, node);
+        }
+        let whole = Expr::MethodCall(node.clone());
+        if self.arithmetic_touches_i128(&whole) {
+            self.push_arithmetic_finding(line_of(&node.method));
+        }
+        self.visit_arithmetic_operands(&whole);
+    }
+
+    fn visit_expr_call(&mut self, node: &'ast syn::ExprCall) {
+        if let Expr::Path(p) = &*node.func {
+            if is_unchecked_arithmetic_fn_path(&p.path)
+                && node
+                    .args
+                    .iter()
+                    .any(|arg| self.arithmetic_touches_i128(arg))
+            {
+                self.push_arithmetic_finding(line_of(p));
+                for arg in &node.args {
+                    self.visit_arithmetic_operands(arg);
+                }
+                return;
+            }
+        }
+        visit::visit_expr_call(self, node);
+    }
 }
 
 fn is_arithmetic(op: &BinOp) -> bool {
     matches!(
         op,
-        BinOp::Add(_) | BinOp::Sub(_) | BinOp::Mul(_) | BinOp::Div(_)
+        BinOp::Add(_)
+            | BinOp::Sub(_)
+            | BinOp::Mul(_)
+            | BinOp::Div(_)
+            | BinOp::Rem(_)
+            | BinOp::AddAssign(_)
+            | BinOp::SubAssign(_)
+            | BinOp::MulAssign(_)
+            | BinOp::DivAssign(_)
+            | BinOp::RemAssign(_)
     )
 }
 
+fn is_compound_assign(op: &BinOp) -> bool {
+    matches!(
+        op,
+        BinOp::AddAssign(_)
+            | BinOp::SubAssign(_)
+            | BinOp::MulAssign(_)
+            | BinOp::DivAssign(_)
+            | BinOp::RemAssign(_)
+    )
+}
+
+fn is_unchecked_arithmetic_method(name: &str) -> bool {
+    matches!(
+        name,
+        "add"
+            | "sub"
+            | "mul"
+            | "div"
+            | "rem"
+            | "neg"
+            | "add_assign"
+            | "sub_assign"
+            | "mul_assign"
+            | "div_assign"
+            | "rem_assign"
+            | "unchecked_add"
+            | "unchecked_sub"
+            | "unchecked_mul"
+            | "unchecked_div"
+            | "unchecked_rem"
+            | "unchecked_neg"
+            | "strict_add"
+            | "strict_sub"
+            | "strict_mul"
+            | "strict_div"
+            | "strict_rem"
+            | "strict_neg"
+    )
+}
+
+fn is_safe_arithmetic_method(name: &str) -> bool {
+    name.starts_with("checked_")
+        || name.starts_with("saturating_")
+        || name.starts_with("wrapping_")
+        || name.starts_with("overflowing_")
+}
+
+fn is_option_unwrap_method(name: &str) -> bool {
+    matches!(
+        name,
+        "unwrap"
+            | "expect"
+            | "unwrap_or"
+            | "unwrap_or_default"
+            | "unwrap_or_else"
+            | "ok_or"
+            | "ok_or_else"
+    )
+}
+
+fn is_arithmetic_type_or_trait(name: &str) -> bool {
+    matches!(
+        name,
+        "i128"
+            | "Add"
+            | "Sub"
+            | "Mul"
+            | "Div"
+            | "Rem"
+            | "Neg"
+            | "AddAssign"
+            | "SubAssign"
+            | "MulAssign"
+            | "DivAssign"
+            | "RemAssign"
+    )
+}
+
+fn is_unchecked_arithmetic_fn_path(path: &syn::Path) -> bool {
+    let len = path.segments.len();
+    if len < 2 {
+        return false;
+    }
+    let last = path.segments[len - 1].ident.to_string();
+    let prev = path.segments[len - 2].ident.to_string();
+    is_unchecked_arithmetic_method(&last) && is_arithmetic_type_or_trait(&prev)
+}
+
+fn is_safe_arithmetic_fn_path(path: &syn::Path) -> bool {
+    let len = path.segments.len();
+    if len < 2 {
+        return false;
+    }
+    let last = path.segments[len - 1].ident.to_string();
+    let prev = path.segments[len - 2].ident.to_string();
+    is_safe_arithmetic_method(&last) && prev == "i128"
+}
+
+fn is_int_literal(expr: &Expr) -> bool {
+    match expr {
+        Expr::Lit(lit) => matches!(lit.lit, syn::Lit::Int(_)),
+        Expr::Paren(p) => is_int_literal(&p.expr),
+        Expr::Group(g) => is_int_literal(&g.expr),
+        _ => false,
+    }
+}
+
 impl I128ArithmeticVisitor<'_> {
+ fix/audit-136-138-139
+    fn push_arithmetic_finding(&mut self, line: usize) {
+        self.findings.push(Finding {
+            file: self.path.clone(),
+            line,
+            rule: Rule::UncheckedI128Arithmetic.id(),
+            severity: "warning",
+            message: format!(
+                "fn {} does raw arithmetic on an i128 value; prefer checked_/saturating_/ \
+                 wrapping_ variants to avoid silent overflow",
+                self.fn_name
+            ),
+        });
+
     fn is_i128_expr(&self, expr: &Expr) -> bool {
         match expr {
             Expr::Path(p) => p
@@ -1155,15 +1362,27 @@ impl I128ArithmeticVisitor<'_> {
             Expr::Group(g) => self.is_i128_expr(&g.expr),
             _ => false,
         }
+ main
     }
 
     /// Whether any operand anywhere in this arithmetic expression (looking
-    /// through nested `+ - * /` and parentheses) is an i128 value.
+    /// through nested arithmetic operators, method forms, and parentheses) is an i128 value.
     fn arithmetic_touches_i128(&self, expr: &Expr) -> bool {
         match expr {
             Expr::Binary(binary) if is_arithmetic(&binary.op) => {
                 self.arithmetic_touches_i128(&binary.left)
                     || self.arithmetic_touches_i128(&binary.right)
+            }
+            Expr::Unary(unary)
+                if matches!(unary.op, syn::UnOp::Neg(_)) && !is_int_literal(&unary.expr) =>
+            {
+                self.arithmetic_touches_i128(&unary.expr)
+            }
+            Expr::MethodCall(mc)
+                if is_unchecked_arithmetic_method(&mc.method.to_string()) =>
+            {
+                self.arithmetic_touches_i128(&mc.receiver)
+                    || mc.args.iter().any(|arg| self.arithmetic_touches_i128(arg))
             }
             Expr::Paren(p) => self.arithmetic_touches_i128(&p.expr),
             Expr::Group(g) => self.arithmetic_touches_i128(&g.expr),
@@ -1179,6 +1398,19 @@ impl I128ArithmeticVisitor<'_> {
                 self.visit_arithmetic_operands(&binary.left);
                 self.visit_arithmetic_operands(&binary.right);
             }
+            Expr::Unary(unary)
+                if matches!(unary.op, syn::UnOp::Neg(_)) && !is_int_literal(&unary.expr) =>
+            {
+                self.visit_arithmetic_operands(&unary.expr);
+            }
+            Expr::MethodCall(mc)
+                if is_unchecked_arithmetic_method(&mc.method.to_string()) =>
+            {
+                self.visit_arithmetic_operands(&mc.receiver);
+                for arg in &mc.args {
+                    self.visit_arithmetic_operands(arg);
+                }
+            }
             Expr::Paren(p) => self.visit_arithmetic_operands(&p.expr),
             Expr::Group(g) => self.visit_arithmetic_operands(&g.expr),
             other => self.visit_expr(other),
@@ -1193,13 +1425,75 @@ impl I128ArithmeticVisitor<'_> {
                 .is_some_and(|ident| self.i128_bindings.contains(&ident.to_string())),
             Expr::Lit(lit) => matches!(&lit.lit, syn::Lit::Int(i) if i.suffix() == "i128"),
             Expr::Reference(r) => self.touches_i128(&r.expr),
+ fix/audit-136-138-139
+            Expr::Unary(u) if matches!(u.op, syn::UnOp::Deref(_) | syn::UnOp::Neg(_)) => {
+                self.touches_i128(&u.expr)
+            }
+            Expr::Binary(b) if is_arithmetic(&b.op) && !is_compound_assign(&b.op) => {
+                self.touches_i128(&b.left) || self.touches_i128(&b.right)
+            }
+            Expr::Try(t) => self.touches_i128(&t.expr),
+            Expr::Cast(c) => type_is_i128(&c.ty),
+            Expr::MethodCall(mc) => {
+                let method = mc.method.to_string();
+                (is_safe_arithmetic_method(&method)
+                    || is_unchecked_arithmetic_method(&method)
+                    || is_option_unwrap_method(&method))
+                    && self.touches_i128(&mc.receiver)
+            }
+            Expr::Call(call) => {
+                if let Expr::Path(p) = &*call.func {
+                    (is_safe_arithmetic_fn_path(&p.path)
+                        || is_unchecked_arithmetic_fn_path(&p.path))
+                        && call.args.iter().any(|arg| self.touches_i128(arg))
+                } else {
+                    false
+                }
+            }
+
             Expr::Unary(u) if matches!(u.op, syn::UnOp::Deref(_)) => self.touches_i128(&u.expr),
+ main
             Expr::Paren(p) => self.touches_i128(&p.expr),
             Expr::Group(g) => self.touches_i128(&g.expr),
             _ => false,
         }
     }
 }
+
+ fix/audit-136-138-139
+fn extract_pat_idents(pat: &Pat, bindings: &mut HashSet<String>) {
+    match pat {
+        Pat::Ident(ident) => {
+            bindings.insert(ident.ident.to_string());
+        }
+        Pat::Reference(r) => extract_pat_idents(&r.pat, bindings),
+        Pat::Type(t) => extract_pat_idents(&t.pat, bindings),
+        Pat::Paren(p) => extract_pat_idents(&p.pat, bindings),
+        Pat::Tuple(t) => {
+            for elem in &t.elems {
+                extract_pat_idents(elem, bindings);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn remove_pat_idents(pat: &Pat, bindings: &mut HashSet<String>) {
+    let mut idents = HashSet::new();
+    extract_pat_idents(pat, &mut idents);
+    for id in idents {
+        bindings.remove(&id);
+    }
+}
+
+fn type_is_i128(ty: &Type) -> bool {
+    matches!(ty, Type::Path(p) if p.path.is_ident("i128"))
+}
+
+/// Visitor that checks if require_auth is called on a tracked Address parameter
+/// (or a local alias of one) in the function body.
+struct RequireAuthVisitor {
+    tracked_addrs: HashSet<String>,
 
 fn type_is_i128(ty: &Type, aliases: &HashSet<String>) -> bool {
     match ty {
@@ -1238,6 +1532,7 @@ fn extract_pat_idents(pat: &Pat, bindings: &mut HashSet<String>) {
 struct RequireAuthVisitor<'a> {
     helpers: &'a HashMap<String, Vec<&'a syn::Block>>,
     visiting: HashSet<String>,
+ main
     has_require_auth: bool,
 }
 
@@ -1245,38 +1540,55 @@ impl<'ast> Visit<'ast> for RequireAuthVisitor<'_> {
     // A nested function's require_auth does not authorize the outer function
     fn visit_item(&mut self, _node: &'ast Item) {}
 
+    fn visit_local(&mut self, node: &'ast Local) {
+        if let Some(init) = &node.init {
+            if self.is_tracked_addr(&init.expr) {
+                extract_pat_idents(&node.pat, &mut self.tracked_addrs);
+            } else {
+                remove_pat_idents(&node.pat, &mut self.tracked_addrs);
+            }
+        } else {
+            remove_pat_idents(&node.pat, &mut self.tracked_addrs);
+        }
+        visit::visit_local(self, node);
+    }
+
     fn visit_expr(&mut self, node: &'ast Expr) {
         if self.has_require_auth {
             return;
         }
-        match node {
-            Expr::MethodCall(mc) => {
-                if mc.method == "require_auth" || mc.method == "require_auth_for_args" {
-                    self.has_require_auth = true;
-                    return;
-                }
-                let method_name = mc.method.to_string();
-                if self.check_helper_auth(&method_name) {
-                    self.has_require_auth = true;
-                    return;
-                }
-            }
-            Expr::Call(call) => {
-                if let Expr::Path(p) = &*call.func {
-                    if let Some(seg) = p.path.segments.last() {
-                        let fn_name = seg.ident.to_string();
-                        if self.check_helper_auth(&fn_name) {
-                            self.has_require_auth = true;
-                            return;
-                        }
-                    }
-                }
+        if let Expr::MethodCall(mc) = node {
+            if (mc.method == "require_auth" || mc.method == "require_auth_for_args")
+                && self.is_tracked_addr(&mc.receiver)
+            {
+                self.has_require_auth = true;
+                return;
             }
             _ => {}
         }
         visit::visit_expr(self, node);
     }
 }
+
+ fix/audit-136-138-139
+impl RequireAuthVisitor {
+    fn is_tracked_addr(&self, expr: &Expr) -> bool {
+        match expr {
+            Expr::Path(p) => p
+                .path
+                .get_ident()
+                .is_some_and(|ident| self.tracked_addrs.contains(&ident.to_string())),
+            Expr::Reference(r) => self.is_tracked_addr(&r.expr),
+            Expr::Unary(u) if matches!(u.op, syn::UnOp::Deref(_)) => self.is_tracked_addr(&u.expr),
+            Expr::Paren(p) => self.is_tracked_addr(&p.expr),
+            Expr::Group(g) => self.is_tracked_addr(&g.expr),
+            Expr::MethodCall(mc)
+                if matches!(mc.method.to_string().as_str(), "clone" | "to_owned") =>
+            {
+                self.is_tracked_addr(&mc.receiver)
+            }
+            _ => false,
+        }
 
 impl RequireAuthVisitor<'_> {
     fn check_helper_auth(&mut self, name: &str) -> bool {
@@ -1298,6 +1610,7 @@ impl RequireAuthVisitor<'_> {
             }
         }
         false
+ main
     }
 }
 
@@ -1965,6 +2278,65 @@ impl Vault {
         );
     }
 
+ fix/audit-136-138-139
+    #[test]
+    fn i128_remainder_negation_and_compound_assignments_are_flagged() {
+        let src = r#"
+fn ops(mut a: i128, b: i128) -> i128 {
+    let rem = a % b;
+    let neg = -a;
+    a += b;
+    a -= 1;
+    a *= 2;
+    a /= 3;
+    a %= 5;
+    let lit_neg = -1i128;
+    lit_neg
+}
+"#;
+        assert_eq!(
+            rules_of(src, &[Rule::UncheckedI128Arithmetic]),
+            vec![
+                ("unchecked-i128-arithmetic", 3),
+                ("unchecked-i128-arithmetic", 4),
+                ("unchecked-i128-arithmetic", 5),
+                ("unchecked-i128-arithmetic", 6),
+                ("unchecked-i128-arithmetic", 7),
+                ("unchecked-i128-arithmetic", 8),
+                ("unchecked-i128-arithmetic", 9),
+            ]
+        );
+    }
+
+    #[test]
+    fn non_i128_remainder_negation_and_compound_assignments_are_not_flagged() {
+        let src = r#"
+fn safe_u64(mut a: u64, b: u64, mut c: i64) -> i64 {
+    let r = a % b;
+    a += b;
+    a -= 1;
+    a *= 2;
+    a /= 3;
+    a %= 5;
+    c = -c;
+    c
+}
+"#;
+        assert_eq!(
+            rules_of(src, &[Rule::UncheckedI128Arithmetic]),
+            Vec::<(&'static str, usize)>::new()
+        );
+    }
+
+    #[test]
+    fn checked_and_saturating_method_chains_are_not_flagged() {
+        let src = r#"
+fn safe_chains(a: i128, b: i128, c: i128) -> Option<i128> {
+    let x = a.checked_add(b)?.checked_mul(c)?;
+    let y = x.saturating_add(1).wrapping_sub(2);
+    let z = i128::checked_div(y, 3)?;
+    Some(z)
+=======
     // ---- #153: auth and TTL checks read the AST, not formatting ----------
 
     #[test]
@@ -2269,18 +2641,32 @@ fn add_ref(a: &i128) -> i128 {
 
 fn sub_mut_ref(a: &mut i128) -> i128 {
     *a - 2
+ main
 }
 "#;
         assert_eq!(
             rules_of(src, &[Rule::UncheckedI128Arithmetic]),
-            vec![
-                ("unchecked-i128-arithmetic", 3),
-                ("unchecked-i128-arithmetic", 7),
-            ]
+            Vec::<(&'static str, usize)>::new()
         );
     }
 
     #[test]
+ fix/audit-136-138-139
+    fn unchecked_method_forms_and_mixed_chains_are_flagged() {
+        let src = r#"
+use core::ops::Add;
+
+fn mixed(a: i128, b: i128, c: i128) -> i128 {
+    let m1 = a.add(b).mul(c);
+    let m2 = a.unchecked_add(b);
+    let m3 = i128::add(a, b);
+    let m4 = Add::add(a, b);
+    let m5 = a.checked_add(b).unwrap() + 1;
+    let m6 = (a + b).checked_mul(c).unwrap();
+    let m7 = a.checked_add(b + c).unwrap();
+    let m8 = a.saturating_add(b) * 2;
+    m1 + m2 + m3 + m4 + m5 + m6 + m7 + m8
+
     fn i128_simple_aliases_and_reference_bindings_are_detected() {
         let src = r#"
 type Balance = i128;
@@ -2293,15 +2679,74 @@ fn aliases(a: i128, b: Balance) -> i128 {
     let y = *r * 2;
     let z = deref_alias - 3;
     b / 2
+ main
 }
 "#;
         assert_eq!(
             rules_of(src, &[Rule::UncheckedI128Arithmetic]),
             vec![
+ fix/audit-136-138-139
+                ("unchecked-i128-arithmetic", 5),
+                ("unchecked-i128-arithmetic", 6),
+                ("unchecked-i128-arithmetic", 7),
+
+ main
                 ("unchecked-i128-arithmetic", 8),
                 ("unchecked-i128-arithmetic", 9),
                 ("unchecked-i128-arithmetic", 10),
                 ("unchecked-i128-arithmetic", 11),
+ fix/audit-136-138-139
+                ("unchecked-i128-arithmetic", 12),
+                ("unchecked-i128-arithmetic", 13),
+            ]
+        );
+    }
+
+    // ---- #136: authorization parameter matching -------------------------
+
+    #[test]
+    fn require_auth_on_wrong_address_or_non_param_is_flagged() {
+        let src = r#"
+#[contractimpl]
+impl Contract {
+    pub fn wrong_local(env: Env, user: Address) {
+        let admin = get_admin(&env);
+        admin.require_auth();
+    }
+
+    pub fn wrong_field(&self, env: Env, user: Address) {
+        self.admin.require_auth();
+    }
+
+    pub fn shadowed_param(env: Env, user: Address) {
+        let user = get_admin(&env);
+        user.require_auth();
+    }
+}
+"#;
+        assert_eq!(auth_findings(src), vec![4, 9, 13]);
+    }
+
+    #[test]
+    fn require_auth_on_tracked_address_parameter_or_alias_passes() {
+        let src = r#"
+#[contractimpl]
+impl Contract {
+    pub fn direct(env: Env, user: Address) {
+        user.require_auth();
+    }
+
+    pub fn via_alias(env: Env, from: Address, to: Address) {
+        let signer = from.clone();
+        signer.require_auth_for_args(());
+    }
+
+    pub fn via_ref(env: Env, owner: &Address) {
+        (*owner).require_auth();
+    }
+}
+"#;
+        assert_eq!(auth_findings(src), Vec::<usize>::new());
             ]
         );
     }
@@ -2342,5 +2787,6 @@ impl Contract {
 }
 "#;
         assert_eq!(auth_findings(src), vec![8, 9, 10, 11, 12, 13, 14]);
+ main
     }
 }
